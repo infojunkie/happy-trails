@@ -150,7 +150,8 @@ All variables are optional; see [`.env.example`](.env.example).
 | `MUSIC_SCHEMA` | `public` | Schema containing the tables. Must be a plain identifier. |
 | `MUSIC_TABLE` | `music` | Table to read. Must be a plain identifier. |
 | `TRACK_TABLE` | `track` | Table used to map a music path to an AudioStation cover id. |
-| `DSM_URL` | — | Synology DSM base URL; required for user sign-in and playback. Falls back to `DSADDR`. |
+| `DSM_URL` | — | Synology DSM base URL; required for user sign-in and album covers. Falls back to `DSADDR`. |
+| `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL; used for playback button redirection. Falls back to value of `DSM_URL` / `DSADDR`. |
 | `DSM_USER` / `DSM_PASS` | — | Optional service account used only for album covers. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
 | `DSM_TLS_REJECT_UNAUTHORIZED` | `false` | Verify the NAS TLS certificate (the stock certificate is self-signed). |
 | `DSM_TIMEOUT_MS` | `10000` | Timeout for Synology requests. |
@@ -164,7 +165,7 @@ All variables are optional; see [`.env.example`](.env.example).
 
 ## How it works
 
-The table holds ~410k tracks across ~34k raw album titles (~33.3k after merging
+The table holds >400k tracks across >30k raw album titles (before merging
 multi-CD variants). Parsing the comma-separated `genre` column and grouping by
 album in SQL on every request is slow (multi-second queries on the production
 dataset), so the server aggregates the library at startup and rebuilds it

@@ -61,6 +61,7 @@ function artistSeparatorWords(): string[] {
 }
 
 const dsmUrl = (process.env.DSM_URL ?? process.env.DSADDR ?? '').trim();
+const dsmFrontendUrl = (process.env.DSM_FRONTEND_URL ?? dsmUrl).trim();
 const dsmUser = (process.env.DSM_USER ?? process.env.DSUSER ?? '').trim();
 const dsmPass = process.env.DSM_PASS ?? process.env.DSPASSWD ?? '';
 const dsmConfigured =
@@ -95,6 +96,7 @@ export const config = {
   artistSeparatorWords: artistSeparatorWords(),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
+  dsmFrontendUrl: dsmFrontendUrl.length > 0 ? dsmFrontendUrl : null,
   dsmTimeoutMs,
   dsmRejectUnauthorized,
   /**

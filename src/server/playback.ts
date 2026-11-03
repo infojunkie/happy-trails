@@ -18,18 +18,18 @@ export class PlaybackUnavailableError extends Error {
 export class PlaybackService {
   constructor() {
     console.log(
-      config.dsmUrl
+      config.dsmFrontendUrl
         ? '[playback] Synology Audio Station handoff enabled'
-        : '[playback] Synology playback disabled (DSM_URL is not configured)',
+        : '[playback] Synology playback disabled (DSM_FRONTEND_URL is not configured)',
     );
   }
 
   get enabled(): boolean {
-    return config.dsmUrl !== null;
+    return config.dsmFrontendUrl !== null;
   }
 
   get audioStationUrl(): string | null {
-    return config.dsmUrl ? audioStationUrl(config.dsmUrl) : null;
+    return config.dsmFrontendUrl ? audioStationUrl(config.dsmFrontendUrl) : null;
   }
 
   async playAlbum(

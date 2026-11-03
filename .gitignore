@@ -4,3 +4,4 @@ public/client/
 public/shared/
 .env
 *.log
+*.tar.gz

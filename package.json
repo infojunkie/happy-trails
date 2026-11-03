@@ -1,6 +1,6 @@
 {
   "name": "happy-trails",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Browse the Synology mediaserver music library.",
   "type": "module",
@@ -11,6 +11,7 @@
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc -p tsconfig.server.json",
     "build:client": "tsc -p tsconfig.client.json",
+    "build:docker": "docker build --network=host -t happy-trails . && docker save happy-trails:latest | gzip > happy-trails.tar.gz",
     "dev": "node scripts/dev.mjs",
     "watch:client": "tsc -p tsconfig.client.json --watch --preserveWatchOutput",
     "watch:server": "tsx watch src/server/index.ts",
