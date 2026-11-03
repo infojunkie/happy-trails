@@ -1,0 +1,11 @@
+node_modules
+dist
+public/client
+public/shared
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+*.log
+npm-debug.log*

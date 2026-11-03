@@ -98,6 +98,46 @@ npm run dev
 | `npm start` | Run the built server |
 | `npm run dev` | Watch client and server |
 
+## Docker
+
+Build the image (the app, server, and compiled client are all included; `.env`
+is deliberately **not** baked into it):
+
+```bash
+docker build -t happy-trails .
+```
+
+If Docker's embedded DNS is unreliable on the build host, build with
+`docker build --network=host -t happy-trails .`.
+
+Run it with the environment file mounted read-only:
+
+```bash
+docker run --rm -p 3000:3000 \
+  --add-host rokanan:192.168.0.2 \
+  -v "$PWD/.env:/app/.env:ro" \
+  -v "$HOME/.pgpass:/home/node/.pgpass:ro" \
+  happy-trails
+```
+
+Open <http://localhost:3000>.
+
+Notes:
+
+- The mounted `.env` is read from `/app/.env`. The container forces
+  `HOST=0.0.0.0` and defaults `PORT=3000`, overriding those values in `.env`;
+  override the port with `-e PORT=8080` and map `-p 8080:8080`.
+- `~/.pgpass` is not part of the image. Either mount it as shown above, or put
+  `PGPASSWORD` / `DATABASE_URL` in the mounted `.env`.
+- `rokanan` is defined in this host's `/etc/hosts`, which Docker containers do
+  not inherit. The `--add-host` flag above supplies it (use the NAS IP); using
+  `PGHOST` with the IP directly, or `--network host` on Linux, also works.
+- The mounted `.env` must be readable by the container's `node` user (UID
+  1000); mode `644` is sufficient. The same applies to a mounted `.pgpass` if
+  the host user does not have UID 1000.
+- The image runs as the unprivileged `node` user and health-checks
+  `/api/status`.
+
 ## Configuration
 
 All variables are optional; see [`.env.example`](.env.example).
