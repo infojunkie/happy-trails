@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Browse the music library by album, filtered by genre."
+    />
+    <title>Happy Trails</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b5bdb'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='white' font-family='sans-serif'%3E%E2%99%AA%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#album-grid">Skip to albums</a>
+
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">♪</span>
+        <div class="brand-text">
+          <h1>Happy Trails</h1>
+          <p id="library-stats" class="library-stats">Connecting to library…</p>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <label class="search-field">
+          <span class="visually-hidden">Search albums or artists</span>
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input
+            id="search"
+            type="search"
+            placeholder="Search albums or artists…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <kbd class="search-hint" aria-hidden="true">/</kbd>
+        </label>
+
+        <label class="sort-field">
+          <span class="sort-label">Sort</span>
+          <select id="sort">
+            <option value="recent">Recently added</option>
+            <option value="artist">Artist A–Z</option>
+            <option value="album">Album A–Z</option>
+            <option value="year">Year, newest</option>
+          </select>
+        </label>
+
+        <button
+          id="refresh-button"
+          class="refresh-button"
+          type="button"
+          disabled
+          title="Library is up to date"
+          aria-label="Library is up to date"
+        >
+          <span class="refresh-icon" aria-hidden="true">↻</span>
+          <span class="refresh-label">Refresh</span>
+          <span
+            id="refresh-dot"
+            class="refresh-dot"
+            aria-hidden="true"
+            hidden
+          ></span>
+        </button>
+
+        <button id="session-button" class="session-button" type="button" hidden>
+          Sign in
+        </button>
+      </div>
+    </header>
+
+    <div id="error-banner" class="error-banner" role="alert" hidden>
+      <span id="error-text"></span>
+      <button
+        id="dismiss-error"
+        class="error-dismiss"
+        type="button"
+        aria-label="Dismiss error"
+        title="Dismiss"
+      >
+        ×
+      </button>
+    </div>
+
+    <div class="layout">
+      <aside class="facets" aria-labelledby="genre-heading">
+        <div class="facets-header">
+          <h2 id="genre-heading">Genres</h2>
+          <button id="clear-genres" class="link-button" type="button" hidden>
+            Clear
+          </button>
+        </div>
+        <p class="facet-note">Albums matching <em>any</em> selected genre.</p>
+        <input
+          id="genre-search"
+          class="genre-search"
+          type="search"
+          placeholder="Filter genres…"
+          aria-label="Filter genres"
+          autocomplete="off"
+          spellcheck="false"
+          hidden
+        />
+        <div id="genre-list" class="genre-list" role="group" aria-labelledby="genre-heading">
+          <p class="facet-empty">Loading genres…</p>
+        </div>
+        <button
+          id="toggle-all-genres"
+          class="link-button toggle-all"
+          type="button"
+          hidden
+        ></button>
+      </aside>
+
+      <main class="content">
+        <div class="results-header">
+          <p id="result-summary" class="result-summary" aria-live="polite">
+            Loading library…
+          </p>
+          <div
+            id="active-filters"
+            class="active-filters"
+            aria-label="Active filters"
+            hidden
+          ></div>
+        </div>
+
+        <div id="album-grid" class="album-grid"></div>
+
+        <div id="empty-state" class="empty-state" hidden>
+          <p class="empty-title">No albums found</p>
+          <p class="empty-text">
+            Try a different search or clear the genre filters.
+          </p>
+          <button id="empty-clear" class="button-secondary" type="button">
+            Clear filters
+          </button>
+        </div>
+
+        <div class="load-more-wrap">
+          <button id="load-more" class="load-more" type="button" hidden>
+            Load more albums
+          </button>
+        </div>
+      </main>
+    </div>
+
+    <dialog
+      id="album-dialog"
+      class="album-dialog"
+      aria-labelledby="dialog-title"
+    ></dialog>
+
+    <dialog
+      id="login-dialog"
+      class="login-dialog"
+      aria-labelledby="login-title"
+    >
+      <form id="login-form" class="login-form">
+        <h2 id="login-title">Sign in to Synology</h2>
+        <p class="login-note">
+          Use your own DSM account. It is used to queue albums in Audio
+          Station and is never written to disk. Your browser must also be
+          signed into DSM as this user to see the queue.
+        </p>
+        <label class="login-field">
+          Username
+          <input
+            id="login-username"
+            name="username"
+            autocomplete="username"
+            required
+          />
+        </label>
+        <label class="login-field">
+          Password
+          <input
+            id="login-password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+        </label>
+        <p id="login-error" class="login-error" role="alert" hidden></p>
+        <div class="login-actions">
+          <button id="login-cancel" class="button-secondary" type="button">
+            Cancel
+          </button>
+          <button id="login-submit" class="button-primary" type="submit">
+            Sign in
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <noscript>
+      <p class="noscript">This app requires JavaScript to browse the library.</p>
+    </noscript>
+
+    <script type="module" src="/client/main.js"></script>
+  </body>
+</html>

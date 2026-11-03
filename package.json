@@ -1,0 +1,32 @@
+{
+  "name": "happy-trails",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browse the mediaserver music library by album, with genre facets.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "tsc -p tsconfig.client.json",
+    "dev": "node scripts/dev.mjs",
+    "watch:client": "tsc -p tsconfig.client.json --watch --preserveWatchOutput",
+    "watch:server": "tsx watch src/server/index.ts",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
