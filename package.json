@@ -2,7 +2,7 @@
   "name": "happy-trails",
   "version": "1.0.0",
   "private": true,
-  "description": "Browse the mediaserver music library by album, with genre facets.",
+  "description": "Browse the Synology mediaserver music library.",
   "type": "module",
   "engines": {
     "node": ">=20"

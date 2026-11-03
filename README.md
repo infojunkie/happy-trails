@@ -12,6 +12,8 @@ comma-separated `genre` column.
 
 ## Features
 
+![Screenshot](docs/screenshot.png)
+
 - Album grid sorted by latest upload date (`MAX(date)`).
 - Multi-CD albums whose titles differ only by a whitespace-separated
   ` // <disc label>` suffix are merged into one album; the original titles
@@ -48,7 +50,7 @@ comma-separated `genre` column.
 
 - Node.js 20 or newer.
 - Read access to a PostgreSQL database containing the `music` table described
-  by [`../music.sql`](../music.sql).
+  by [`music.sql`](docs/music.sql).
 - Optional: read access to the `track` table and a Synology DSM URL for Audio
   Station playback. A DSM service account is optional and used only for album
   covers; users sign in with their own account to play.
