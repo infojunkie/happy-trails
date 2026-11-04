@@ -47,6 +47,7 @@ const DEFAULT_ARTIST_SEPARATOR_WORDS = [
   'et',
   'e',
   'con',
+  'vs.',
 ];
 
 function artistSeparatorWords(): string[] {

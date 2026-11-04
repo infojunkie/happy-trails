@@ -822,13 +822,14 @@ function renderFacets(): void {
     const selectedExtras = state.facets.filter(
       (genre) => selected.has(genre.key) && !shown.has(genre.key),
     );
-    items = [...preview, ...selectedExtras].sort(
-      (a, b) =>
-        b.albumCount - a.albumCount || a.name.localeCompare(b.name),
-    );
+    items = [...preview, ...selectedExtras];
   }
 
-  const rows: HTMLElement[] = items.map((genre) => {
+  const rows: HTMLElement[] = items.sort(
+    (a, b) =>
+      Number(selected.has(b.key)) - Number(selected.has(a.key)) ||
+      b.albumCount - a.albumCount || a.name.localeCompare(b.name),
+  ).map((genre) => {
     const input = el('input', {
       type: 'checkbox',
       value: genre.key,
@@ -1287,7 +1288,7 @@ function bindEvents(): void {
     if (!(target instanceof HTMLInputElement)) return;
     const key = target.dataset.genreKey;
     if (!key) return;
-    setGenreSelected(key, target.checked, { rerenderFacets: false });
+    setGenreSelected(key, target.checked, { rerenderFacets: true });
   });
 
   activeFilters.addEventListener('click', (event) => {
