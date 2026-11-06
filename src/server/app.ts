@@ -6,8 +6,10 @@ import express, {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  isFilterMode,
   isSortKey,
   type AlbumsResponse,
+  type FilterMode,
   type GenresResponse,
   type SessionResponse,
   type TracksResponse,
@@ -17,7 +19,8 @@ import { config } from './config.js';
 import { covers } from './covers.js';
 import { loadTracks } from './db.js';
 import { DsmError } from './dsm.js';
-import { decodeAlbumKey, library } from './library.js';
+import { library } from './library.js';
+import { decodeAlbumKey } from './search.js';
 import { playback } from './playback.js';
 import { userSessions } from './userSessions.js';
 
@@ -50,19 +53,19 @@ function integerParam(
 }
 
 /** Accepts `?genre=Rock&genre=Jazz` as well as `?genre=Rock,Jazz`. */
-function genreParams(value: unknown): string[] {
+function facetParams(value: unknown): string[] {
   const values = Array.isArray(value) ? value : [value];
-  const genres = new Set<string>();
+  const names = new Set<string>();
   for (const item of values) {
     if (typeof item !== 'string') continue;
     for (const part of item.split(',')) {
       const name = part.trim();
       if (!name) continue;
-      genres.add(name);
-      if (genres.size >= MAX_SELECTED_GENRES) return [...genres];
+      names.add(name);
+      if (names.size >= MAX_SELECTED_GENRES) return [...names];
     }
   }
-  return [...genres];
+  return [...names];
 }
 
 function unavailable(res: Response): void {
@@ -229,22 +232,22 @@ app.post('/api/session/logout', (req, res) => {
 });
 
 app.get('/api/genres', (_req, res) => {
-  const snapshot = library.getSnapshot();
-  if (!snapshot) {
+  const status = library.status();
+  if (!status.ready) {
     unavailable(res);
     return;
   }
   const body: GenresResponse = {
-    totalAlbums: snapshot.albums.length,
-    genres: snapshot.genres,
-    libraryVersion: snapshot.version,
+    totalAlbums: status.albumCount,
+    genres: library.genres(),
+    regions: library.regions(),
+    libraryVersion: status.libraryVersion,
   };
   res.json(body);
 });
 
 app.get('/api/albums', (req, res) => {
-  const snapshot = library.getSnapshot();
-  if (!snapshot) {
+  if (!library.status().ready) {
     unavailable(res);
     return;
   }
@@ -259,9 +262,27 @@ app.get('/api/albums', (req, res) => {
     1,
     config.maxPageSize,
   );
-  const genres = genreParams(req.query.genre);
+  const genres = facetParams(req.query.genre);
+  const regions = facetParams(req.query.region);
+  const genreModeParam = stringParam(req.query.genreMode);
+  const regionModeParam = stringParam(req.query.regionMode);
+  const genreMode: FilterMode = isFilterMode(genreModeParam)
+    ? genreModeParam
+    : 'any';
+  const regionMode: FilterMode = isFilterMode(regionModeParam)
+    ? regionModeParam
+    : 'any';
 
-  const result = library.queryAlbums({ genres, q, sort, offset, limit });
+  const result = library.queryAlbums({
+    genres,
+    genreMode,
+    regions,
+    regionMode,
+    q,
+    sort,
+    offset,
+    limit,
+  });
   const body: AlbumsResponse = {
     total: result.total,
     offset,

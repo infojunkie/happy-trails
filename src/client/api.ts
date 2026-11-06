@@ -1,5 +1,6 @@
 import type {
   AlbumsResponse,
+  FilterMode,
   GenresResponse,
   SessionResponse,
   SortKey,
@@ -56,6 +57,9 @@ function postJson<T>(url: string, body: unknown): Promise<T> {
 
 export interface AlbumRequest {
   genres: string[];
+  genreMode: FilterMode;
+  regions: string[];
+  regionMode: FilterMode;
   q: string;
   sort: SortKey;
   offset: number;
@@ -78,6 +82,9 @@ export const api = {
   albums: (request: AlbumRequest): Promise<AlbumsResponse> => {
     const params = new URLSearchParams();
     for (const genre of request.genres) params.append('genre', genre);
+    for (const region of request.regions) params.append('region', region);
+    params.set('genreMode', request.genreMode);
+    params.set('regionMode', request.regionMode);
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
     params.set('offset', String(request.offset));

@@ -20,6 +20,8 @@ export interface AlbumSummary {
   latest: string | null;
   /** Display names of the album's genres, deduplicated. */
   genres: string[];
+  /** Country/region tags from the genre column, deduplicated. */
+  regions: string[];
 }
 
 /** A genre and the number of albums carrying it. */
@@ -33,6 +35,7 @@ export interface GenreFacet {
 export interface GenresResponse {
   totalAlbums: number;
   genres: GenreFacet[];
+  regions: GenreFacet[];
   libraryVersion: number;
 }
 
@@ -96,4 +99,14 @@ export type SortKey = (typeof SORT_KEYS)[number];
 
 export function isSortKey(value: unknown): value is SortKey {
   return typeof value === 'string' && (SORT_KEYS as readonly string[]).includes(value);
+}
+
+export const FILTER_MODES = ['any', 'all'] as const;
+export type FilterMode = (typeof FILTER_MODES)[number];
+
+export function isFilterMode(value: unknown): value is FilterMode {
+  return (
+    typeof value === 'string' &&
+    (FILTER_MODES as readonly string[]).includes(value)
+  );
 }

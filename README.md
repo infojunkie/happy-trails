@@ -3,10 +3,10 @@
 A small, read-only web app for browsing the music tables of the Synology `mediaserver`
 PostgreSQL database. Albums are grouped by album title and album artist, with
 multi-CD variants merged at their ` // <disc label>` suffix, sorted by their
-most recent upload date, and filterable with a genre facet built from the
-comma-separated `genre` column.
+most recent upload date, and filterable with separate genre and country/region
+facets built from the comma-separated `genre` column.
 
-- **Backend:** Node.js + Express + `pg`, written in TypeScript.
+- **Backend:** Node.js + Express + `pg` + the built-in `node:sqlite` module, written in TypeScript.
 - **Frontend:** vanilla TypeScript (no framework), compiled to ES modules.
 - No database migrations and no write queries.
 
@@ -18,16 +18,24 @@ comma-separated `genre` column.
 - Multi-CD albums whose titles differ only by a whitespace-separated
   ` // <disc label>` suffix are merged into one album; the original titles
   (including the labels) remain searchable.
-- Genre facet with album counts, facet search, and multi-select. Selecting
-  several genres matches albums containing **any** of them.
+- Genre facet with album counts, facet search, and multi-select.
+- Country and region tags in the genre column (Brazil, France, Corsica,
+  Catalonia, …) are detected and exposed as a separate **Regions** facet, with
+  their own filter. The genre facet contains only non-location tags.
+- Each facet has **Match any** / **Match all** modes. Any is the default and
+  matches albums carrying at least one selected tag; All requires every
+  selected tag. The two facets are combined with AND.
 - Free-text album/artist search with case-, accent-, and ligature-insensitive
   matching (`Soren` finds `Søren`, `caetera` finds `cætera`, `Bjork` finds
   `Björk`). Track-level artists are searchable too.
 - Album and artist names are search shortcuts in cards and in the album dialog;
-  genre tags activate the genre facet everywhere. Name links clear the current
-  genre filters, while genre tags keep the current search query.
-- Multi-artist values are parsed into individual artists. Each detected name
-  is its own search link in cards, the dialog header, and track artist lines.
+  genre tags activate the genre facet and region tags activate the region
+  facet everywhere. Name links clear both filters, while tag chips keep the
+  current search query.
+- Multi-artist values are parsed into individual artists, including
+  comma-separated lists; a configurable exception list keeps names such as
+  `Earth, Wind & Fire` together. Each detected name is its own search link in
+  cards, the dialog header, and track artist lines.
 - The server checks for database changes every 60 seconds by default and
   silently rebuilds the snapshot when needed. The header **Refresh** control
   enables when a newer snapshot is available and reloads the current view; it
@@ -42,13 +50,13 @@ comma-separated `genre` column.
   Audio Station: the server replaces the Audio Station web-player queue with
   the album's tracks and opens Audio Station. No audio player lives in this app.
   Play controls are hidden until the app session is authenticated.
-- Shareable URL state (`?genre=Jazz&q=...&sort=artist`).
+- Shareable URL state (`?genre=Jazz&genreMode=all&region=France&q=...&sort=artist`).
 - Light/dark colour schemes, keyboard navigation, `/` focuses search.
 - Responsive layout for narrow screens.
 
 ## Requirements
 
-- Node.js 20 or newer.
+- Node.js 24 or newer (the server uses the built-in `node:sqlite` module).
 - Read access to a PostgreSQL database containing the `music` table described
   by [`music.sql`](docs/music.sql).
 - Optional: read access to the `track` table and a Synology DSM URL for Audio
@@ -160,7 +168,9 @@ All variables are optional; see [`.env.example`](.env.example).
 | `LIBRARY_CHECK_MS` | `60000` | How often the `music` table is checked for changes; a detected change triggers a silent rebuild. `LIBRARY_REFRESH_MS` is accepted as a legacy fallback. |
 | `PAGE_SIZE` | `48` | Default albums per page. |
 | `MAX_PAGE_SIZE` | `200` | Upper bound accepted from clients. |
-| `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
+| `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
+| `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
+| `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
 ## How it works
@@ -188,28 +198,57 @@ WHERE m.fs_online IS NOT FALSE
 GROUP BY 1, 2
 ```
 
-The genre string is split on commas, trimmed, deduplicated, and indexed in
-memory. Album titles are normalised by stripping a whitespace-separated
-` // ...` suffix; rows that end up with the same title and artist are merged:
-track counts and durations are summed, the newest upload date wins, and genres
-are unioned. The original raw titles and all track-level artists are folded into the search
-text, so labels such as "The Vanilla Tapes" and guest artists still match.
+The aggregated rows are parsed and written to an in-memory SQLite database.
+The genre string is split on commas, trimmed, deduplicated, and stored in
+`genres`/`album_genres` or `regions`/`album_regions`, depending on whether the
+tag is a country/region name. Album titles are normalised by stripping a
+whitespace-separated ` // ...` suffix; rows that end up with the same title and
+artist are merged: track counts and durations are summed, the newest upload
+date wins, and tags are unioned. Parsed artists and the original raw titles are
+kept in `album_artists` and `album_sources`. The original raw titles and all
+track-level artists are folded into the FTS search text, so labels such as
+"The Vanilla Tapes" and guest artists still match. See
+[`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
+equivalents.
+
+Country/region detection uses `Intl.DisplayNames` for ISO 3166 country names in
+English, French, German, Spanish, Portuguese, and Italian, plus UN M49
+macro-regions and a curated list of subnational regions, historical countries,
+and spelling variants (`Corsica`, `Catalonia`, `Andalusia`, `Byelorussia`,
+`Zaire`, …). Matching is exact after folding case, accents, and apostrophe
+variants; `REGION_TAGS` adds site-specific names. Compound tags such as
+`Jazz/Brazil` are still treated as genres because only whole tags are
+classified.
 
 Search folding lowercases the text, applies Unicode NFKD, removes combining
 marks, and maps Latin letters that NFKD leaves intact (`ø`→`o`, `æ`→`ae`,
 `œ`→`oe`, `ß`→`ss`, `ł`→`l`, `đ`→`d`, `ð`→`d`, `þ`→`th`, `ı`→`i`, and a few
-others). Both the stored search text and the query use the same folding, so
-accented and unaccented searches match in either direction.
+others). The folded text is stored in `albums.search_text`, and queries are
+folded with the same function, so accented and unaccented searches match in
+either direction. `album_search` is an FTS5 table using the `trigram`
+tokenizer, which preserves the old substring semantics; tokens shorter than
+three characters fall back to an exact `instr()` scan.
 
 Artist parsing applies to the effective album artist and to each track artist.
 A punctuation run is a separator only when whitespace surrounds it, so
 `Artist A & Artist B`, `Artist A / Artist B`, and `Artist A - Artist B` split,
-while `AC/DC`, `Jay-Z`, and `R.E.M.` stay intact. Note that `A, B` does not
-split (no space before the comma), whereas `A , B` does. Words listed in
-`ARTIST_SEPARATOR_WORDS` are separators when they are standalone words
-surrounded by whitespace; the defaults are
-`feat., com, part., avec, with, et, e, con`, and `ARTIST_SEPARATOR_WORDS` adds
-more. One-letter words are matched case-sensitively, so `E Street Band` is not
+while `AC/DC`, `Jay-Z`, and `R.E.M.` stay intact. A comma followed by
+whitespace is also a separator, so `A, B, C` becomes three names; `A,B`
+without the following space is left intact.
+
+Names listed in `ARTIST_EXCEPTIONS` are masked before separator processing and
+restored verbatim, so `Earth, Wind & Fire` and `Florence + The Machine` stay
+intact. The defaults also include Simon & Garfunkel and Crosby, Stills, Nash &
+Young; `ARTIST_EXCEPTIONS` adds more (separated by a vertical-bar character
+because the names contain commas).
+Matching is case-insensitive and whole-name only, but the original spelling is
+preserved.
+
+Words listed in `ARTIST_SEPARATOR_WORDS` are separators when they are
+standalone words surrounded by whitespace; the defaults are
+`feat., com, part., avec, with, et, e, con, vs., mit`, and
+`ARTIST_SEPARATOR_WORDS` adds more. One-letter words are matched
+case-sensitively, so `E Street Band` is not
 split. Parsed names are exposed as
 `artists` in the API and rendered as separate search links (joined by ` · `);
 the original string remains in `artist`/`albumArtist`.
@@ -237,11 +276,16 @@ The fingerprint catches inserts/deletes (count/id), uploads (`date`), and most
 metadata/file changes (`mdate`/size). An update that changes none of those
 fields would not be seen; a DB trigger or `pg_stat_user_tables` counters can be
 added if that matters. The check is a cheap scan (sub-second); the rebuild
-remains the ~5s operation.
+remains the ~6–8s operation.
 
-Genres are matched case-insensitively; facet counts are the number of merged
-albums carrying each genre. The index also keeps one pre-sorted array per sort
-order, which makes filtering and pagination effectively instant.
+Genres and regions are matched case-insensitively; region keys also fold
+accents and apostrophe variants. Facet counts are the number of merged albums
+carrying each tag. Each facet can match **any** or **all** selected tags; a
+genre selection and a region selection are combined with AND. Sorting uses
+precomputed dense ranks that reproduce the old `Intl.Collator` ordering,
+including its case/accent-insensitive ties. Filtering, searching, and
+pagination are single SQLite queries; the current dataset answers typical
+searches in a few milliseconds.
 
 Track lists are **not** cached: opening an album issues a parameterized,
 index-backed query against `music` for every raw title merged into it, and
@@ -309,7 +353,11 @@ Notes on the data:
   left untouched.
 - Some genre values are inconsistent in the source data (for example
   `Bossa Nova`, `Bossa Nova. Jazz`, and `Bossa Nova+Jazz` are three genres).
-  The facet mirrors the data rather than trying to normalise those labels.
+  The facets mirror the data rather than trying to normalise those labels.
+  Country/region detection also works on whole tags only, so `Jazz/Brazil`
+  remains a genre even though `Brazil` alone is a region. Detection classifies
+  tags individually rather than canonicalising them, so multilingual variants
+  such as `Germany`/`Allemagne` can appear as separate region entries.
 
 If the database is unavailable at startup, the HTTP server still starts and
 returns an explanatory error; the UI retries automatically and the change
@@ -344,15 +392,16 @@ configured, i.e. when users can sign in and use the Play links.
 
 ### `GET /api/genres`
 
-All genres and their album counts, sorted by count then name. `key` is the
-normalised value accepted by the `genre` filter. `libraryVersion` identifies the
-snapshot the counts came from.
+All genres/regions and their album counts, sorted by count then name. `key` is
+the normalised value accepted by the matching filter. `libraryVersion`
+identifies the snapshot the counts came from.
 
 ```json
 {
   "totalAlbums": 33317,
   "libraryVersion": 1,
-  "genres": [{ "key": "jazz", "name": "Jazz", "albumCount": 8726 }]
+  "genres": [{ "key": "jazz", "name": "Jazz", "albumCount": 8726 }],
+  "regions": [{ "key": "ethiopia", "name": "Ethiopia", "albumCount": 42 }]
 }
 ```
 
@@ -361,6 +410,9 @@ snapshot the counts came from.
 | Parameter | Description |
 | --- | --- |
 | `genre` | Repeatable (`?genre=Jazz&genre=Rock`) or comma-separated. Matches albums containing any selected genre. |
+| `genreMode` | `any` (default) or `all`; controls whether an album must contain any or all selected genres. |
+| `region` | Repeatable or comma-separated. Matches albums containing any selected country/region tag. Combined with `genre` using AND. |
+| `regionMode` | `any` (default) or `all`; controls whether an album must contain any or all selected regions. |
 | `q` | Album, album-artist, and track-artist search (accent- and ligature-insensitive), up to 200 characters. |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
@@ -385,7 +437,8 @@ listing; compare it with `/api/status` before deciding to reload.
       "trackCount": 12,
       "duration": 3046,
       "latest": "2026-10-13T19:25:15",
-      "genres": ["Jazz", "Funk", "Ethiopia", "France"]
+      "genres": ["Jazz", "Funk"],
+      "regions": ["Ethiopia", "France"]
     }
   ]
 }
@@ -476,8 +529,11 @@ happy-trails/
 │   │   ├── db.ts         Pool and SQL queries
 │   │   ├── dsm.ts        Synology login, covers, and web-player client
 │   │   ├── index.ts      Startup and shutdown
-│   │   ├── library.ts    Album index, genres, filtering, sorting
+│   │   ├── library.ts    Index lifecycle, rebuilds, and change detection
 │   │   ├── playback.ts   Album-to-Audio-Station handoff
+│   │   ├── regions.ts    Country/region tag detection
+│   │   ├── search.ts     Folding, album keys, and title normalisation
+│   │   ├── sqliteIndex.ts  SQLite schema, bulk load, and query layer
 │   │   └── userSessions.ts  Per-browser DSM sign-in sessions
 │   ├── client/
 │   │   ├── api.ts        API client
@@ -485,6 +541,7 @@ happy-trails/
 │   │   ├── format.ts     Duration/date/bitrate formatting
 │   │   └── main.ts       State, rendering, and events
 │   └── shared/
+│       ├── text.ts       Folding and region keys shared with the browser
 │       └── types.ts      Shared API types and sort keys
 ├── public/
 │   ├── index.html
@@ -496,10 +553,11 @@ happy-trails/
 ## Operational notes
 
 - The app only issues `SELECT` queries.
-- The in-memory index for the current dataset takes ~5–6 seconds to build and
-  uses roughly 200 MB of RSS with a warm cover cache. The change check runs
-  every `LIBRARY_CHECK_MS` (default 60s) but only performs the full rebuild
-  when the fingerprint changes.
+- The in-memory SQLite index for the current dataset takes roughly 6–8 seconds
+  to build and settles around 300 MB of RSS (about 47 MB is the SQLite
+  database; the rest includes the build's transient parsing structures and the
+  cover cache). The change check runs every `LIBRARY_CHECK_MS` (default 60s)
+  but only performs the full rebuild when the fingerprint changes.
 - Open pages poll `/api/status` every 30s and reuse the old snapshot until the
   user clicks the enabled Refresh control. A rebuild failure leaves the old
   snapshot in place and is reported through `error`.

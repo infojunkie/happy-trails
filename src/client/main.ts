@@ -1,6 +1,8 @@
 import {
+  isFilterMode,
   isSortKey,
   type AlbumSummary,
+  type FilterMode,
   type GenreFacet,
   type SessionResponse,
   type SortKey,
@@ -8,6 +10,7 @@ import {
   type Track,
   type TracksResponse,
 } from '../shared/types.js';
+import { regionKey } from '../shared/text.js';
 import { api } from './api.js';
 import { $, el } from './dom.js';
 import {
@@ -28,11 +31,18 @@ const STATUS_POLL_MS = 30_000;
 
 interface State {
   selectedGenres: string[];
+  genreMode: FilterMode;
   facets: GenreFacet[];
   facetByKey: Map<string, GenreFacet>;
+  selectedRegions: string[];
+  regionMode: FilterMode;
+  regionFacets: GenreFacet[];
+  regionByKey: Map<string, GenreFacet>;
   totalAlbums: number;
   genreQuery: string;
   genreExpanded: boolean;
+  regionQuery: string;
+  regionExpanded: boolean;
   q: string;
   sort: SortKey;
   albums: AlbumSummary[];
@@ -50,11 +60,18 @@ interface State {
 
 const state: State = {
   selectedGenres: [],
+  genreMode: 'any',
   facets: [],
   facetByKey: new Map(),
+  selectedRegions: [],
+  regionMode: 'any',
+  regionFacets: [],
+  regionByKey: new Map(),
   totalAlbums: 0,
   genreQuery: '',
   genreExpanded: false,
+  regionQuery: '',
+  regionExpanded: false,
   q: '',
   sort: 'recent',
   albums: [],
@@ -82,6 +99,16 @@ const genreList = $('#genre-list');
 const genreSearch = $<HTMLInputElement>('#genre-search');
 const clearGenresButton = $<HTMLButtonElement>('#clear-genres');
 const toggleAllButton = $<HTMLButtonElement>('#toggle-all-genres');
+const regionList = $('#region-list');
+const regionSearch = $<HTMLInputElement>('#region-search');
+const clearRegionsButton = $<HTMLButtonElement>('#clear-regions');
+const toggleAllRegionsButton = $<HTMLButtonElement>('#toggle-all-regions');
+const genreModeInputs = document.querySelectorAll<HTMLInputElement>(
+  'input[name="genre-mode"]',
+);
+const regionModeInputs = document.querySelectorAll<HTMLInputElement>(
+  'input[name="region-mode"]',
+);
 const errorBanner = $('#error-banner');
 const errorText = $('#error-text');
 const dialog = $<HTMLDialogElement>('#album-dialog');
@@ -136,6 +163,15 @@ function initials(value: string): string {
 
 function setSummary(text: string): void {
   resultSummary.textContent = text;
+}
+
+function renderModeControls(): void {
+  for (const input of genreModeInputs) {
+    input.checked = input.value === state.genreMode;
+  }
+  for (const input of regionModeInputs) {
+    input.checked = input.value === state.regionMode;
+  }
 }
 
 function showError(message: string): void {
@@ -218,10 +254,13 @@ async function reloadLibrary(): Promise<void> {
   updateRefreshControl();
 
   try {
-    const [genres, albums] = await Promise.all([
+    const [facets, albums] = await Promise.all([
       api.genres(),
       api.albums({
         genres: state.selectedGenres,
+        genreMode: state.genreMode,
+        regions: state.selectedRegions,
+        regionMode: state.regionMode,
         q: state.q,
         sort: state.sort,
         offset: 0,
@@ -229,20 +268,24 @@ async function reloadLibrary(): Promise<void> {
       }),
     ]);
 
-    state.facets = genres.genres;
+    state.facets = facets.genres;
     state.facetByKey = new Map(
-      genres.genres.map((genre) => [genre.key, genre]),
+      facets.genres.map((genre) => [genre.key, genre]),
     );
-    state.totalAlbums = genres.totalAlbums;
+    state.regionFacets = facets.regions;
+    state.regionByKey = new Map(
+      facets.regions.map((region) => [region.key, region]),
+    );
+    state.totalAlbums = facets.totalAlbums;
     state.total = albums.total;
     state.albums = albums.albums;
     state.loadedVersion = Math.min(
-      genres.libraryVersion,
+      facets.libraryVersion,
       albums.libraryVersion,
     );
     state.libraryReady = true;
     const newestVersion = Math.max(
-      genres.libraryVersion,
+      facets.libraryVersion,
       albums.libraryVersion,
     );
     if (
@@ -255,6 +298,7 @@ async function reloadLibrary(): Promise<void> {
     if (dialog.open) dialog.close();
     trackCache.clear();
     renderFacets();
+    renderRegions();
     renderAlbums();
     albumGrid.removeAttribute('aria-busy');
     hideError();
@@ -436,6 +480,18 @@ function readUrlState(): void {
     .filter(Boolean);
   state.selectedGenres = [...new Set(genres)];
 
+  const regions = params
+    .getAll('region')
+    .flatMap((value) => value.split(','))
+    .map(regionKey)
+    .filter(Boolean);
+  state.selectedRegions = [...new Set(regions)];
+
+  const genreMode = params.get('genreMode');
+  state.genreMode = isFilterMode(genreMode) ? genreMode : 'any';
+  const regionMode = params.get('regionMode');
+  state.regionMode = isFilterMode(regionMode) ? regionMode : 'any';
+
   const login = params.get('login') === '1';
   const playKey = params.get('play');
   if (login && playKey) {
@@ -445,6 +501,7 @@ function readUrlState(): void {
 
   searchInput.value = state.q;
   sortSelect.value = state.sort;
+  renderModeControls();
 }
 
 function syncUrl(): void {
@@ -453,6 +510,11 @@ function syncUrl(): void {
   for (const key of state.selectedGenres) {
     params.append('genre', state.facetByKey.get(key)?.name ?? key);
   }
+  for (const key of state.selectedRegions) {
+    params.append('region', state.regionByKey.get(key)?.name ?? key);
+  }
+  if (state.genreMode !== 'any') params.set('genreMode', state.genreMode);
+  if (state.regionMode !== 'any') params.set('regionMode', state.regionMode);
   if (state.sort !== 'recent') params.set('sort', state.sort);
   const query = params.toString();
   history.replaceState(
@@ -490,15 +552,22 @@ async function loadLibrary(): Promise<void> {
     }
 
     const response = await api.genres();
-    const genresVersion = response.libraryVersion;
+    const facetsVersion = response.libraryVersion;
     state.facets = response.genres;
-    state.facetByKey = new Map(response.genres.map((genre) => [genre.key, genre]));
+    state.facetByKey = new Map(
+      response.genres.map((genre) => [genre.key, genre]),
+    );
+    state.regionFacets = response.regions;
+    state.regionByKey = new Map(
+      response.regions.map((region) => [region.key, region]),
+    );
     state.totalAlbums = response.totalAlbums;
     renderFacets();
+    renderRegions();
     hideError();
     const albumsVersion = await loadAlbums(true);
     if (albumsVersion !== null) {
-      state.loadedVersion = Math.min(genresVersion, albumsVersion);
+      state.loadedVersion = Math.min(facetsVersion, albumsVersion);
     }
     updateRefreshControl();
   } catch (error) {
@@ -537,6 +606,9 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
   try {
     const response = await api.albums({
       genres: state.selectedGenres,
+      genreMode: state.genreMode,
+      regions: state.selectedRegions,
+      regionMode: state.regionMode,
       q: state.q,
       sort: state.sort,
       offset: reset ? 0 : state.albums.length,
@@ -590,7 +662,10 @@ function renderAlbums(): void {
 }
 
 function updateSummary(): void {
-  const filtered = state.q.length > 0 || state.selectedGenres.length > 0;
+  const filtered =
+    state.q.length > 0 ||
+    state.selectedGenres.length > 0 ||
+    state.selectedRegions.length > 0;
   setSummary(
     filtered
       ? `${formatCount(state.total)} of ${formatCount(state.totalAlbums)} albums`
@@ -675,12 +750,17 @@ function navigateToSearch(value: string): void {
 
   window.clearTimeout(searchTimer);
   state.q = query;
-  // A name search is a fresh navigation; drop genre filters that could hide it.
+  // A name search is a fresh navigation; drop filters that could hide it.
   state.selectedGenres = [];
+  state.genreMode = 'any';
+  state.selectedRegions = [];
+  state.regionMode = 'any';
   searchInput.value = query;
   if (dialog.open) dialog.close();
+  renderModeControls();
   syncUrl();
   renderFacets();
+  renderRegions();
   renderActiveFilters();
   window.scrollTo({ top: 0 });
   void loadAlbums(true);
@@ -689,6 +769,12 @@ function navigateToSearch(value: string): void {
 function activateGenre(name: string): void {
   if (dialog.open) dialog.close();
   setGenreSelected(genreKey(name), true);
+  window.scrollTo({ top: 0 });
+}
+
+function activateRegion(name: string): void {
+  if (dialog.open) dialog.close();
+  setRegionSelected(regionKey(name), true);
   window.scrollTo({ top: 0 });
 }
 
@@ -752,7 +838,8 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
     );
   }
 
-  for (const name of album.genres.slice(0, 3)) {
+  const shownGenres = album.genres.slice(0, 3);
+  for (const name of shownGenres) {
     const key = genreKey(name);
     const chip = el(
       'button',
@@ -769,12 +856,34 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
     genreChips.push(chip);
   }
 
-  if (album.genres.length > 3) {
+  const shownRegions = album.regions.slice(0, 2);
+  for (const name of shownRegions) {
+    const key = regionKey(name);
+    const chip = el(
+      'button',
+      {
+        class: 'chip chip-small chip-region',
+        type: 'button',
+        title: `Filter by region: ${name}`,
+        'aria-pressed': state.selectedRegions.includes(key) ? 'true' : 'false',
+      },
+      el('span', { text: name }),
+    );
+    if (state.selectedRegions.includes(key)) chip.classList.add('is-active');
+    chip.addEventListener('click', () => activateRegion(name));
+    genreChips.push(chip);
+  }
+
+  const hiddenTags = [
+    ...album.genres.slice(shownGenres.length),
+    ...album.regions.slice(shownRegions.length),
+  ];
+  if (hiddenTags.length > 0) {
     genreChips.push(
       el('span', {
         class: 'chip chip-more',
-        title: album.genres.slice(3).join(', '),
-        text: `+${album.genres.length - 3} more`,
+        title: hiddenTags.join(', '),
+        text: `+${hiddenTags.length} more`,
       }),
     );
   }
@@ -792,6 +901,66 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
 /* Genre facets                                                        */
 /* ------------------------------------------------------------------ */
 
+function visibleFacetItems(
+  facets: GenreFacet[],
+  selected: Set<string>,
+  query: string,
+  expanded: boolean,
+  normalize: (value: string) => string = (value) => value.toLowerCase(),
+): GenreFacet[] {
+  const needle = normalize(query);
+  if (needle) {
+    return facets.filter((facet) =>
+      normalize(facet.name).includes(needle),
+    );
+  }
+  if (expanded) return [...facets];
+
+  const preview = facets.slice(0, FACET_PREVIEW);
+  const shown = new Set(preview.map((facet) => facet.key));
+  const selectedExtras = facets.filter(
+    (facet) => selected.has(facet.key) && !shown.has(facet.key),
+  );
+  return [...preview, ...selectedExtras];
+}
+
+function buildFacetRows(
+  items: GenreFacet[],
+  selected: Set<string>,
+  keyAttribute: 'data-genre-key' | 'data-region-key',
+): HTMLElement[] {
+  return [...items]
+    .sort(
+      (a, b) =>
+        Number(selected.has(b.key)) - Number(selected.has(a.key)) ||
+        b.albumCount - a.albumCount ||
+        a.name.localeCompare(b.name),
+    )
+    .map((facet) => {
+      const attrs: Record<string, string> = {
+        type: 'checkbox',
+        value: facet.key,
+      };
+      attrs[keyAttribute] = facet.key;
+      const input = el('input', attrs);
+      input.checked = selected.has(facet.key);
+      return el(
+        'label',
+        { class: 'facet-row' },
+        input,
+        el('span', {
+          class: 'facet-name',
+          title: facet.name,
+          text: facet.name,
+        }),
+        el('span', {
+          class: 'facet-count',
+          text: formatCount(facet.albumCount),
+        }),
+      );
+    });
+}
+
 function updateFacetChrome(): void {
   clearGenresButton.hidden = state.selectedGenres.length === 0;
   const hasQuery = state.genreQuery.trim().length > 0;
@@ -804,46 +973,33 @@ function updateFacetChrome(): void {
   }
 }
 
+function updateRegionChrome(): void {
+  clearRegionsButton.hidden = state.selectedRegions.length === 0;
+  const hasQuery = state.regionQuery.trim().length > 0;
+  const canToggle = state.regionFacets.length > FACET_PREVIEW && !hasQuery;
+  toggleAllRegionsButton.hidden = !canToggle;
+  if (canToggle) {
+    toggleAllRegionsButton.textContent = state.regionExpanded
+      ? 'Show fewer regions'
+      : `Show all ${formatCount(state.regionFacets.length)} regions`;
+  }
+}
+
 function renderFacets(): void {
   const selected = new Set(state.selectedGenres);
-  const query = state.genreQuery.trim().toLowerCase();
+  const query = state.genreQuery.trim();
   genreSearch.hidden = state.facets.length <= 12;
 
-  let items: GenreFacet[];
-  if (query) {
-    items = state.facets.filter((genre) =>
-      genre.name.toLowerCase().includes(query),
-    );
-  } else if (state.genreExpanded) {
-    items = state.facets;
-  } else {
-    const preview = state.facets.slice(0, FACET_PREVIEW);
-    const shown = new Set(preview.map((genre) => genre.key));
-    const selectedExtras = state.facets.filter(
-      (genre) => selected.has(genre.key) && !shown.has(genre.key),
-    );
-    items = [...preview, ...selectedExtras];
-  }
-
-  const rows: HTMLElement[] = items.sort(
-    (a, b) =>
-      Number(selected.has(b.key)) - Number(selected.has(a.key)) ||
-      b.albumCount - a.albumCount || a.name.localeCompare(b.name),
-  ).map((genre) => {
-    const input = el('input', {
-      type: 'checkbox',
-      value: genre.key,
-      'data-genre-key': genre.key,
-    });
-    input.checked = selected.has(genre.key);
-    return el(
-      'label',
-      { class: 'facet-row' },
-      input,
-      el('span', { class: 'facet-name', title: genre.name, text: genre.name }),
-      el('span', { class: 'facet-count', text: formatCount(genre.albumCount) }),
-    );
-  });
+  const rows = buildFacetRows(
+    visibleFacetItems(
+      state.facets,
+      selected,
+      query,
+      state.genreExpanded,
+    ),
+    selected,
+    'data-genre-key',
+  );
 
   if (rows.length === 0) {
     rows.push(
@@ -856,6 +1012,36 @@ function renderFacets(): void {
 
   genreList.replaceChildren(...rows);
   updateFacetChrome();
+}
+
+function renderRegions(): void {
+  const selected = new Set(state.selectedRegions);
+  const query = state.regionQuery.trim();
+  regionSearch.hidden = state.regionFacets.length <= 12;
+
+  const rows = buildFacetRows(
+    visibleFacetItems(
+      state.regionFacets,
+      selected,
+      query,
+      state.regionExpanded,
+      regionKey,
+    ),
+    selected,
+    'data-region-key',
+  );
+
+  if (rows.length === 0) {
+    rows.push(
+      el('p', {
+        class: 'facet-empty',
+        text: `No regions match “${state.regionQuery.trim()}”.`,
+      }),
+    );
+  }
+
+  regionList.replaceChildren(...rows);
+  updateRegionChrome();
 }
 
 function setGenreSelected(
@@ -876,12 +1062,35 @@ function setGenreSelected(
   void loadAlbums(true);
 }
 
+function setRegionSelected(
+  key: string,
+  selected: boolean,
+  options: { rerenderFacets?: boolean } = {},
+): void {
+  const current = new Set(state.selectedRegions);
+  if (selected === current.has(key)) return;
+  if (selected) current.add(key);
+  else current.delete(key);
+
+  state.selectedRegions = [...current];
+  syncUrl();
+  if (options.rerenderFacets === false) updateRegionChrome();
+  else renderRegions();
+  renderActiveFilters();
+  void loadAlbums(true);
+}
+
 function clearFilters(): void {
   state.selectedGenres = [];
+  state.genreMode = 'any';
+  state.selectedRegions = [];
+  state.regionMode = 'any';
   state.q = '';
   searchInput.value = '';
+  renderModeControls();
   syncUrl();
   renderFacets();
+  renderRegions();
   renderActiveFilters();
   void loadAlbums(true);
 }
@@ -900,6 +1109,24 @@ function renderActiveFilters(): void {
           'data-remove-genre': key,
           'aria-label': `Remove ${name} filter`,
           title: `Remove ${name} filter`,
+        },
+        el('span', { text: name }),
+        el('span', { class: 'chip-x', 'aria-hidden': 'true', text: '×' }),
+      ),
+    );
+  }
+
+  for (const key of state.selectedRegions) {
+    const name = state.regionByKey.get(key)?.name ?? key;
+    chips.push(
+      el(
+        'button',
+        {
+          class: 'chip is-active chip-region',
+          type: 'button',
+          'data-remove-region': key,
+          'aria-label': `Remove ${name} region filter`,
+          title: `Remove ${name} region filter`,
         },
         el('span', { text: name }),
         el('span', { class: 'chip-x', 'aria-hidden': 'true', text: '×' }),
@@ -1020,6 +1247,26 @@ function renderDialog(
       return chip;
     });
     heading.append(el('div', { class: 'dialog-genres' }, ...genreButtons));
+  }
+
+  if (album.regions.length > 0) {
+    const regionButtons = album.regions.slice(0, 6).map((name) => {
+      const key = regionKey(name);
+      const chip = el(
+        'button',
+        {
+          class: 'chip chip-small chip-region',
+          type: 'button',
+          title: `Filter by region: ${name}`,
+          'aria-pressed': state.selectedRegions.includes(key) ? 'true' : 'false',
+        },
+        el('span', { text: name }),
+      );
+      if (state.selectedRegions.includes(key)) chip.classList.add('is-active');
+      chip.addEventListener('click', () => activateRegion(name));
+      return chip;
+    });
+    heading.append(el('div', { class: 'dialog-genres' }, ...regionButtons));
   }
 
   if (state.playbackEnabled && state.session.authenticated) {
@@ -1269,11 +1516,57 @@ function bindEvents(): void {
     renderFacets();
   });
 
+  regionSearch.addEventListener('input', () => {
+    state.regionQuery = regionSearch.value;
+    renderRegions();
+  });
+
+  for (const input of genreModeInputs) {
+    input.addEventListener('change', () => {
+      if (!input.checked || !isFilterMode(input.value)) return;
+      state.genreMode = input.value;
+      syncUrl();
+      void loadAlbums(true);
+    });
+  }
+
+  for (const input of regionModeInputs) {
+    input.addEventListener('change', () => {
+      if (!input.checked || !isFilterMode(input.value)) return;
+      state.regionMode = input.value;
+      syncUrl();
+      void loadAlbums(true);
+    });
+  }
+
   clearGenresButton.addEventListener('click', () => {
-    if (state.selectedGenres.length === 0) return;
+    if (
+      state.selectedGenres.length === 0 &&
+      state.genreMode === 'any'
+    ) {
+      return;
+    }
     state.selectedGenres = [];
+    state.genreMode = 'any';
+    renderModeControls();
     syncUrl();
     renderFacets();
+    renderActiveFilters();
+    void loadAlbums(true);
+  });
+
+  clearRegionsButton.addEventListener('click', () => {
+    if (
+      state.selectedRegions.length === 0 &&
+      state.regionMode === 'any'
+    ) {
+      return;
+    }
+    state.selectedRegions = [];
+    state.regionMode = 'any';
+    renderModeControls();
+    syncUrl();
+    renderRegions();
     renderActiveFilters();
     void loadAlbums(true);
   });
@@ -1281,6 +1574,11 @@ function bindEvents(): void {
   toggleAllButton.addEventListener('click', () => {
     state.genreExpanded = !state.genreExpanded;
     renderFacets();
+  });
+
+  toggleAllRegionsButton.addEventListener('click', () => {
+    state.regionExpanded = !state.regionExpanded;
+    renderRegions();
   });
 
   genreList.addEventListener('change', (event) => {
@@ -1291,6 +1589,14 @@ function bindEvents(): void {
     setGenreSelected(key, target.checked, { rerenderFacets: true });
   });
 
+  regionList.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const key = target.dataset.regionKey;
+    if (!key) return;
+    setRegionSelected(key, target.checked, { rerenderFacets: true });
+  });
+
   activeFilters.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -1299,6 +1605,13 @@ function bindEvents(): void {
     if (removeGenre) {
       const key = removeGenre.dataset.removeGenre;
       if (key) setGenreSelected(key, false);
+      return;
+    }
+
+    const removeRegion = target.closest<HTMLElement>('[data-remove-region]');
+    if (removeRegion) {
+      const key = removeRegion.dataset.removeRegion;
+      if (key) setRegionSelected(key, false);
       return;
     }
 

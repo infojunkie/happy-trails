@@ -89,33 +89,98 @@
     </div>
 
     <div class="layout">
-      <aside class="facets" aria-labelledby="genre-heading">
-        <div class="facets-header">
-          <h2 id="genre-heading">Genres</h2>
-          <button id="clear-genres" class="link-button" type="button" hidden>
-            Clear
-          </button>
-        </div>
-        <p class="facet-note">Albums matching <em>any</em> selected genre.</p>
-        <input
-          id="genre-search"
-          class="genre-search"
-          type="search"
-          placeholder="Filter genres…"
-          aria-label="Filter genres"
-          autocomplete="off"
-          spellcheck="false"
-          hidden
-        />
-        <div id="genre-list" class="genre-list" role="group" aria-labelledby="genre-heading">
-          <p class="facet-empty">Loading genres…</p>
-        </div>
-        <button
-          id="toggle-all-genres"
-          class="link-button toggle-all"
-          type="button"
-          hidden
-        ></button>
+      <aside class="facets" aria-label="Filters">
+        <section
+          class="facet-section facet-section-genres"
+          aria-labelledby="genre-heading"
+        >
+          <div class="facets-header">
+            <h2 id="genre-heading">Genres</h2>
+            <button id="clear-genres" class="link-button" type="button" hidden>
+              Clear
+            </button>
+          </div>
+          <div class="facet-mode" role="radiogroup" aria-label="Genre matching">
+            <label class="facet-mode-option">
+              <input type="radio" name="genre-mode" value="any" checked />
+              <span>Match any</span>
+            </label>
+            <label class="facet-mode-option">
+              <input type="radio" name="genre-mode" value="all" />
+              <span>Match all</span>
+            </label>
+          </div>
+          <input
+            id="genre-search"
+            class="genre-search"
+            type="search"
+            placeholder="Filter genres…"
+            aria-label="Filter genres"
+            autocomplete="off"
+            spellcheck="false"
+            hidden
+          />
+          <div
+            id="genre-list"
+            class="genre-list"
+            role="group"
+            aria-labelledby="genre-heading"
+          >
+            <p class="facet-empty">Loading genres…</p>
+          </div>
+          <button
+            id="toggle-all-genres"
+            class="link-button toggle-all"
+            type="button"
+            hidden
+          ></button>
+        </section>
+
+        <section
+          class="facet-section facet-section-regions"
+          aria-labelledby="region-heading"
+        >
+          <div class="facets-header">
+            <h2 id="region-heading">Regions</h2>
+            <button id="clear-regions" class="link-button" type="button" hidden>
+              Clear
+            </button>
+          </div>
+          <div class="facet-mode" role="radiogroup" aria-label="Region matching">
+            <label class="facet-mode-option">
+              <input type="radio" name="region-mode" value="any" checked />
+              <span>Match any</span>
+            </label>
+            <label class="facet-mode-option">
+              <input type="radio" name="region-mode" value="all" />
+              <span>Match all</span>
+            </label>
+          </div>
+          <input
+            id="region-search"
+            class="genre-search"
+            type="search"
+            placeholder="Filter regions…"
+            aria-label="Filter regions"
+            autocomplete="off"
+            spellcheck="false"
+            hidden
+          />
+          <div
+            id="region-list"
+            class="genre-list region-list"
+            role="group"
+            aria-labelledby="region-heading"
+          >
+            <p class="facet-empty">Loading regions…</p>
+          </div>
+          <button
+            id="toggle-all-regions"
+            class="link-button toggle-all"
+            type="button"
+            hidden
+          ></button>
+        </section>
       </aside>
 
       <main class="content">
@@ -136,7 +201,7 @@
         <div id="empty-state" class="empty-state" hidden>
           <p class="empty-title">No albums found</p>
           <p class="empty-text">
-            Try a different search or clear the genre filters.
+            Try a different search or clear the filters.
           </p>
           <button id="empty-clear" class="button-secondary" type="button">
             Clear filters

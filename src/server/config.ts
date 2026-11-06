@@ -48,6 +48,7 @@ const DEFAULT_ARTIST_SEPARATOR_WORDS = [
   'e',
   'con',
   'vs.',
+  'mit',
 ];
 
 function artistSeparatorWords(): string[] {
@@ -59,6 +60,36 @@ function artistSeparatorWords(): string[] {
         .filter(Boolean)
     : [];
   return [...DEFAULT_ARTIST_SEPARATOR_WORDS, ...extra];
+}
+
+/** Artist names whose punctuation must not be treated as a separator. */
+const DEFAULT_ARTIST_EXCEPTIONS = [
+  'Earth, Wind & Fire',
+  'Simon & Garfunkel',
+  'Crosby, Stills, Nash & Young',
+];
+
+function artistExceptions(): string[] {
+  const raw = process.env.ARTIST_EXCEPTIONS?.trim();
+  // Exceptions contain commas, so this list uses "|" as its separator.
+  const extra = raw
+    ? raw
+        .split('|')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+  return [...DEFAULT_ARTIST_EXCEPTIONS, ...extra];
+}
+
+/** Extra genre tags to classify as countries/regions; REGION_TAGS adds more. */
+function regionTags(): string[] {
+  const raw = process.env.REGION_TAGS?.trim();
+  return raw
+    ? raw
+        .split('|')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
 }
 
 const dsmUrl = (process.env.DSM_URL ?? process.env.DSADDR ?? '').trim();
@@ -95,6 +126,10 @@ export const config = {
   maxPageSize: integerFromEnv('MAX_PAGE_SIZE', 200, 1),
   /** Words that separate multiple artists; ARTIST_SEPARATOR_WORDS adds more. */
   artistSeparatorWords: artistSeparatorWords(),
+  /** Names kept intact; ARTIST_EXCEPTIONS adds more, separated by "|". */
+  artistExceptions: artistExceptions(),
+  /** Additional genre tags to treat as countries/regions. */
+  regionTags: regionTags(),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
   dsmFrontendUrl: dsmFrontendUrl.length > 0 ? dsmFrontendUrl : null,
