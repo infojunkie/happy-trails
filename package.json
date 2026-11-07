@@ -13,10 +13,19 @@
     "build:client": "tsc -p tsconfig.client.json",
     "build:docker": "TAG=$(npm pkg get version --workspaces=false); docker build --network=host -t happy-trails:v$TAG . && docker save happy-trails:v$TAG | gzip > happy-trails-$TAG.tar.gz",
     "dev": "node scripts/dev.mjs",
+    "lint": "eslint .",
     "watch:client": "tsc -p tsconfig.client.json --watch --preserveWatchOutput",
     "watch:server": "tsx watch src/server/index.ts",
     "start": "node dist/server/index.js",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+    "test": "npm run test:backend && npm run test:ui",
+    "test:backend": "npm run test:api && npm run test:search",
+    "test:api": "node --import tsx --test tests/api/*.test.ts",
+    "test:search": "node --import tsx --test tests/search/*.test.ts",
+    "pretest:ui": "npm run build:client",
+    "test:ui": "playwright test",
+    "test:ui:headed": "playwright test --headed",
+    "test:install-browsers": "playwright install chromium",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -24,10 +33,15 @@
     "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.72.1"
   }
 }

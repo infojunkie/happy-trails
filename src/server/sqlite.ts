@@ -290,6 +290,7 @@ function ftsPhrase(token: string): string {
  * No real metadata contains them, so treat such a token as matching nothing
  * rather than returning a 500.
  */
+// eslint-disable-next-line no-control-regex -- control characters are the point
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
 /** Pre-syntax behavior: every whitespace-separated token, all fields, ANDed. */

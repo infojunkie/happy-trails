@@ -1,6 +1,5 @@
 import express, {
   type ErrorRequestHandler,
-  type Request,
   type Response,
 } from 'express';
 import path from 'node:path';
@@ -31,6 +30,41 @@ const MAX_OFFSET = 1_000_000;
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 /** Works both for src/server/*.ts (tsx) and dist/server/*.js (built). */
 const publicDir = path.resolve(currentDir, '../../public');
+
+export interface AppDependencies {
+  library: Pick<
+    typeof library,
+    | 'status'
+    | 'genres'
+    | 'regions'
+    | 'queryAlbums'
+    | 'sourceAlbumsFor'
+    | 'coverPathFor'
+  >;
+  loadTracks: typeof loadTracks;
+  covers: Pick<typeof covers, 'getCover'>;
+  userSessions: Pick<
+    typeof userSessions,
+    | 'enabled'
+    | 'cookieName'
+    | 'get'
+    | 'login'
+    | 'destroy'
+    | 'cookieOptions'
+    | 'clearCookieOptions'
+  >;
+  playback: Pick<typeof playback, 'audioStationUrl' | 'playAlbum'>;
+  config: Pick<typeof config, 'defaultPageSize' | 'maxPageSize' | 'dsmUrl'>;
+}
+
+const defaultDependencies: AppDependencies = {
+  library,
+  loadTracks,
+  covers,
+  userSessions,
+  playback,
+  config,
+};
 
 function stringParam(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
@@ -68,8 +102,8 @@ function facetParams(value: unknown): string[] {
   return [...names];
 }
 
-function unavailable(res: Response): void {
-  const status = library.status();
+function unavailable(res: Response, dependencies: AppDependencies): void {
+  const status = dependencies.library.status();
   res.status(503).json({
     error: status.error ?? 'The library index is still being built',
   });
@@ -152,303 +186,312 @@ ${openLink}
 </main></body></html>`;
 }
 
-export const app = express();
-app.disable('x-powered-by');
+/** Build the Express app with injectable services (used by the API tests). */
+export function createApp(
+  dependencies: AppDependencies = defaultDependencies,
+): express.Express {
+  const app = express();
+  app.disable('x-powered-by');
 
-app.use((_req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  next();
-});
-
-app.use(express.json({ limit: '16kb' }));
-
-app.use('/api', (_req, res, next) => {
-  res.setHeader('Cache-Control', 'no-store');
-  next();
-});
-
-app.get('/api/status', (_req, res) => {
-  res.json(library.status());
-});
-
-app.get('/api/session', (req, res) => {
-  const session = userSessions.get(req);
-  const body: SessionResponse = {
-    authenticated: session !== null,
-    account: session?.account ?? null,
-  };
-  res.json(body);
-});
-
-app.post('/api/session/login', async (req, res) => {
-  if (!userSessions.enabled || !config.dsmUrl) {
-    res.status(503).json({ error: 'Synology sign-in is not configured.' });
-    return;
-  }
-
-  const body: unknown = req.body;
-  const record =
-    body !== null && typeof body === 'object'
-      ? (body as Record<string, unknown>)
-      : {};
-  const username =
-    typeof record.username === 'string' ? record.username.trim() : '';
-  const password = typeof record.password === 'string' ? record.password : '';
-
-  if (!username || !password) {
-    res.status(400).json({ error: 'Username and password are required.' });
-    return;
-  }
-  if (username.length > 256 || password.length > 1024) {
-    res.status(400).json({ error: 'Username or password is too long.' });
-    return;
-  }
-
-  try {
-    const { sessionId, account } = await userSessions.login(username, password);
-    res.cookie(
-      userSessions.cookieName,
-      sessionId,
-      userSessions.cookieOptions(req),
-    );
-    const result: SessionResponse = { authenticated: true, account };
-    res.json(result);
-  } catch (error) {
-    const { status, message } = loginErrorMessage(error);
-    console.error('[session] sign-in failed:', message);
-    res.status(status).json({ error: message });
-  }
-});
-
-app.post('/api/session/logout', (req, res) => {
-  userSessions.destroy(req);
-  res.clearCookie(
-    userSessions.cookieName,
-    userSessions.clearCookieOptions(req),
-  );
-  const result: SessionResponse = { authenticated: false, account: null };
-  res.json(result);
-});
-
-app.get('/api/genres', (_req, res) => {
-  const status = library.status();
-  if (!status.ready) {
-    unavailable(res);
-    return;
-  }
-  const body: GenresResponse = {
-    totalAlbums: status.albumCount,
-    genres: library.genres(),
-    regions: library.regions(),
-    libraryVersion: status.libraryVersion,
-  };
-  res.json(body);
-});
-
-app.get('/api/albums', (req, res) => {
-  if (!library.status().ready) {
-    unavailable(res);
-    return;
-  }
-
-  const q = (stringParam(req.query.q) ?? '').slice(0, MAX_SEARCH_LENGTH).trim();
-  const sortParam = stringParam(req.query.sort);
-  const sort = isSortKey(sortParam) ? sortParam : 'recent';
-  const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
-  const limit = integerParam(
-    req.query.limit,
-    config.defaultPageSize,
-    1,
-    config.maxPageSize,
-  );
-  const genres = facetParams(req.query.genre);
-  const regions = facetParams(req.query.region);
-  const genreModeParam = stringParam(req.query.genreMode);
-  const regionModeParam = stringParam(req.query.regionMode);
-  const genreMode: FilterMode = isFilterMode(genreModeParam)
-    ? genreModeParam
-    : 'any';
-  const regionMode: FilterMode = isFilterMode(regionModeParam)
-    ? regionModeParam
-    : 'any';
-
-  const result = library.queryAlbums({
-    genres,
-    genreMode,
-    regions,
-    regionMode,
-    q,
-    sort,
-    offset,
-    limit,
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
   });
-  const body: AlbumsResponse = {
-    total: result.total,
-    offset,
-    limit,
-    albums: result.albums,
-    libraryVersion: result.libraryVersion,
-  };
-  res.json(body);
-});
 
-app.get('/api/albums/:key/cover', async (req, res) => {
-  const decoded = decodeAlbumKey(req.params.key);
-  if (!decoded) {
-    res.status(400).end();
-    return;
-  }
+  app.use(express.json({ limit: '16kb' }));
 
-  const coverPath = library.coverPathFor(decoded.album, decoded.artist);
-  if (!coverPath) {
-    res.status(404).end();
-    return;
-  }
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
-  const image = await covers.getCover(coverPath);
-  if (!image) {
-    // Let the browser retry a missing cover after a short while.
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.status(404).end();
-    return;
-  }
+  app.get('/api/status', (_req, res) => {
+    res.json(dependencies.library.status());
+  });
 
-  res.setHeader('Cache-Control', 'private, max-age=86400');
-  res.type(image.contentType);
-  res.send(image.body);
-});
+  app.get('/api/session', (req, res) => {
+    const session = dependencies.userSessions.get(req);
+    const body: SessionResponse = {
+      authenticated: session !== null,
+      account: session?.account ?? null,
+    };
+    res.json(body);
+  });
 
-app.get('/api/albums/:key/tracks', async (req, res) => {
-  const decoded = decodeAlbumKey(req.params.key);
-  if (!decoded) {
-    res.status(400).json({ error: 'Invalid album key' });
-    return;
-  }
-
-  const sourceAlbums = library.sourceAlbumsFor(decoded.album, decoded.artist);
-  const rows = await loadTracks(sourceAlbums, decoded.album, decoded.artist);
-  if (rows.length === 0) {
-    res.status(404).json({ error: 'Album not found' });
-    return;
-  }
-
-  const body: TracksResponse = {
-    album: decoded.album,
-    artist: decoded.artist,
-    sourceAlbums:
-      sourceAlbums.length > 0 ? sourceAlbums : [decoded.album],
-    tracks: rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      artist: row.artist,
-      artists: parseArtists(row.artist),
-      albumArtist: row.album_artist,
-      composer: row.composer,
-      composers: parseComposers(row.composer),
-      sourceAlbum: row.source_album ?? '(Unknown Album)',
-      genre: row.genre,
-      year: row.year,
-      track: row.track,
-      disc: row.disc,
-      duration: row.duration,
-      bitrate: row.bitrate,
-      frequency: row.frequency,
-    })),
-  };
-  res.json(body);
-});
-
-app.get('/play/:key', async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-
-  const decoded = decodeAlbumKey(req.params.key);
-  if (!decoded) {
-    res
-      .status(400)
-      .type('html')
-      .send(
-        playErrorPage(
-          'Invalid album link',
-          'This playback link is not valid.',
-          playback.audioStationUrl,
-        ),
-      );
-    return;
-  }
-
-  const session = userSessions.get(req);
-  if (!session) {
-    if (!playback.audioStationUrl) {
-      res
-        .status(503)
-        .type('html')
-        .send(
-          playErrorPage(
-            'Playback unavailable',
-            'Synology DSM is not configured.',
-            null,
-          ),
-        );
+  app.post('/api/session/login', async (req, res) => {
+    if (!dependencies.userSessions.enabled || !dependencies.config.dsmUrl) {
+      res.status(503).json({ error: 'Synology sign-in is not configured.' });
       return;
     }
-    res.redirect(
-      303,
-      `/?login=1&play=${encodeURIComponent(req.params.key)}`,
+
+    const body: unknown = req.body;
+    const record =
+      body !== null && typeof body === 'object'
+        ? (body as Record<string, unknown>)
+        : {};
+    const username =
+      typeof record.username === 'string' ? record.username.trim() : '';
+    const password = typeof record.password === 'string' ? record.password : '';
+
+    if (!username || !password) {
+      res.status(400).json({ error: 'Username and password are required.' });
+      return;
+    }
+    if (username.length > 256 || password.length > 1024) {
+      res.status(400).json({ error: 'Username or password is too long.' });
+      return;
+    }
+
+    try {
+      const { sessionId, account } = await dependencies.userSessions.login(username, password);
+      res.cookie(
+        dependencies.userSessions.cookieName,
+        sessionId,
+        dependencies.userSessions.cookieOptions(req),
+      );
+      const result: SessionResponse = { authenticated: true, account };
+      res.json(result);
+    } catch (error) {
+      const { status, message } = loginErrorMessage(error);
+      console.error('[session] sign-in failed:', message);
+      res.status(status).json({ error: message });
+    }
+  });
+
+  app.post('/api/session/logout', (req, res) => {
+    dependencies.userSessions.destroy(req);
+    res.clearCookie(
+      dependencies.userSessions.cookieName,
+      dependencies.userSessions.clearCookieOptions(req),
     );
-    return;
-  }
+    const result: SessionResponse = { authenticated: false, account: null };
+    res.json(result);
+  });
 
-  try {
-    await playback.playAlbum(session.client, decoded.album, decoded.artist);
-    const target = playback.audioStationUrl;
-    if (!target) {
+  app.get('/api/genres', (_req, res) => {
+    const status = dependencies.library.status();
+    if (!status.ready) {
+      unavailable(res, dependencies);
+      return;
+    }
+    const body: GenresResponse = {
+      totalAlbums: status.albumCount,
+      genres: dependencies.library.genres(),
+      regions: dependencies.library.regions(),
+      libraryVersion: status.libraryVersion,
+    };
+    res.json(body);
+  });
+
+  app.get('/api/albums', (req, res) => {
+    if (!dependencies.library.status().ready) {
+      unavailable(res, dependencies);
+      return;
+    }
+
+    const q = (stringParam(req.query.q) ?? '').slice(0, MAX_SEARCH_LENGTH).trim();
+    const sortParam = stringParam(req.query.sort);
+    const sort = isSortKey(sortParam) ? sortParam : 'recent';
+    const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
+    const limit = integerParam(
+      req.query.limit,
+      dependencies.config.defaultPageSize,
+      1,
+      dependencies.config.maxPageSize,
+    );
+    const genres = facetParams(req.query.genre);
+    const regions = facetParams(req.query.region);
+    const genreModeParam = stringParam(req.query.genreMode);
+    const regionModeParam = stringParam(req.query.regionMode);
+    const genreMode: FilterMode = isFilterMode(genreModeParam)
+      ? genreModeParam
+      : 'any';
+    const regionMode: FilterMode = isFilterMode(regionModeParam)
+      ? regionModeParam
+      : 'any';
+
+    const result = dependencies.library.queryAlbums({
+      genres,
+      genreMode,
+      regions,
+      regionMode,
+      q,
+      sort,
+      offset,
+      limit,
+    });
+    const body: AlbumsResponse = {
+      total: result.total,
+      offset,
+      limit,
+      albums: result.albums,
+      libraryVersion: result.libraryVersion,
+    };
+    res.json(body);
+  });
+
+  app.get('/api/albums/:key/cover', async (req, res) => {
+    const decoded = decodeAlbumKey(req.params.key);
+    if (!decoded) {
+      res.status(400).end();
+      return;
+    }
+
+    const coverPath = dependencies.library.coverPathFor(decoded.album, decoded.artist);
+    if (!coverPath) {
+      res.status(404).end();
+      return;
+    }
+
+    const image = await dependencies.covers.getCover(coverPath);
+    if (!image) {
+      // Let the browser retry a missing cover after a short while.
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.status(404).end();
+      return;
+    }
+
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.type(image.contentType);
+    res.send(image.body);
+  });
+
+  app.get('/api/albums/:key/tracks', async (req, res) => {
+    const decoded = decodeAlbumKey(req.params.key);
+    if (!decoded) {
+      res.status(400).json({ error: 'Invalid album key' });
+      return;
+    }
+
+    const sourceAlbums = dependencies.library.sourceAlbumsFor(decoded.album, decoded.artist);
+    const rows = await dependencies.loadTracks(sourceAlbums, decoded.album, decoded.artist);
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Album not found' });
+      return;
+    }
+
+    const body: TracksResponse = {
+      album: decoded.album,
+      artist: decoded.artist,
+      sourceAlbums:
+        sourceAlbums.length > 0 ? sourceAlbums : [decoded.album],
+      tracks: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        artist: row.artist,
+        artists: parseArtists(row.artist),
+        albumArtist: row.album_artist,
+        composer: row.composer,
+        composers: parseComposers(row.composer),
+        sourceAlbum: row.source_album ?? '(Unknown Album)',
+        genre: row.genre,
+        year: row.year,
+        track: row.track,
+        disc: row.disc,
+        duration: row.duration,
+        bitrate: row.bitrate,
+        frequency: row.frequency,
+      })),
+    };
+    res.json(body);
+  });
+
+  app.get('/play/:key', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const decoded = decodeAlbumKey(req.params.key);
+    if (!decoded) {
       res
-        .status(503)
+        .status(400)
         .type('html')
         .send(
           playErrorPage(
-            'Playback unavailable',
-            'Synology DSM is not configured.',
-            null,
+            'Invalid album link',
+            'This playback link is not valid.',
+            dependencies.playback.audioStationUrl,
           ),
         );
       return;
     }
-    res.redirect(303, target);
-  } catch (error) {
-    console.error('[play] could not start playback:', error);
-    const message = error instanceof Error ? error.message : String(error);
-    res
-      .status(502)
-      .type('html')
-      .send(
-        playErrorPage(
-          'Could not start playback',
-          message,
-          playback.audioStationUrl,
-        ),
+
+    const session = dependencies.userSessions.get(req);
+    if (!session) {
+      if (!dependencies.playback.audioStationUrl) {
+        res
+          .status(503)
+          .type('html')
+          .send(
+            playErrorPage(
+              'Playback unavailable',
+              'Synology DSM is not configured.',
+              null,
+            ),
+          );
+        return;
+      }
+      res.redirect(
+        303,
+        `/?login=1&play=${encodeURIComponent(req.params.key)}`,
       );
-  }
-});
+      return;
+    }
 
-app.use('/api', (_req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
+    try {
+      await dependencies.playback.playAlbum(session.client, decoded.album, decoded.artist);
+      const target = dependencies.playback.audioStationUrl;
+      if (!target) {
+        res
+          .status(503)
+          .type('html')
+          .send(
+            playErrorPage(
+              'Playback unavailable',
+              'Synology DSM is not configured.',
+              null,
+            ),
+          );
+        return;
+      }
+      res.redirect(303, target);
+    } catch (error) {
+      console.error('[play] could not start playback:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      res
+        .status(502)
+        .type('html')
+        .send(
+          playErrorPage(
+            'Could not start playback',
+            message,
+            dependencies.playback.audioStationUrl,
+          ),
+        );
+    }
+  });
 
-app.use(
-  express.static(publicDir, {
-    index: 'index.html',
-    etag: true,
-    maxAge: 0,
-  }),
-);
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
 
-const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
-  console.error('[http] request failed:', error);
-  if (res.headersSent) return;
-  res.status(500).json({ error: 'Internal server error' });
-};
-app.use(errorHandler);
+  app.use(
+    express.static(publicDir, {
+      index: 'index.html',
+      etag: true,
+      maxAge: 0,
+    }),
+  );
+
+  const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+    console.error('[http] request failed:', error);
+    if (res.headersSent) return;
+    res.status(500).json({ error: 'Internal server error' });
+  };
+  app.use(errorHandler);
+
+  return app;
+}
+
+export const app = createApp();
 
 export { publicDir };

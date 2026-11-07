@@ -380,6 +380,28 @@ If the database is unavailable at startup, the HTTP server still starts and
 returns an explanatory error; the UI retries automatically and the change
 check keeps retrying in the background.
 
+## Tests
+
+The suite is deterministic and does not require PostgreSQL, DSM, or network access. It uses synthetic album/track fixtures and fake cover, session, and playback services.
+
+```bash
+npm run test:install-browsers  # once per machine/CI
+npm run lint                   # ESLint
+npm run typecheck              # server, client, and tests
+npm test                       # API + search + UI
+npm run test:api               # Express endpoints
+npm run test:search            # parser + SQLite search/tag combinations
+npm run test:ui                # Playwright UI tests
+npm run test:ui:headed         # Playwright with a visible browser
+```
+
+- API tests start the real Express app via `createApp()` with an injected fixture index.
+- Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, and combinations.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, help popups, and the sticky error banner are checked against stable data.
+- Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
+- Playwright is configured in `playwright.config.ts`; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running.
+- `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.
+
 ## API
 
 All endpoints return JSON.
@@ -600,7 +622,17 @@ happy-trails/
 ├── public/
 │   ├── index.html
 │   └── styles.css        Compiled client files are written to public/client/
+├── tests/
+│   ├── api/              Express endpoint tests
+│   ├── search/           Parser and SQLite search tests
+│   ├── ui/               Playwright browser tests
+│   ├── fixtures/         Synthetic album/track data and UI fixture server
+│   └── helpers/          Test server and HTTP helpers
+├── .github/workflows/    CI: lint, typecheck, backend and UI tests
+├── eslint.config.js      ESLint flat config
+├── playwright.config.ts  Fixture-server-backed browser tests
 ├── scripts/dev.mjs       Runs the client and server watchers
+├── tsconfig.test.json    Typechecks the test suite
 └── .env.example
 ```
 

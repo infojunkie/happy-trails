@@ -5,3 +5,6 @@ public/shared/
 .env
 *.log
 *.tar.gz
+test-results/
+playwright-report/
+blob-report/
