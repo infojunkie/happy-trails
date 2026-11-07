@@ -33,6 +33,8 @@ export interface AlbumRow {
   genres: string | null;
   /** Distinct track-level artists, folded into the search text. */
   track_artists: string[] | null;
+  /** Distinct composer tag values from the tracks. */
+  composers: string[] | null;
   /** Representative file path, used to resolve an AudioStation cover id. */
   cover_path: string;
 }
@@ -42,6 +44,7 @@ export interface TrackRow {
   title: string;
   artist: string | null;
   album_artist: string;
+  composer: string | null;
   source_album: string | null;
   genre: string | null;
   year: number | null;
@@ -63,6 +66,8 @@ const ALBUM_QUERY = `
     STRING_AGG(DISTINCT m.genre, ',') AS genres,
     ARRAY_AGG(DISTINCT m.artist)
       FILTER (WHERE m.artist IS NOT NULL AND m.artist <> '') AS track_artists,
+    ARRAY_AGG(DISTINCT m.composer)
+      FILTER (WHERE m.composer IS NOT NULL AND m.composer <> '') AS composers,
     MIN(m.path) AS cover_path
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
@@ -75,6 +80,7 @@ const TRACK_QUERY = `
     m.title,
     m.artist,
     ${ALBUM_ARTIST} AS album_artist,
+    m.composer,
     m.album AS source_album,
     m.genre,
     m.year,

@@ -29,17 +29,35 @@
 
       <div class="header-controls">
         <label class="search-field">
-          <span class="visually-hidden">Search albums or artists</span>
+          <span class="visually-hidden">Search the mediatheque</span>
           <span class="search-icon" aria-hidden="true">⌕</span>
           <input
             id="search"
             type="search"
-            placeholder="Search albums or artists…"
+            placeholder="Search the mediatheque…"
             autocomplete="off"
             spellcheck="false"
+            aria-describedby="search-syntax"
+            title='album:"exact phrase" artist:name composer:name source:label trackartist:name — supports AND, OR, and parentheses'
           />
           <kbd class="search-hint" aria-hidden="true">/</kbd>
         </label>
+        <button
+          id="search-help-button"
+          class="search-help-button"
+          type="button"
+          aria-label="Search syntax help"
+          title="Search syntax help"
+          aria-haspopup="dialog"
+          aria-controls="search-help-dialog"
+        >
+          ?
+        </button>
+        <span id="search-syntax" class="visually-hidden">
+          Search syntax: use field colon value, quote multi-word values, and
+          combine terms with AND or OR. Fields are album, artist, composer,
+          source, and trackartist. Bare terms search all fields.
+        </span>
 
         <label class="sort-field">
           <span class="sort-label">Sort</span>
@@ -73,20 +91,20 @@
           Sign in
         </button>
       </div>
-    </header>
 
-    <div id="error-banner" class="error-banner" role="alert" hidden>
-      <span id="error-text"></span>
-      <button
-        id="dismiss-error"
-        class="error-dismiss"
-        type="button"
-        aria-label="Dismiss error"
-        title="Dismiss"
-      >
-        ×
-      </button>
-    </div>
+      <div id="error-banner" class="error-banner" role="alert" hidden>
+        <span id="error-text"></span>
+        <button
+          id="dismiss-error"
+          class="error-dismiss"
+          type="button"
+          aria-label="Dismiss error"
+          title="Dismiss"
+        >
+          ×
+        </button>
+      </div>
+    </header>
 
     <div class="layout">
       <aside class="facets" aria-label="Filters">
@@ -263,6 +281,118 @@
           </button>
         </div>
       </form>
+    </dialog>
+
+    <dialog
+      id="search-help-dialog"
+      class="search-help-dialog"
+      aria-labelledby="search-help-title"
+    >
+      <div class="search-help">
+        <div class="search-help-header">
+          <div>
+            <h2 id="search-help-title">Search syntax</h2>
+            <p class="search-help-intro">
+              Bare terms search every field. Add a field prefix to narrow the
+              search, and quote values that contain spaces or parentheses.
+            </p>
+          </div>
+          <button
+            id="search-help-close"
+            class="dialog-close"
+            type="button"
+            aria-label="Close search syntax help"
+            title="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <dl class="search-help-fields">
+          <dt><code>album:</code></dt>
+          <dd>Album title and raw source titles.</dd>
+          <dt><code>artist:</code></dt>
+          <dd>Album artist, parsed artists, and track artists.</dd>
+          <dt><code>composer:</code></dt>
+          <dd>Composer tags from the tracks. Alias: <code>composers:</code>.</dd>
+          <dt><code>source:</code></dt>
+          <dd>Raw source/disc titles only. Alias: <code>disc:</code>.</dd>
+          <dt><code>trackartist:</code></dt>
+          <dd>
+            Track-level artists only. Aliases: <code>guest:</code>,
+            <code>track_artist:</code>.
+          </dd>
+          <dt><code>all:</code></dt>
+          <dd>Every indexed field. Aliases: <code>any:</code>.</dd>
+        </dl>
+
+        <h3>Operators</h3>
+        <ul class="search-help-list">
+          <li>
+            <code>AND</code> requires both sides; adjacent terms are implicitly
+            ANDed.
+          </li>
+          <li><code>OR</code> matches either side.</li>
+          <li>
+            <code>AND</code> binds more tightly than <code>OR</code>;
+            parentheses group expressions.
+          </li>
+          <li>
+            Matching is case-, accent-, and ligature-insensitive, including
+            quoted phrases.
+          </li>
+        </ul>
+
+        <h3>Examples</h3>
+        <div class="search-help-examples">
+          <button
+            type="button"
+            class="syntax-example"
+            data-search-example='album:"abbey road"'
+          >
+            <code>album:"abbey road"</code>
+            <span>quoted phrase in the album field</span>
+          </button>
+          <button
+            type="button"
+            class="syntax-example"
+            data-search-example="artist:beatles OR artist:stones"
+          >
+            <code>artist:beatles OR artist:stones</code>
+            <span>either artist</span>
+          </button>
+          <button
+            type="button"
+            class="syntax-example"
+            data-search-example="(album:road OR album:street) artist:beatles"
+          >
+            <code>(album:road OR album:street) artist:beatles</code>
+            <span>parentheses and implicit AND</span>
+          </button>
+          <button
+            type="button"
+            class="syntax-example"
+            data-search-example='trackartist:"Ferenc Snétberger"'
+          >
+            <code>trackartist:"Ferenc Snétberger"</code>
+            <span>a guest artist</span>
+          </button>
+          <button
+            type="button"
+            class="syntax-example"
+            data-search-example='composer:"Antonio Carlos Jobim"'
+          >
+            <code>composer:"Antonio Carlos Jobim"</code>
+            <span>a composer tag</span>
+          </button>
+        </div>
+
+        <p class="search-help-note">
+          Unknown field names are treated as ordinary text. Incomplete or
+          malformed expressions fall back to the all-field token search.
+          <code>NOT</code> is not supported.
+        </p>
+      </div>
     </dialog>
 
     <noscript>

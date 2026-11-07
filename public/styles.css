@@ -121,6 +121,12 @@ button {
   text-underline-offset: 2px;
 }
 
+.composer-link {
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, var(--text-muted) 60%, transparent);
+  text-underline-offset: 2px;
+}
+
 .artist-sep {
   color: var(--text-muted);
 }
@@ -182,9 +188,10 @@ p {
   top: 0;
   z-index: 30;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 10px 24px;
   padding: 12px clamp(16px, 3vw, 32px);
   background: var(--bg);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -298,6 +305,30 @@ p {
   pointer-events: none;
 }
 
+.search-help-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.search-help-button:hover,
+.search-help-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .sort-field {
   display: flex;
   flex: none;
@@ -400,10 +431,11 @@ p {
 
 .error-banner {
   display: flex;
+  flex-basis: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 14px clamp(16px, 3vw, 32px) 0;
+  margin: 0;
   padding: 11px 14px;
   background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
@@ -1061,6 +1093,136 @@ button.chip:hover {
   backdrop-filter: blur(4px);
 }
 
+.search-help-dialog {
+  width: min(600px, calc(100vw - 28px));
+  max-height: min(86vh, 820px);
+  margin: auto;
+  padding: 0;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  color: var(--text);
+  box-shadow: 0 30px 90px rgb(0 0 0 / 40%);
+}
+
+.search-help-dialog::backdrop {
+  background: rgb(10 10 14 / 55%);
+  backdrop-filter: blur(4px);
+}
+
+.search-help {
+  padding: 24px;
+}
+
+.search-help-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.search-help-header h2 {
+  font-size: 1.2rem;
+  letter-spacing: -0.01em;
+}
+
+.search-help-intro {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.search-help h3 {
+  margin: 20px 0 8px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.search-help-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 14px;
+  margin-top: 18px;
+  font-size: 0.84rem;
+}
+
+.search-help-fields dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.search-help-fields code,
+.search-help-list code,
+.search-help-note code,
+.syntax-example code {
+  padding: 1px 4px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8em;
+}
+
+.search-help-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.search-help-list li + li {
+  margin-top: 4px;
+}
+
+.search-help-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.syntax-example {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.syntax-example:hover,
+.syntax-example:focus-visible {
+  border-color: var(--accent);
+}
+
+.syntax-example code {
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.syntax-example span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.search-help-note {
+  margin-top: 18px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;
@@ -1339,6 +1501,24 @@ h4.disc-heading {
   font-size: 0.76rem;
 }
 
+.track-composer {
+  margin-top: 2px;
+  font-style: italic;
+}
+
+.track-role {
+  margin-right: 5px;
+  font-size: 0.63rem;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.track-composer-name {
+  overflow-wrap: anywhere;
+}
+
 .track-format {
   color: var(--text-muted);
   font-size: 0.72rem;
@@ -1427,10 +1607,6 @@ h4.disc-heading {
     display: none;
   }
 
-  .error-banner {
-    margin: 10px 16px 0;
-  }
-
   .dialog-header {
     grid-template-columns: 72px minmax(0, 1fr) auto;
     gap: 14px;
@@ -1456,6 +1632,23 @@ h4.disc-heading {
 
   .dialog-body {
     padding: 6px 14px 18px;
+  }
+
+  .search-help {
+    padding: 18px;
+  }
+
+  .search-help-fields {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .search-help-fields dt {
+    margin-top: 8px;
+  }
+
+  .search-help-fields dd {
+    margin-bottom: 2px;
   }
 }
 

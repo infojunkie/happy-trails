@@ -6,7 +6,7 @@ replaces the previous JavaScript arrays and `Map`s; query logic now lives in
 SQL. The API keeps its existing fields and adds a separate `regions` facet and
 album field.
 
-The implementation is in [`src/server/sqliteIndex.ts`](../src/server/sqliteIndex.ts);
+The implementation is in [`src/server/sqlite.ts`](../src/server/sqlite.ts);
 normalisation and album keys are in [`src/server/search.ts`](../src/server/search.ts);
 country/region detection is in [`src/server/regions.ts`](../src/server/regions.ts).
 
@@ -24,6 +24,11 @@ CREATE TABLE albums (
   latest      TEXT,                   -- MAX(music.date), ISO-like text
   cover_path  TEXT,                   -- representative file path
   search_text TEXT NOT NULL,          -- folded album + artist + sources + guests
+  search_album TEXT NOT NULL,         -- folded album title + source titles
+  search_artist TEXT NOT NULL,        -- folded album, parsed, and track artists
+  search_source TEXT NOT NULL,        -- folded raw source titles
+  search_track_artist TEXT NOT NULL,  -- folded track-level artists
+  search_composer TEXT NOT NULL,      -- folded composer tags
   album_rank  INTEGER NOT NULL,       -- Intl.Collator rank for album
   artist_rank INTEGER NOT NULL,       -- Intl.Collator rank for artist
   key_rank    INTEGER NOT NULL        -- Intl.Collator rank for key
@@ -72,6 +77,11 @@ CREATE TABLE album_regions (
 
 CREATE VIRTUAL TABLE album_search USING fts5(
   search_text,
+  search_album,
+  search_artist,
+  search_source,
+  search_track_artist,
+  search_composer,
   content = 'albums',
   content_rowid = 'id',
   tokenize = 'trigram'
@@ -79,30 +89,44 @@ CREATE VIRTUAL TABLE album_search USING fts5(
 ```
 
 `album_search` is an external-content FTS5 table: the text is stored once in
-`albums.search_text`, and FTS5 maintains the inverted index. Triggers are
+the `albums` columns, and FTS5 maintains the inverted index. Triggers are
 created after the bulk load and `album_search` is populated with a single
 `'rebuild'` command, which is substantially faster than indexing row by row.
+
+The separate folded columns are what make fielded search possible. `album`
+includes the merged title and all raw source titles; `source` contains only the
+raw titles; `artist` combines the effective album artist, parsed artists, and
+track-level artists; `trackartist` contains only the track-level names;
+`composer` contains the distinct composer tag values from the tracks. The
+field names are parsed in [`src/server/searchQuery.ts`](../src/server/searchQuery.ts).
 
 ## Why trigram?
 
 The old search used `entry.search.includes(token)`, i.e. an arbitrary substring
 match. FTS5's default `unicode61` tokenizer supports words and prefixes, not
 substrings. The `trigram` tokenizer indexes every three-character sequence, so
-a quoted phrase is a substring query and preserves the existing behaviour:
+a quoted phrase is a substring query.
+
+Each query term becomes either an FTS phrase or, for phrases shorter than three
+characters, an `instr()` check on the relevant folded column. FTS phrases are
+wrapped in materialized CTEs so the trigram index is used once per term rather
+than once per album:
 
 ```sql
--- every >= 3 character token must appear somewhere in the folded text
-JOIN album_search ON album_search.rowid = a.id
-WHERE album_search MATCH ?   -- e.g. '"abbey" "road"'
+WITH search_term_0 AS MATERIALIZED (
+  SELECT rowid FROM album_search WHERE album_search MATCH ?
+)
+SELECT ...
+  FROM albums a
+ WHERE EXISTS (
+   SELECT 1 FROM search_term_0 WHERE search_term_0.rowid = a.id
+ )
 ```
 
-The query builder emits one quoted phrase per token. Adjacent phrases in an
-FTS5 `MATCH` are an implicit AND. Tokens shorter than three characters cannot be
-represented by trigrams, so they use an exact scan of the folded column:
-
-```sql
-WHERE instr(a.search_text, ?) > 0
-```
+The match string includes a field column, for example
+`search_album : "abbey road"`. Short phrases use
+`instr(a.search_album, ?) > 0`. Boolean `AND`/`OR`/parentheses are composed at
+the SQL level from these leaves.
 
 Both paths use the same `foldSearch()` output that was written to the index:
 NFKD, combining-mark removal, lowercasing, and explicit mappings for Latin
@@ -113,19 +137,27 @@ letters that NFKD leaves alone (`ø`, `æ`, `œ`, `ß`, `ł`, …).
 The queries below implement the album listing, search, facet, and match-mode
 logic.
 
-### Free-text album/artist search
+### Free-text and fielded search
 
 ```sql
+WITH search_term_0 AS MATERIALIZED (
+  SELECT rowid FROM album_search WHERE album_search MATCH ?
+)
 SELECT a.key, a.album, a.artist, a.year, a.track_count, a.duration, a.latest
   FROM albums a
-  JOIN album_search ON album_search.rowid = a.id
- WHERE album_search MATCH ?          -- '"one" "two"'
+ WHERE EXISTS (
+         SELECT 1 FROM search_term_0 WHERE search_term_0.rowid = a.id
+       )
  ORDER BY a.latest DESC, a.album_rank, a.artist_rank
  LIMIT ? OFFSET ?;
 ```
 
 `search_text` contains the merged album title, the effective album artist, all
-parsed artists, every raw source title, and every distinct track-level artist.
+parsed artists, every raw source title, every distinct track-level artist, and
+every distinct composer tag.
+Fielded terms target `search_album`, `search_artist`, `search_source`,
+`search_track_artist`, or `search_composer` instead. Bare terms target
+`search_text`, which also includes composer tags.
 
 ### Genre filter
 
@@ -241,11 +273,11 @@ SELECT cover_path FROM albums WHERE key = ?;
 
 `SqliteIndex.build()` performs the same row parsing as before (merging
 ` // …` titles, splitting tags, classifying country/region tags, parsing
-artists), then:
+artists, collecting composer tags), then:
 
 1. Creates a fresh `:memory:` database and schema.
-2. Inserts genres, albums, parsed artists, source titles, and album genres in
-   one transaction, yielding to the event loop between chunks.
+2. Inserts genres, regions, albums, parsed artists, source titles, and both tag
+   mappings in one transaction, yielding to the event loop between chunks.
 3. Calculates ranks and stores build metadata.
 4. Creates the FTS triggers and rebuilds `album_search`.
 5. Returns the database; `Library` swaps it in and closes the previous one.
@@ -264,10 +296,13 @@ reported through `/api/status`.
   triggers are already in place for row-level updates.
 - The whole build runs in the main thread. Moving it to a worker thread (or
   streaming PostgreSQL rows and inserting directly) would reduce the build
-  peak; the current 33k-album dataset settles around 300 MB RSS, including the
-  47 MB SQLite database.
-- Only `album_search` is indexed. Fielded search (`album:"…"` vs
-  `artist:"…"`) would use separate FTS columns or additional virtual tables.
+  peak; the current 33k-album dataset settles around 370 MB RSS, including the
+  84 MB SQLite database.
+- Search covers album titles, source titles, and artist names. Track titles are
+  not in the index yet; a future `tracks` FTS table would add `track:` as a
+  field.
+- The expression parser supports `AND`, `OR`, implicit AND, parentheses, and
+  quoted phrases. `NOT`/negation is not implemented.
 - Region detection is exact-tag only. A future pass could split compound tags
   (`Jazz/Brazil`, `Classical+Spain`) and classify the location component, and
   could canonicalize multilingual country spellings into one facet.

@@ -16,6 +16,12 @@ import {
   normalizeAlbumName,
   searchTokens,
 } from './search.js';
+import {
+  parseSearchQuery,
+  SEARCH_FIELD_COLUMNS,
+  type SearchNode,
+  type SearchTermNode,
+} from './searchQuery.js';
 
 export interface AlbumsQuery {
   genres: string[];
@@ -54,6 +60,11 @@ const SCHEMA_SQL = `
     latest      TEXT,
     cover_path  TEXT,
     search_text TEXT NOT NULL,
+    search_album TEXT NOT NULL,
+    search_artist TEXT NOT NULL,
+    search_source TEXT NOT NULL,
+    search_track_artist TEXT NOT NULL,
+    search_composer TEXT NOT NULL,
     album_rank  INTEGER NOT NULL,
     artist_rank INTEGER NOT NULL,
     key_rank    INTEGER NOT NULL
@@ -123,6 +134,11 @@ const SCHEMA_SQL = `
   -- whole words or prefixes. Search text is already folded by foldSearch().
   CREATE VIRTUAL TABLE album_search USING fts5(
     search_text,
+    search_album,
+    search_artist,
+    search_source,
+    search_track_artist,
+    search_composer,
     content = 'albums',
     content_rowid = 'id',
     tokenize = 'trigram'
@@ -135,20 +151,43 @@ const SCHEMA_SQL = `
  */
 const TRIGGER_SQL = `
   CREATE TRIGGER albums_ai AFTER INSERT ON albums BEGIN
-    INSERT INTO album_search(rowid, search_text)
-      VALUES (new.id, new.search_text);
+    INSERT INTO album_search(
+      rowid, search_text, search_album, search_artist,
+      search_source, search_track_artist, search_composer
+    ) VALUES (
+      new.id, new.search_text, new.search_album, new.search_artist,
+      new.search_source, new.search_track_artist, new.search_composer
+    );
   END;
 
   CREATE TRIGGER albums_ad AFTER DELETE ON albums BEGIN
-    INSERT INTO album_search(album_search, rowid, search_text)
-      VALUES ('delete', old.id, old.search_text);
+    INSERT INTO album_search(
+      album_search, rowid, search_text, search_album, search_artist,
+      search_source, search_track_artist, search_composer
+    ) VALUES (
+      'delete', old.id, old.search_text, old.search_album, old.search_artist,
+      old.search_source, old.search_track_artist, old.search_composer
+    );
   END;
 
-  CREATE TRIGGER albums_au AFTER UPDATE OF search_text ON albums BEGIN
-    INSERT INTO album_search(album_search, rowid, search_text)
-      VALUES ('delete', old.id, old.search_text);
-    INSERT INTO album_search(rowid, search_text)
-      VALUES (new.id, new.search_text);
+  CREATE TRIGGER albums_au AFTER UPDATE OF
+    search_text, search_album, search_artist,
+    search_source, search_track_artist, search_composer
+  ON albums BEGIN
+    INSERT INTO album_search(
+      album_search, rowid, search_text, search_album, search_artist,
+      search_source, search_track_artist, search_composer
+    ) VALUES (
+      'delete', old.id, old.search_text, old.search_album, old.search_artist,
+      old.search_source, old.search_track_artist, old.search_composer
+    );
+    INSERT INTO album_search(
+      rowid, search_text, search_album, search_artist,
+      search_source, search_track_artist, search_composer
+    ) VALUES (
+      new.id, new.search_text, new.search_album, new.search_artist,
+      new.search_source, new.search_track_artist, new.search_composer
+    );
   END;
 `;
 
@@ -169,6 +208,7 @@ interface AlbumAccumulator {
   sourceAlbums: Set<string>;
   sourcePaths: Map<string, string>;
   trackArtists: Set<string>;
+  composers: Set<string>;
   genreKeys: Set<string>;
   regionKeys: Set<string>;
   year: number | null;
@@ -252,6 +292,23 @@ function ftsPhrase(token: string): string {
  */
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
+/** Pre-syntax behavior: every whitespace-separated token, all fields, ANDed. */
+function legacySearchNode(input: string): SearchNode | null {
+  let node: SearchNode | null = null;
+  for (const token of searchTokens(input)) {
+    const term: SearchNode = {
+      kind: 'term',
+      field: 'all',
+      value: token,
+      quoted: false,
+    };
+    node = node
+      ? { kind: 'and', left: node, right: term }
+      : term;
+  }
+  return node;
+}
+
 async function accumulateAlbums(
   rows: AlbumRow[],
 ): Promise<{
@@ -283,6 +340,7 @@ async function accumulateAlbums(
         sourceAlbums: new Set(),
         sourcePaths: new Map(),
         trackArtists: new Set(),
+        composers: new Set(),
         genreKeys: new Set(),
         regionKeys: new Set(),
         year: null,
@@ -298,6 +356,10 @@ async function accumulateAlbums(
     for (const trackArtist of row.track_artists ?? []) {
       const name = trackArtist.trim();
       if (name) acc.trackArtists.add(name);
+    }
+    for (const composer of row.composers ?? []) {
+      const name = composer.trim();
+      if (name) acc.composers.add(name);
     }
     acc.trackCount += row.track_count;
     acc.duration += row.duration;
@@ -400,8 +462,10 @@ export class SqliteIndex {
       const insertAlbum = db.prepare(`
         INSERT INTO albums(
           key, album, artist, year, track_count, duration, latest, cover_path,
-          search_text, album_rank, artist_rank, key_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          search_text, search_album, search_artist, search_source,
+          search_track_artist, search_composer, album_rank, artist_rank,
+          key_rank
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertAlbumArtist = db.prepare(
         'INSERT INTO album_artists(album_id, position, artist) VALUES (?, ?, ?)',
@@ -436,16 +500,28 @@ export class SqliteIndex {
           acc.sourcePaths.get(acc.album) ??
           (sourceAlbums[0] ? acc.sourcePaths.get(sourceAlbums[0]) : undefined) ??
           null;
-        // Include source titles and track artists so labels and guests match.
+        const trackArtists = [...acc.trackArtists];
+        const composers = [...acc.composers];
+        // Include source titles, track artists, and composer tags.
         const searchText = foldSearch(
           [
             acc.album,
             acc.artist,
             ...displayArtists,
             ...sourceAlbums,
-            ...acc.trackArtists,
+            ...trackArtists,
+            ...composers,
           ].join(' '),
         );
+        const searchAlbum = foldSearch(
+          [acc.album, ...sourceAlbums].join(' '),
+        );
+        const searchArtist = foldSearch(
+          [acc.artist, ...displayArtists, ...trackArtists].join(' '),
+        );
+        const searchSource = foldSearch(sourceAlbums.join(' '));
+        const searchTrackArtist = foldSearch(trackArtists.join(' '));
+        const searchComposer = foldSearch(composers.join(' '));
         const genreKeys = [...acc.genreKeys];
         const regionKeys = [...acc.regionKeys];
 
@@ -459,6 +535,11 @@ export class SqliteIndex {
           acc.latest,
           coverPath,
           searchText,
+          searchAlbum,
+          searchArtist,
+          searchSource,
+          searchTrackArtist,
+          searchComposer,
           albumRanks.get(acc.album) ?? 0,
           artistRanks.get(acc.artist) ?? 0,
           keyRanks.get(key) ?? 0,
@@ -500,12 +581,12 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(totalTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '2');
+      insertMeta.run('schema_version', '4');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 2');
+      db.exec('PRAGMA user_version = 4');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -576,7 +657,6 @@ export class SqliteIndex {
   }
 
   queryAlbums(query: AlbumsQuery): AlbumsResult {
-    const joins: string[] = [];
     const where: string[] = [];
     const params: Array<string | number> = [];
 
@@ -626,41 +706,66 @@ export class SqliteIndex {
       }
     }
 
-    const ftsPhrases: string[] = [];
-    for (const token of searchTokens(query.q)) {
-      if (CONTROL_CHARS.test(token)) {
-        where.push('0');
-      } else if ([...token].length >= 3) {
-        ftsPhrases.push(ftsPhrase(token));
-      } else {
-        // Trigram indexes only phrases of three or more characters; shorter
-        // tokens fall back to an exact substring scan of the folded text.
-        where.push('instr(a.search_text, ?) > 0');
-        params.push(token);
-      }
-    }
-    if (ftsPhrases.length > 0) {
-      // Join against the FTS table once and let the trigram index find
-      // candidates. One MATCH query with adjacent phrases is an implicit AND,
-      // which is exactly the old "every token is a substring" rule.
-      joins.push('JOIN album_search ON album_search.rowid = a.id');
-      where.push('album_search MATCH ?');
-      params.push(ftsPhrases.join(' '));
+    const trimmedQuery = query.q.trim();
+    let searchAst = trimmedQuery ? parseSearchQuery(query.q) : null;
+    if (!searchAst && trimmedQuery) {
+      // Preserve the pre-syntax behavior for incomplete or malformed input.
+      searchAst = legacySearchNode(trimmedQuery);
     }
 
-    const joinSql = joins.length > 0 ? joins.join(' ') : '';
+    const ctes: string[] = [];
+    const cteParams: string[] = [];
+
+    const termSql = (term: SearchTermNode): string => {
+      const phrase = foldSearch(term.value).trim();
+      if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
+
+      const column = SEARCH_FIELD_COLUMNS[term.field];
+      if ([...phrase].length >= 3) {
+        const name = `search_term_${ctes.length}`;
+        ctes.push(
+          `${name} AS MATERIALIZED (
+             SELECT rowid FROM album_search
+              WHERE album_search MATCH ?
+           )`,
+        );
+        cteParams.push(`${column} : ${ftsPhrase(phrase)}`);
+        return `EXISTS (SELECT 1 FROM ${name} WHERE ${name}.rowid = a.id)`;
+      }
+
+      // Trigram indexes only phrases of three or more characters; shorter
+      // phrases fall back to an exact substring scan of the folded column.
+      params.push(phrase);
+      return `instr(a.${column}, ?) > 0`;
+    };
+
+    const nodeSql = (node: SearchNode): string => {
+      switch (node.kind) {
+        case 'term':
+          return termSql(node);
+        case 'and':
+          return `(${nodeSql(node.left)} AND ${nodeSql(node.right)})`;
+        case 'or':
+          return `(${nodeSql(node.left)} OR ${nodeSql(node.right)})`;
+      }
+    };
+
+    if (searchAst) where.push(nodeSql(searchAst));
+
+    const withSql = ctes.length > 0 ? `WITH ${ctes.join(', ')} ` : '';
     const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const boundParams: Array<string | number> = [...cteParams, ...params];
 
     const countRow = this.db
       .prepare(
-        `SELECT COUNT(*) AS total FROM albums a ${joinSql} ${whereSql}`,
+        `${withSql}SELECT COUNT(*) AS total FROM albums a ${whereSql}`,
       )
-      .get(...params);
+      .get(...boundParams);
     const total = Number(countRow?.total ?? 0);
 
     const rows = this.db
       .prepare(
-        `SELECT
+        `${withSql}SELECT
            a.key, a.album, a.artist, a.year, a.track_count, a.duration,
            a.latest,
            (SELECT json_group_array(artist) FROM (
@@ -684,12 +789,11 @@ export class SqliteIndex {
                ORDER BY ar.position
             )) AS regions
          FROM albums a
-         ${joinSql}
          ${whereSql}
          ORDER BY ${ORDER_BY[query.sort]}
          LIMIT ? OFFSET ?`,
       )
-      .all(...params, query.limit, query.offset) as unknown as DbAlbumRow[];
+      .all(...boundParams, query.limit, query.offset) as unknown as DbAlbumRow[];
 
     const albums: AlbumSummary[] = rows.map((row) => ({
       key: row.key,

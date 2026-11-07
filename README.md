@@ -28,6 +28,11 @@ facets built from the comma-separated `genre` column.
 - Free-text album/artist search with case-, accent-, and ligature-insensitive
   matching (`Soren` finds `Søren`, `caetera` finds `cætera`, `Bjork` finds
   `Björk`). Track-level artists are searchable too.
+- Fielded search syntax: `album:"abbey road" artist:beatles`,
+  `composer:jobim`, `source:"Bonus Tracks"`, `trackartist:"guest"`, combined
+  with `AND`, `OR`, implicit AND, and parentheses. Quoted values are matched as
+  contiguous phrases; bare terms search all fields as before. The `?` button
+  beside the search bar opens a syntax help popup with clickable examples.
 - Album and artist names are search shortcuts in cards and in the album dialog;
   genre tags activate the genre facet and region tags activate the region
   facet everywhere. Name links clear both filters, while tag chips keep the
@@ -42,8 +47,10 @@ facets built from the comma-separated `genre` column.
   never triggers a rebuild itself.
 - Additional sort orders: artist A–Z, album A–Z, and release year.
 - Album dialog with the full track list, duration, sample rate, and bitrate.
-  Merged multi-CD albums group tracks under their original disc labels, since
-  disc numbers frequently collide across the source titles.
+  Composer tags appear as a separate italic **Composer** line when they differ
+  from the track and album artists; each composer name is a link that runs a
+  top-level search. Merged multi-CD albums group tracks under their original
+  disc labels, since disc numbers frequently collide across the source titles.
 - Album artwork from Synology AudioStation, proxied and cached by the server.
   Albums without artwork keep the generated gradient/initials cover.
 - Sign in with your own Synology account, then **Play** hands an album to
@@ -205,9 +212,10 @@ tag is a country/region name. Album titles are normalised by stripping a
 whitespace-separated ` // ...` suffix; rows that end up with the same title and
 artist are merged: track counts and durations are summed, the newest upload
 date wins, and tags are unioned. Parsed artists and the original raw titles are
-kept in `album_artists` and `album_sources`. The original raw titles and all
-track-level artists are folded into the FTS search text, so labels such as
-"The Vanilla Tapes" and guest artists still match. See
+kept in `album_artists` and `album_sources`. The original raw titles, all
+track-level artists, and composer tags are folded into the FTS search text, so
+labels such as "The Vanilla Tapes", guest artists, and composers still match.
+See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
 
@@ -226,8 +234,15 @@ marks, and maps Latin letters that NFKD leaves intact (`ø`→`o`, `æ`→`ae`,
 others). The folded text is stored in `albums.search_text`, and queries are
 folded with the same function, so accented and unaccented searches match in
 either direction. `album_search` is an FTS5 table using the `trigram`
-tokenizer, which preserves the old substring semantics; tokens shorter than
-three characters fall back to an exact `instr()` scan.
+tokenizer, which preserves substring semantics; phrases shorter than three
+characters fall back to an exact `instr()` scan.
+
+The search expression parser supports bare terms, `album:`, `artist:`,
+`composer:`, `source:`, and `trackartist:` fields, quoted phrases,
+implicit/explicit `AND`, `OR`, and parentheses. Field terms target dedicated
+folded columns; each FTS term is evaluated once in a materialized CTE so `OR`
+expressions do not rescan the FTS index per album. Composer values come from
+the track-level `composer` column populated from FLAC/ID3 tags.
 
 Artist parsing applies to the effective album artist and to each track artist.
 A punctuation run is a separator only when whitespace surrounds it, so
@@ -289,11 +304,13 @@ searches in a few milliseconds.
 
 Track lists are **not** cached: opening an album issues a parameterized,
 index-backed query against `music` for every raw title merged into it, and
-returns the current rows. The response carries each track's original title, so
-the dialog can group merged CDs under their labels (`Main album`,
-`The Vanilla Tapes`, `CD02 …`) instead of relying on disc numbers that often
-repeat across the sources. The client caches responses for the lifetime of the
-page.
+returns the current rows. The response carries each track's original title,
+composer tag, and source title, so the dialog can group merged CDs under their
+labels (`Main album`, `The Vanilla Tapes`, `CD02 …`) instead of relying on disc
+numbers that often repeat across the sources. Composer tags are surfaced under
+the track artist only when they add information (they are suppressed when
+equal to the track or album artist), and each parsed composer name links to a
+top-level search. The client caches responses for the lifetime of the page.
 
 Covers are fetched through the server; the optional cover service account is
 never exposed to the browser. Each merged album keeps a representative file path (preferring the
@@ -413,7 +430,7 @@ identifies the snapshot the counts came from.
 | `genreMode` | `any` (default) or `all`; controls whether an album must contain any or all selected genres. |
 | `region` | Repeatable or comma-separated. Matches albums containing any selected country/region tag. Combined with `genre` using AND. |
 | `regionMode` | `any` (default) or `all`; controls whether an album must contain any or all selected regions. |
-| `q` | Album, album-artist, and track-artist search (accent- and ligature-insensitive), up to 200 characters. |
+| `q` | Search expression, up to 200 characters. Supports bare terms and `album:`, `artist:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
 | `limit` | Default `48`, maximum `200`. |
@@ -447,12 +464,46 @@ listing; compare it with `/api/status` before deciding to reload.
 `duration` is in seconds. `key` is an opaque base64url value identifying the
 `(album, artist)` pair.
 
+#### Search syntax
+
+The `q` parameter accepts `field:value` terms. A bare term searches all fields.
+Values containing spaces or parentheses must be quoted; a quoted value is
+matched as a contiguous phrase rather than as separate words.
+
+| Field | Matches |
+| --- | --- |
+| `album` | Merged album title and all raw source titles. |
+| `artist` | Effective album artist, parsed artists, and track-level artists. |
+| `composer` | Composer tag values from the FLAC/ID3 metadata (`composers` is an alias). |
+| `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). |
+| `trackartist` | Track-level artists only (`guest`, `track_artist`, and `track-artist` are aliases). |
+| `all` / `any` | All indexed fields, equivalent to a bare term. |
+
+Operators are case-insensitive. Adjacent terms are implicitly ANDed; `AND`
+binds more tightly than `OR`; parentheses group expressions. Matching is
+case-, accent-, and ligature-insensitive, including quoted phrases.
+
+```text
+album:"abbey road"
+artist:beatles OR artist:stones
+composer:"Antonio Carlos Jobim"
+(album:road OR album:street) artist:beatles
+source:"Vanilla Tapes"
+trackartist:"Ferenc Snétberger"
+```
+
+Unknown field names are treated as ordinary text, so titles containing colons
+still work. An incomplete or malformed expression falls back to the previous
+all-field token search. `NOT`/negation is not supported.
+
 ### `GET /api/albums/:key/tracks`
 
 Returns the tracks of every raw album title merged into the album, ordered by
 disc, track number, and title. `sourceAlbums` lists the raw titles in display
-order, and each track's `sourceAlbum` identifies the title it came from. `key`
-is the value from the album listing.
+order, each track's `sourceAlbum` identifies the title it came from,
+`composer` is the nullable track-level composer tag, and `composers` contains
+the individual names parsed from it. `key` is the value from the album
+listing.
 
 ```json
 {
@@ -466,6 +517,8 @@ is the value from the album listing.
       "artist": "Arat Kilo",
       "artists": ["Arat Kilo"],
       "albumArtist": "Arat Kilo",
+      "composer": null,
+      "composers": [],
       "sourceAlbum": "Danama",
       "genre": "Jazz, Funk, Ethiopia, France",
       "year": 2025,
@@ -533,7 +586,8 @@ happy-trails/
 │   │   ├── playback.ts   Album-to-Audio-Station handoff
 │   │   ├── regions.ts    Country/region tag detection
 │   │   ├── search.ts     Folding, album keys, and title normalisation
-│   │   ├── sqliteIndex.ts  SQLite schema, bulk load, and query layer
+│   │   ├── searchQuery.ts  Fielded search expression parser
+│   │   ├── sqlite.ts     SQLite schema, bulk load, and query layer
 │   │   └── userSessions.ts  Per-browser DSM sign-in sessions
 │   ├── client/
 │   │   ├── api.ts        API client
@@ -554,7 +608,7 @@ happy-trails/
 
 - The app only issues `SELECT` queries.
 - The in-memory SQLite index for the current dataset takes roughly 6–8 seconds
-  to build and settles around 300 MB of RSS (about 47 MB is the SQLite
+  to build and settles around 370 MB of RSS (about 84 MB is the SQLite
   database; the rest includes the build's transient parsing structures and the
   cover cache). The change check runs every `LIBRARY_CHECK_MS` (default 60s)
   but only performs the full rebuild when the fingerprint changes.

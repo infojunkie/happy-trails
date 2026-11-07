@@ -145,3 +145,28 @@ export function parseArtists(value: string | null | undefined): string[] {
 
   return names;
 }
+
+/**
+ * Split a composer tag into individual names. It reuses artist rules, then
+ * additionally splits semicolons and slashes, including without surrounding
+ * whitespace (for example "jacques dutronc/jacques lanzmann").
+ */
+export function parseComposers(
+  value: string | null | undefined,
+): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+
+  for (const part of parseArtists(value)) {
+    for (const piece of part.split(/\s*[;/]\s*/u)) {
+      const name = piece.replace(/\s+/g, ' ').trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      names.push(name);
+    }
+  }
+
+  return names;
+}

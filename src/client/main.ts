@@ -122,6 +122,9 @@ const loginPassword = $<HTMLInputElement>('#login-password');
 const loginError = $('#login-error');
 const loginSubmit = $<HTMLButtonElement>('#login-submit');
 const loginCancel = $<HTMLButtonElement>('#login-cancel');
+const searchHelpButton = $<HTMLButtonElement>('#search-help-button');
+const searchHelpDialog = $<HTMLDialogElement>('#search-help-dialog');
+const searchHelpClose = $<HTMLButtonElement>('#search-help-close');
 
 const trackCache = new Map<string, TracksResponse>();
 let requestSequence = 0;
@@ -1157,7 +1160,7 @@ function renderActiveFilters(): void {
           'aria-label': 'Clear search',
           title: 'Clear search',
         },
-        el('span', { text: `“${state.q}”` }),
+        el('span', { text: `${state.q}` }),
         el('span', { class: 'chip-x', 'aria-hidden': 'true', text: '×' }),
       ),
     );
@@ -1426,6 +1429,10 @@ function renderTrackGroups(response: TracksResponse): HTMLElement {
   return container;
 }
 
+function normalizedMetadata(value: string | null | undefined): string {
+  return (value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 function renderTrackRow(track: Track): HTMLElement {
   const main = el(
     'div',
@@ -1439,6 +1446,40 @@ function renderTrackRow(track: Track): HTMLElement {
         'span',
         { class: 'track-sub' },
         ...artistNodes(track.artists, track.artist),
+      ),
+    );
+  }
+
+  const composer = track.composer?.trim();
+  if (
+    composer &&
+    normalizedMetadata(composer) !== normalizedMetadata(track.artist) &&
+    normalizedMetadata(composer) !== normalizedMetadata(track.albumArtist)
+  ) {
+    const segments = artistSegments(composer, track.composers);
+    const composerNodes: Array<Node | string> = segments
+      ? segments.map((segment) =>
+          segment.name
+            ? createSearchButton(
+                segment.name,
+                'composer-link link-inline',
+                segment.text,
+              )
+            : segment.text,
+        )
+      : [createSearchButton(composer, 'composer-link link-inline')];
+
+    main.append(
+      el(
+        'span',
+        { class: 'track-sub track-composer' },
+        el('span', { class: 'track-role', text: 'Composer' }),
+        ' ',
+        el(
+          'span',
+          { class: 'track-composer-name', title: composer },
+          ...composerNodes,
+        ),
       ),
     );
   }
@@ -1673,6 +1714,24 @@ function bindEvents(): void {
       state.loginRequestedFromUrl = false;
       syncUrl();
     }
+  });
+
+  searchHelpButton.addEventListener('click', () => {
+    if (!searchHelpDialog.open) searchHelpDialog.showModal();
+  });
+  searchHelpClose.addEventListener('click', () => searchHelpDialog.close());
+  searchHelpDialog.addEventListener('click', (event) => {
+    const target = event.target;
+    if (target === searchHelpDialog) {
+      searchHelpDialog.close();
+      return;
+    }
+    if (!(target instanceof Element)) return;
+    const example = target.closest<HTMLElement>('[data-search-example]');
+    const query = example?.dataset.searchExample;
+    if (!query) return;
+    searchHelpDialog.close();
+    navigateToSearch(query);
   });
 
   document.addEventListener('click', (event) => {

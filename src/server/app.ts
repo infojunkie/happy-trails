@@ -14,7 +14,7 @@ import {
   type SessionResponse,
   type TracksResponse,
 } from '../shared/types.js';
-import { parseArtists } from './artists.js';
+import { parseArtists, parseComposers } from './artists.js';
 import { config } from './config.js';
 import { covers } from './covers.js';
 import { loadTracks } from './db.js';
@@ -344,6 +344,8 @@ app.get('/api/albums/:key/tracks', async (req, res) => {
       artist: row.artist,
       artists: parseArtists(row.artist),
       albumArtist: row.album_artist,
+      composer: row.composer,
+      composers: parseComposers(row.composer),
       sourceAlbum: row.source_album ?? '(Unknown Album)',
       genre: row.genre,
       year: row.year,

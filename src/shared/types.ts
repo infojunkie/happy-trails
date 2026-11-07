@@ -54,6 +54,10 @@ export interface Track {
   /** Individual artists parsed from `artist`. */
   artists: string[];
   albumArtist: string;
+  /** Composer tag from the file metadata, if present. */
+  composer: string | null;
+  /** Individual composer names parsed from `composer`. */
+  composers: string[];
   /** Raw album title this track came from, including a " // <disc label>" suffix. */
   sourceAlbum: string;
   genre: string | null;
