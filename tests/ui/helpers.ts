@@ -24,8 +24,8 @@ export async function apiAlbums(
 export async function summaryTotal(page: Page): Promise<number> {
   const text = await page.locator('#result-summary').innerText();
   const match = /^([\d,]+)/.exec(text);
-  if (!match?.[1]) throw new Error(`Could not parse result summary: ${text}`);
-  return Number(match[1].replaceAll(',', ''));
+  // A transient "Loading…" summary should make expect.poll retry, not fail.
+  return match?.[1] ? Number(match[1].replaceAll(',', '')) : Number.NaN;
 }
 
 export async function expectSummaryFor(
@@ -33,6 +33,8 @@ export async function expectSummaryFor(
   params: Record<string, QueryValue> = {},
 ): Promise<AlbumsResponse> {
   const api = await apiAlbums(page, params);
-  await expect.poll(() => summaryTotal(page)).toBe(api.total);
+  await expect
+    .poll(() => summaryTotal(page), { timeout: 15_000 })
+    .toBe(api.total);
   return api;
 }
