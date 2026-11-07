@@ -10,6 +10,7 @@ permissions:
 jobs:
   lint-typecheck-test:
     name: Lint, typecheck, and test
+    if: "! contains(toJSON(github.event.commits.*.message), '[skip-ci]')"
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
