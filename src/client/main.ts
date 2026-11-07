@@ -10,7 +10,7 @@ import {
   type Track,
   type TracksResponse,
 } from '../shared/types.js';
-import { regionKey } from '../shared/text.js';
+import { artistSegments, regionKey } from '../shared/text.js';
 import { api } from './api.js';
 import { $, el } from './dom.js';
 import {
@@ -723,11 +723,24 @@ function createSearchButton(
 
 function artistNodes(
   artists: string[],
-  fallback: string,
+  original: string | null | undefined,
 ): Array<Node | string> {
-  const names = artists.length > 0 ? artists : fallback ? [fallback] : [];
-  const nodes: Array<Node | string> = [];
+  const segments = artistSegments(original, artists);
+  if (segments) {
+    return segments.map((segment) =>
+      segment.name
+        ? createSearchButton(
+            segment.name,
+            'artist-link link-inline',
+            segment.text,
+          )
+        : segment.text,
+    );
+  }
 
+  // Fallback for malformed or missing original text: keep the old joined form.
+  const names = artists.length > 0 ? artists : original ? [original] : [];
+  const nodes: Array<Node | string> = [];
   names.forEach((name, index) => {
     if (index > 0) {
       nodes.push(
@@ -740,7 +753,6 @@ function artistNodes(
     }
     nodes.push(createSearchButton(name, 'artist-link link-inline'));
   });
-
   return nodes;
 }
 

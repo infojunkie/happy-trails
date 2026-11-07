@@ -53,3 +53,63 @@ export function regionKey(name: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+/** A piece of an artist display string; `name` marks a searchable artist. */
+export interface ArtistSegment {
+  text: string;
+  name: string | null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findArtistPart(
+  source: string,
+  name: string,
+  from: number,
+): { start: number; end: number; text: string } | null {
+  if (!name) return null;
+  const pattern = new RegExp(
+    escapeRegExp(name).replace(/\\?\s+/g, '\\s+'),
+    'i',
+  );
+  const match = pattern.exec(source.slice(from));
+  if (!match) return null;
+  const start = from + match.index;
+  return { start, end: start + match[0].length, text: match[0] };
+}
+
+/**
+ * Split the original artist string into plain punctuation segments and
+ * searchable artist segments, preserving the source spelling and punctuation.
+ * Returns null when the parsed names cannot be located in the original text,
+ * so callers can fall back to the joined artist list.
+ */
+export function artistSegments(
+  original: string | null | undefined,
+  artists: readonly string[],
+): ArtistSegment[] | null {
+  const source = (original ?? '').trim();
+  if (!source) return null;
+
+  const names = artists.length > 0 ? artists : [source];
+  const segments: ArtistSegment[] = [];
+  let cursor = 0;
+
+  for (const name of names) {
+    const match = findArtistPart(source, name, cursor);
+    if (!match) return null;
+    if (match.start > cursor) {
+      segments.push({ text: source.slice(cursor, match.start), name: null });
+    }
+    segments.push({ text: match.text, name });
+    cursor = match.end;
+  }
+
+  if (cursor < source.length) {
+    segments.push({ text: source.slice(cursor), name: null });
+  }
+
+  return segments;
+}
