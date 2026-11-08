@@ -1,5 +1,6 @@
 import express, {
   type ErrorRequestHandler,
+  type Request,
   type Response,
 } from 'express';
 import path from 'node:path';
@@ -53,7 +54,10 @@ export interface AppDependencies {
     | 'cookieOptions'
     | 'clearCookieOptions'
   >;
-  playback: Pick<typeof playback, 'audioStationUrl' | 'playAlbum'>;
+  playback: Pick<
+    typeof playback,
+    'enabled' | 'audioStationUrlFor' | 'playAlbum'
+  >;
   config: Pick<typeof config, 'defaultPageSize' | 'maxPageSize' | 'dsmUrl'>;
 }
 
@@ -65,6 +69,33 @@ const defaultDependencies: AppDependencies = {
   playback,
   config,
 };
+
+function validOrigin(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? url.origin
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The request origin used for path/port DSM_FRONTEND_URL values. Prefer the
+ * Origin header; fall back to Referer and Host because top-level navigations do
+ * not normally send Origin.
+ */
+function requestOrigin(req: Request): string | null {
+  return (
+    validOrigin(req.get('origin')) ??
+    validOrigin(req.get('referer')) ??
+    validOrigin(
+      req.get('host') ? `${req.protocol}://${req.get('host')}` : undefined,
+    )
+  );
+}
 
 function stringParam(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
@@ -399,6 +430,9 @@ export function createApp(
 
   app.get('/play/:key', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
+    const frontendTarget = dependencies.playback.audioStationUrlFor(
+      requestOrigin(req),
+    );
 
     const decoded = decodeAlbumKey(req.params.key);
     if (!decoded) {
@@ -409,7 +443,7 @@ export function createApp(
           playErrorPage(
             'Invalid album link',
             'This playback link is not valid.',
-            dependencies.playback.audioStationUrl,
+            frontendTarget,
           ),
         );
       return;
@@ -417,7 +451,7 @@ export function createApp(
 
     const session = dependencies.userSessions.get(req);
     if (!session) {
-      if (!dependencies.playback.audioStationUrl) {
+      if (!dependencies.playback.enabled || !frontendTarget) {
         res
           .status(503)
           .type('html')
@@ -437,23 +471,23 @@ export function createApp(
       return;
     }
 
+    if (!frontendTarget) {
+      res
+        .status(503)
+        .type('html')
+        .send(
+          playErrorPage(
+            'Playback unavailable',
+            'The playback target could not be resolved.',
+            null,
+          ),
+        );
+      return;
+    }
+
     try {
       await dependencies.playback.playAlbum(session.client, decoded.album, decoded.artist);
-      const target = dependencies.playback.audioStationUrl;
-      if (!target) {
-        res
-          .status(503)
-          .type('html')
-          .send(
-            playErrorPage(
-              'Playback unavailable',
-              'Synology DSM is not configured.',
-              null,
-            ),
-          );
-        return;
-      }
-      res.redirect(303, target);
+      res.redirect(303, frontendTarget);
     } catch (error) {
       console.error('[play] could not start playback:', error);
       const message = error instanceof Error ? error.message : String(error);
@@ -464,7 +498,7 @@ export function createApp(
           playErrorPage(
             'Could not start playback',
             message,
-            dependencies.playback.audioStationUrl,
+            frontendTarget,
           ),
         );
     }

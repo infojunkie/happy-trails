@@ -463,12 +463,19 @@ test('GET /play/:key handles invalid keys, sign-in, and playback handoff', async
   const abbey = await findAlbum(main.server.baseUrl, 'Abbey Road');
   const signedOut = await fetch(
     `${main.server.baseUrl}/play/${encodeURIComponent(abbey.key)}`,
-    { redirect: 'manual' },
+    {
+      redirect: 'manual',
+      headers: { Origin: 'https://app.example:8443' },
+    },
   );
   assert.equal(signedOut.status, 303);
   assert.equal(
     signedOut.headers.get('location'),
     `/?login=1&play=${encodeURIComponent(abbey.key)}`,
+  );
+  assert.equal(
+    main.context.playbackOrigins.at(-1),
+    'https://app.example:8443',
   );
 
   const login = await json<{ account: string }>(
@@ -490,6 +497,10 @@ test('GET /play/:key handles invalid keys, sign-in, and playback handoff', async
   assert.equal(
     played.headers.get('location'),
     'https://audio.example/?launchApp=SYNO.SDS.AudioStation.Application',
+  );
+  assert.match(
+    main.context.playbackOrigins.at(-1) ?? '',
+    /^http:\/\/127\.0\.0\.1:\d+$/,
   );
   assert.ok(
     main.context.playbackCalls.some(

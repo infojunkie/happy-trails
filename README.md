@@ -164,7 +164,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `MUSIC_TABLE` | `music` | Table to read. Must be a plain identifier. |
 | `TRACK_TABLE` | `track` | Table used to map a music path to an AudioStation cover id. |
 | `DSM_URL` | — | Synology DSM base URL; required for user sign-in and album covers. Falls back to `DSADDR`. |
-| `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL; used for playback button redirection. Falls back to value of `DSM_URL` / `DSADDR`. |
+| `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise `[path][:port]` is applied to the request origin (Origin header, with Referer/Host fallback): path defaults to `/`, and an omitted port preserves the origin port. Examples: `/`, `/audio`, `:5001`, `/audio:5001`. |
 | `DSM_USER` / `DSM_PASS` | — | Optional service account used only for album covers. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
 | `DSM_TLS_REJECT_UNAUTHORIZED` | `false` | Verify the NAS TLS certificate (the stock certificate is self-signed). |
 | `DSM_TIMEOUT_MS` | `10000` | Timeout for Synology requests. |
@@ -388,6 +388,7 @@ npm run lint                   # ESLint
 npm run typecheck              # server, client, and tests
 npm test                       # API + search + UI
 npm run test:api               # Express endpoints
+npm run test:config            # DSM frontend URL parsing
 npm run test:search            # parser + SQLite search/tag combinations
 npm run test:ui                # Playwright UI tests
 npm run test:ui:headed         # Playwright with a visible browser
@@ -622,6 +623,7 @@ happy-trails/
 │   └── styles.css        Compiled client files are written to public/client/
 ├── tests/
 │   ├── api/              Express endpoint tests
+│   ├── config/           DSM frontend URL parsing tests
 │   ├── search/           Parser and SQLite search tests
 │   ├── ui/               Playwright browser tests
 │   ├── fixtures/         Synthetic album/track data and UI fixture server

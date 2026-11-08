@@ -298,6 +298,7 @@ export interface FixtureContext {
   index: SqliteIndex;
   dependencies: AppDependencies;
   playbackCalls: Array<{ album: string; artist: string }>;
+  playbackOrigins: Array<string | null>;
   coverCalls: string[];
   close(): void;
 }
@@ -387,6 +388,7 @@ export async function createFixtureContext(
   };
 
   const playbackCalls: Array<{ album: string; artist: string }> = [];
+  const playbackOrigins: Array<string | null> = [];
   const coverCalls: string[] = [];
   const playbackUrl =
     options.playbackUrl === undefined
@@ -415,7 +417,11 @@ export async function createFixtureContext(
     },
     userSessions,
     playback: {
-      audioStationUrl: playbackUrl,
+      enabled: playbackUrl !== null,
+      audioStationUrlFor: (origin) => {
+        playbackOrigins.push(origin);
+        return playbackUrl;
+      },
       playAlbum: async (_client, album, artist) => {
         if (options.playbackError) throw options.playbackError;
         playbackCalls.push({ album, artist });
@@ -433,6 +439,7 @@ export async function createFixtureContext(
     index,
     dependencies,
     playbackCalls,
+    playbackOrigins,
     coverCalls,
     close: () => index.close(),
   };

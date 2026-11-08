@@ -93,7 +93,111 @@ function regionTags(): string[] {
 }
 
 const dsmUrl = (process.env.DSM_URL ?? process.env.DSADDR ?? '').trim();
-const dsmFrontendUrl = (process.env.DSM_FRONTEND_URL ?? dsmUrl).trim();
+
+export interface DsmFrontendTarget {
+  /** Fixed frontend URL, or null when origin-based formatting is used. */
+  url: string | null;
+  /** Path to apply to the request origin, or null for a fixed URL. */
+  originPath: string | null;
+  /** Port to apply to the request origin; null preserves its port. */
+  originPort: number | null;
+}
+
+function fallbackTarget(fallback: string): DsmFrontendTarget {
+  return {
+    url: fallback.trim() || null,
+    originPath: null,
+    originPort: null,
+  };
+}
+
+function parseOriginSpec(
+  raw: string,
+): { originPath: string; originPort: number | null } | null {
+  let pathPart = raw;
+  let originPort: number | null = null;
+
+  const portMatch = /^(.*):(\d+)$/.exec(raw);
+  if (portMatch) {
+    const port = Number(portMatch[2]);
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+    originPort = port;
+    pathPart = portMatch[1] ?? '';
+  }
+
+  let originPath = pathPart.trim();
+  if (!originPath) originPath = '/';
+  if (!originPath.startsWith('/')) originPath = `/${originPath}`;
+  return { originPath, originPort };
+}
+
+/**
+ * Parse DSM_FRONTEND_URL:
+ * - empty: fall back to DSM_URL/DSADDR
+ * - full http(s) URL: use verbatim
+ * - otherwise: "[path][:port]" applied to each request's origin
+ *   (path defaults to "/"; an omitted port preserves the origin port)
+ */
+export function parseDsmFrontendUrl(
+  rawValue: string | undefined,
+  fallback: string,
+): DsmFrontendTarget {
+  const raw = (rawValue ?? '').trim();
+  if (!raw) return fallbackTarget(fallback);
+
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return { url: raw, originPath: null, originPort: null };
+    }
+    // A non-HTTP absolute URL is not a usable frontend target.
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw)) {
+      return fallbackTarget(fallback);
+    }
+  } catch {
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw)) {
+      return fallbackTarget(fallback);
+    }
+  }
+
+  const spec = parseOriginSpec(raw);
+  if (!spec) return fallbackTarget(fallback);
+  return { url: null, ...spec };
+}
+
+/** Apply a configured path and optional port to an HTTP(S) origin. */
+export function formatOriginTarget(
+  origin: string,
+  originPath: string,
+  originPort: number | null,
+): string | null {
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    url.pathname = originPath;
+    url.search = '';
+    url.hash = '';
+    if (originPort !== null) url.port = String(originPort);
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve a parsed frontend target for one request. */
+export function resolveDsmFrontendBase(
+  target: DsmFrontendTarget,
+  origin: string | null,
+): string | null {
+  if (target.url !== null) return target.url;
+  if (target.originPath === null || !origin) return null;
+  return formatOriginTarget(origin, target.originPath, target.originPort);
+}
+
+const frontendTarget = parseDsmFrontendUrl(
+  process.env.DSM_FRONTEND_URL,
+  dsmUrl,
+);
 const dsmUser = (process.env.DSM_USER ?? process.env.DSUSER ?? '').trim();
 const dsmPass = process.env.DSM_PASS ?? process.env.DSPASSWD ?? '';
 const dsmConfigured =
@@ -132,7 +236,9 @@ export const config = {
   regionTags: regionTags(),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
-  dsmFrontendUrl: dsmFrontendUrl.length > 0 ? dsmFrontendUrl : null,
+  dsmFrontendUrl: frontendTarget.url,
+  dsmFrontendPath: frontendTarget.originPath,
+  dsmFrontendPort: frontendTarget.originPort,
   dsmTimeoutMs,
   dsmRejectUnauthorized,
   /**
