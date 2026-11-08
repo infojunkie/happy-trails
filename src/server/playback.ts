@@ -1,5 +1,8 @@
 import { config, resolveDsmFrontendBase } from './config.js';
-import { loadPlaybackTrackIds } from './db.js';
+import {
+  loadPlaybackTrackIdForMusicId,
+  loadPlaybackTrackIds,
+} from './db.js';
 import { audioStationUrl, type DsmClient } from './dsm.js';
 import { library } from './library.js';
 
@@ -64,6 +67,17 @@ export class PlaybackService {
 
     await client.updateWebPlayer(trackIds);
     return trackIds.length;
+  }
+
+  async playTrack(client: DsmClient, musicId: number): Promise<number> {
+    const audioStationId = await loadPlaybackTrackIdForMusicId(musicId);
+    if (audioStationId === null) {
+      throw new PlaybackUnavailableError(
+        'No playable copy of this track was found',
+      );
+    }
+    await client.updateWebPlayer([audioStationId]);
+    return 1;
   }
 }
 

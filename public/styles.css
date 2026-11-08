@@ -1537,8 +1537,35 @@ h4.disc-heading {
   text-align: right;
 }
 
+.track-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .track-title {
+  min-width: 0;
   font-size: 0.92rem;
+}
+
+.track-play {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: 50%;
+  color: var(--on-accent);
+  font-size: 0.56rem;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.track-play:hover {
+  color: var(--on-accent);
+  filter: brightness(1.08);
 }
 
 .track-sub {

@@ -536,8 +536,12 @@ function readUrlState(): void {
   state.regionMode = isFilterMode(regionMode) ? regionMode : 'any';
 
   const login = params.get('login') === '1';
+  const playTrackId = params.get('playTrack');
   const playKey = params.get('play');
-  if (login && playKey) {
+  if (login && playTrackId && /^\d+$/.test(playTrackId)) {
+    state.loginRequestedFromUrl = true;
+    state.pendingPlayUrl = `/play/track/${encodeURIComponent(playTrackId)}`;
+  } else if (login && playKey) {
     state.loginRequestedFromUrl = true;
     state.pendingPlayUrl = `/play/${encodeURIComponent(playKey)}`;
   }
@@ -1474,10 +1478,31 @@ function normalizedMetadata(value: string | null | undefined): string {
 }
 
 function renderTrackRow(track: Track): HTMLElement {
+  const titleRow: Array<Node | string> = [];
+  if (state.playbackEnabled && state.session.authenticated) {
+    titleRow.push(
+      el(
+        'a',
+        {
+          class: 'track-play',
+          href: `/play/track/${track.id}`,
+          target: '_blank',
+          rel: 'noopener',
+          title: `Play ${track.title} in Audio Station`,
+          'aria-label': `Play ${track.title} in Audio Station`,
+        },
+        el('span', { 'aria-hidden': 'true', text: '▶' }),
+      ),
+    );
+  }
+  titleRow.push(
+    el('span', { class: 'track-title', text: track.title }),
+  );
+
   const main = el(
     'div',
     { class: 'track-main' },
-    el('span', { class: 'track-title', text: track.title }),
+    el('span', { class: 'track-title-row' }, ...titleRow),
   );
 
   if (track.artist && track.artist !== track.albumArtist) {

@@ -57,8 +57,9 @@ facets built from the comma-separated `genre` column.
   Albums without artwork keep the generated gradient/initials cover.
 - Sign in with your own Synology account, then **Play** hands an album to
   Audio Station: the server replaces the Audio Station web-player queue with
-  the album's tracks and opens Audio Station. No audio player lives in this app.
-  Play controls are hidden until the app session is authenticated.
+  the album's tracks and opens Audio Station. Each track row also has a small
+  blue play control that queues just that track. No audio player lives in this
+  app. Play controls are hidden until the app session is authenticated.
 - Shareable URL state (`?genre=Jazz&genreMode=all&region=France&q=...&sort=artist`).
 - Light/dark colour schemes, keyboard navigation, `/` focuses search.
 - Responsive layout for narrow screens.
@@ -586,6 +587,14 @@ key shows an HTML `400` page; a playback failure shows an HTML error page with
 a link to Audio Station. This route changes playback state and is meant to be
 opened in a browser tab.
 
+### `GET /play/track/:id`
+
+The target of the per-track blue play controls. `id` is the track's `music.id`.
+It follows the same sign-in and redirect flow as the album Play endpoint, but
+queues only that track in Audio Station. Signed-out requests redirect to
+`/?login=1&playTrack=…`; invalid ids show an HTML `400` page, and playback
+failures show the standard HTML error page. This route changes playback state.
+
 Errors use `{ "error": "message" }`. Unknown API routes return `404`;
 an album key that cannot be decoded returns `400`; a valid key with no rows
 returns `404`.
@@ -604,7 +613,7 @@ happy-trails/
 │   │   ├── dsm.ts        Synology login, covers, and web-player client
 │   │   ├── index.ts      Startup and shutdown
 │   │   ├── library.ts    Index lifecycle, rebuilds, and change detection
-│   │   ├── playback.ts   Album-to-Audio-Station handoff
+│   │   ├── playback.ts   Album/track-to-Audio-Station handoff
 │   │   ├── regions.ts    Country/region tag detection
 │   │   ├── search.ts     Folding, album keys, and title normalisation
 │   │   ├── searchQuery.ts  Fielded search expression parser

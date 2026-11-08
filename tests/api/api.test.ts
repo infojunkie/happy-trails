@@ -509,6 +509,45 @@ test('GET /play/:key handles invalid keys, sign-in, and playback handoff', async
   );
 });
 
+test('GET /play/track/:id queues a single track', async () => {
+  const invalid = await fetch(`${main.server.baseUrl}/play/track/nope`, {
+    redirect: 'manual',
+  });
+  assert.equal(invalid.status, 400);
+  assert.match(await invalid.text(), /Invalid track link/);
+
+  const signedOut = await fetch(`${main.server.baseUrl}/play/track/1`, {
+    redirect: 'manual',
+  });
+  assert.equal(signedOut.status, 303);
+  assert.equal(
+    signedOut.headers.get('location'),
+    '/?login=1&playTrack=1',
+  );
+
+  const login = await json<{ account: string }>(
+    main.server.baseUrl,
+    '/api/session/login',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 'secret' }),
+    },
+  );
+  const cookie = cookieFrom(login.response);
+  assert.ok(cookie);
+  const played = await fetch(`${main.server.baseUrl}/play/track/1`, {
+    redirect: 'manual',
+    headers: { Cookie: cookie },
+  });
+  assert.equal(played.status, 303);
+  assert.equal(
+    played.headers.get('location'),
+    'https://audio.example/?launchApp=SYNO.SDS.AudioStation.Application',
+  );
+  assert.ok(main.context.trackPlaybackCalls.includes(1));
+});
+
 test('GET /play/:key reports playback failures and unavailable playback', async () => {
   const failing = await runFixture({ playbackError: new Error('queue full') });
   try {

@@ -56,7 +56,7 @@ export interface AppDependencies {
   >;
   playback: Pick<
     typeof playback,
-    'enabled' | 'audioStationUrlFor' | 'playAlbum'
+    'enabled' | 'audioStationUrlFor' | 'playAlbum' | 'playTrack'
   >;
   config: Pick<typeof config, 'defaultPageSize' | 'maxPageSize' | 'dsmUrl'>;
 }
@@ -426,6 +426,83 @@ export function createApp(
       })),
     };
     res.json(body);
+  });
+
+  app.get('/play/track/:id', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const frontendTarget = dependencies.playback.audioStationUrlFor(
+      requestOrigin(req),
+    );
+    const rawId = req.params.id;
+    const trackId = /^\d+$/.test(rawId) ? Number(rawId) : Number.NaN;
+
+    if (!Number.isSafeInteger(trackId) || trackId < 1) {
+      res
+        .status(400)
+        .type('html')
+        .send(
+          playErrorPage(
+            'Invalid track link',
+            'This playback link is not valid.',
+            frontendTarget,
+          ),
+        );
+      return;
+    }
+
+    const session = dependencies.userSessions.get(req);
+    if (!session) {
+      if (!dependencies.playback.enabled || !frontendTarget) {
+        res
+          .status(503)
+          .type('html')
+          .send(
+            playErrorPage(
+              'Playback unavailable',
+              'Synology DSM is not configured.',
+              null,
+            ),
+          );
+        return;
+      }
+      res.redirect(
+        303,
+        `/?login=1&playTrack=${encodeURIComponent(String(trackId))}`,
+      );
+      return;
+    }
+
+    if (!frontendTarget) {
+      res
+        .status(503)
+        .type('html')
+        .send(
+          playErrorPage(
+            'Playback unavailable',
+            'The playback target could not be resolved.',
+            null,
+          ),
+        );
+      return;
+    }
+
+    try {
+      await dependencies.playback.playTrack(session.client, trackId);
+      res.redirect(303, frontendTarget);
+    } catch (error) {
+      console.error('[play] could not start track playback:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      res
+        .status(502)
+        .type('html')
+        .send(
+          playErrorPage(
+            'Could not start playback',
+            message,
+            frontendTarget,
+          ),
+        );
+    }
   });
 
   app.get('/play/:key', async (req, res) => {

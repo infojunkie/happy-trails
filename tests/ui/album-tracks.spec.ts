@@ -58,6 +58,7 @@ test('album dialog shows merged tracks, composer lines, and artist punctuation',
   await expect(page.locator('.dialog-artist')).toHaveText('The Beatles');
   await expect(page.locator('.dialog-genres .chip')).toHaveText(['Rock', 'Pop']);
   await expect(page.locator('.source-heading')).toContainText(['Main album', 'Bonus Tracks']);
+  await expect(page.locator('#album-dialog .track-play')).toHaveCount(0);
 
   const comeTogether = page
     .locator('.track-row', { hasText: 'Come Together' })
@@ -137,6 +138,17 @@ test('sign-in reveals Play links and sign-out removes them', async ({ page }) =>
     'target',
     '_blank',
   );
+
+  await page
+    .locator('.album-title', { hasText: /^Abbey Road$/ })
+    .first()
+    .click();
+  await expect(page.locator('#album-dialog')).toBeVisible();
+  const trackPlay = page.locator('#album-dialog .track-play').first();
+  await expect(trackPlay).toBeVisible();
+  await expect(trackPlay).toHaveAttribute('href', /^\/play\/track\/\d+$/);
+  await expect(trackPlay).toHaveAttribute('target', '_blank');
+  await page.locator('#album-dialog .dialog-close').click();
 
   await page.reload();
   await expect(page.locator('.album-card').first()).toBeVisible();

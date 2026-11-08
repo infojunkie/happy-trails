@@ -119,6 +119,16 @@ const PLAYBACK_IDS_QUERY = `
     m.id
 `;
 
+const PLAYBACK_TRACK_ID_QUERY = `
+  SELECT t.id
+  FROM ${musicTable} m
+  JOIN ${trackTable} t ON t.path = m.path
+  WHERE m.id = $1
+    AND m.fs_online IS NOT FALSE
+    AND t.is_virtual = false
+  LIMIT 1
+`;
+
 const FINGERPRINT_QUERY = `
   SELECT
     COUNT(*)::int AS tracks,
@@ -167,6 +177,16 @@ export async function loadLibraryFingerprint(): Promise<string> {
  */
 export async function loadCoverTrackId(filePath: string): Promise<number | null> {
   const result = await pool.query<{ id: number }>(TRACK_ID_QUERY, [filePath]);
+  return result.rows[0]?.id ?? null;
+}
+
+/** AudioStation song id for one `music` row. */
+export async function loadPlaybackTrackIdForMusicId(
+  musicId: number,
+): Promise<number | null> {
+  const result = await pool.query<{ id: number }>(PLAYBACK_TRACK_ID_QUERY, [
+    musicId,
+  ]);
   return result.rows[0]?.id ?? null;
 }
 
