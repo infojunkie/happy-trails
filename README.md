@@ -25,6 +25,8 @@ facets built from the comma-separated `genre` column.
 - Each facet has **Match any** / **Match all** modes. Any is the default and
   matches albums carrying at least one selected tag; All requires every
   selected tag. The two facets are combined with AND.
+- Genre and region sections are collapsible. Both start collapsed on mobile
+  and expanded on desktop; toggling one does not affect the other.
 - Free-text album/artist search with case-, accent-, and ligature-insensitive
   matching (`Soren` finds `Søren`, `caetera` finds `cætera`, `Bjork` finds
   `Björk`). Track-level artists are searchable too.

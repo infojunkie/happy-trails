@@ -500,6 +500,24 @@ p {
   flex: 1;
 }
 
+.facet-section.is-collapsed {
+  flex: 0 0 auto;
+}
+
+.facet-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.facet-section-genres .facet-panel {
+  flex: 1;
+}
+
+.facet-section-regions .facet-panel {
+  flex: 0 0 auto;
+}
+
 .facet-section-regions {
   flex: 0 0 auto;
   margin-top: 16px;
@@ -525,6 +543,35 @@ p {
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
+}
+
+.facet-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.facet-toggle:hover {
+  color: var(--text);
+}
+
+.facet-chevron {
+  font-size: 0.72rem;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.facet-toggle[aria-expanded="false"] .facet-chevron {
+  transform: rotate(-90deg);
 }
 
 .facet-mode {

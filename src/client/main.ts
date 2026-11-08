@@ -109,6 +109,11 @@ const genreModeInputs = document.querySelectorAll<HTMLInputElement>(
 const regionModeInputs = document.querySelectorAll<HTMLInputElement>(
   'input[name="region-mode"]',
 );
+const genreToggle = $<HTMLButtonElement>('#genre-toggle');
+const genrePanel = $('#genre-panel');
+const regionToggle = $<HTMLButtonElement>('#region-toggle');
+const regionPanel = $('#region-panel');
+const narrowFiltersQuery = window.matchMedia('(max-width: 620px)');
 const errorBanner = $('#error-banner');
 const errorText = $('#error-text');
 const dialog = $<HTMLDialogElement>('#album-dialog');
@@ -166,6 +171,41 @@ function initials(value: string): string {
 
 function setSummary(text: string): void {
   resultSummary.textContent = text;
+}
+
+interface FacetDisclosure {
+  toggle: HTMLButtonElement;
+  panel: HTMLElement;
+  section: HTMLElement;
+}
+
+function facetDisclosure(
+  toggle: HTMLButtonElement,
+  panel: HTMLElement,
+): FacetDisclosure {
+  const section = panel.closest<HTMLElement>('.facet-section');
+  if (!section) throw new Error('Facet panel is missing its section');
+  return { toggle, panel, section };
+}
+
+const facetDisclosures = [
+  facetDisclosure(genreToggle, genrePanel),
+  facetDisclosure(regionToggle, regionPanel),
+];
+
+function setFacetCollapsed(
+  disclosure: FacetDisclosure,
+  collapsed: boolean,
+): void {
+  disclosure.toggle.setAttribute('aria-expanded', String(!collapsed));
+  disclosure.panel.hidden = collapsed;
+  disclosure.section.classList.toggle('is-collapsed', collapsed);
+}
+
+function setAllFacetsCollapsed(collapsed: boolean): void {
+  for (const disclosure of facetDisclosures) {
+    setFacetCollapsed(disclosure, collapsed);
+  }
 }
 
 function renderModeControls(): void {
@@ -1546,6 +1586,18 @@ function applySearch(): void {
 }
 
 function bindEvents(): void {
+  setAllFacetsCollapsed(narrowFiltersQuery.matches);
+  narrowFiltersQuery.addEventListener('change', (event) => {
+    setAllFacetsCollapsed(event.matches);
+  });
+  for (const disclosure of facetDisclosures) {
+    disclosure.toggle.addEventListener('click', () => {
+      const currentlyExpanded =
+        disclosure.toggle.getAttribute('aria-expanded') === 'true';
+      setFacetCollapsed(disclosure, currentlyExpanded);
+    });
+  }
+
   searchInput.addEventListener('input', () => {
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(applySearch, SEARCH_DEBOUNCE_MS);

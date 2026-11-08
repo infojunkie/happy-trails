@@ -113,45 +113,58 @@
           aria-labelledby="genre-heading"
         >
           <div class="facets-header">
-            <h2 id="genre-heading">Genres</h2>
+            <h2>
+              <button
+                id="genre-toggle"
+                class="facet-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="genre-panel"
+              >
+                <span id="genre-heading">Genres</span>
+                <span class="facet-chevron" aria-hidden="true">▾</span>
+              </button>
+            </h2>
             <button id="clear-genres" class="link-button" type="button" hidden>
               Clear
             </button>
           </div>
-          <div class="facet-mode" role="radiogroup" aria-label="Genre matching">
-            <label class="facet-mode-option">
-              <input type="radio" name="genre-mode" value="any" checked />
-              <span>Match any</span>
-            </label>
-            <label class="facet-mode-option">
-              <input type="radio" name="genre-mode" value="all" />
-              <span>Match all</span>
-            </label>
+          <div id="genre-panel" class="facet-panel">
+            <div class="facet-mode" role="radiogroup" aria-label="Genre matching">
+              <label class="facet-mode-option">
+                <input type="radio" name="genre-mode" value="any" checked />
+                <span>Match any</span>
+              </label>
+              <label class="facet-mode-option">
+                <input type="radio" name="genre-mode" value="all" />
+                <span>Match all</span>
+              </label>
+            </div>
+            <input
+              id="genre-search"
+              class="genre-search"
+              type="search"
+              placeholder="Filter genres…"
+              aria-label="Filter genres"
+              autocomplete="off"
+              spellcheck="false"
+              hidden
+            />
+            <div
+              id="genre-list"
+              class="genre-list"
+              role="group"
+              aria-labelledby="genre-heading"
+            >
+              <p class="facet-empty">Loading genres…</p>
+            </div>
+            <button
+              id="toggle-all-genres"
+              class="link-button toggle-all"
+              type="button"
+              hidden
+            ></button>
           </div>
-          <input
-            id="genre-search"
-            class="genre-search"
-            type="search"
-            placeholder="Filter genres…"
-            aria-label="Filter genres"
-            autocomplete="off"
-            spellcheck="false"
-            hidden
-          />
-          <div
-            id="genre-list"
-            class="genre-list"
-            role="group"
-            aria-labelledby="genre-heading"
-          >
-            <p class="facet-empty">Loading genres…</p>
-          </div>
-          <button
-            id="toggle-all-genres"
-            class="link-button toggle-all"
-            type="button"
-            hidden
-          ></button>
         </section>
 
         <section
@@ -159,45 +172,58 @@
           aria-labelledby="region-heading"
         >
           <div class="facets-header">
-            <h2 id="region-heading">Regions</h2>
+            <h2>
+              <button
+                id="region-toggle"
+                class="facet-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="region-panel"
+              >
+                <span id="region-heading">Regions</span>
+                <span class="facet-chevron" aria-hidden="true">▾</span>
+              </button>
+            </h2>
             <button id="clear-regions" class="link-button" type="button" hidden>
               Clear
             </button>
           </div>
-          <div class="facet-mode" role="radiogroup" aria-label="Region matching">
-            <label class="facet-mode-option">
-              <input type="radio" name="region-mode" value="any" checked />
-              <span>Match any</span>
-            </label>
-            <label class="facet-mode-option">
-              <input type="radio" name="region-mode" value="all" />
-              <span>Match all</span>
-            </label>
+          <div id="region-panel" class="facet-panel">
+            <div class="facet-mode" role="radiogroup" aria-label="Region matching">
+              <label class="facet-mode-option">
+                <input type="radio" name="region-mode" value="any" checked />
+                <span>Match any</span>
+              </label>
+              <label class="facet-mode-option">
+                <input type="radio" name="region-mode" value="all" />
+                <span>Match all</span>
+              </label>
+            </div>
+            <input
+              id="region-search"
+              class="genre-search"
+              type="search"
+              placeholder="Filter regions…"
+              aria-label="Filter regions"
+              autocomplete="off"
+              spellcheck="false"
+              hidden
+            />
+            <div
+              id="region-list"
+              class="genre-list region-list"
+              role="group"
+              aria-labelledby="region-heading"
+            >
+              <p class="facet-empty">Loading regions…</p>
+            </div>
+            <button
+              id="toggle-all-regions"
+              class="link-button toggle-all"
+              type="button"
+              hidden
+            ></button>
           </div>
-          <input
-            id="region-search"
-            class="genre-search"
-            type="search"
-            placeholder="Filter regions…"
-            aria-label="Filter regions"
-            autocomplete="off"
-            spellcheck="false"
-            hidden
-          />
-          <div
-            id="region-list"
-            class="genre-list region-list"
-            role="group"
-            aria-labelledby="region-heading"
-          >
-            <p class="facet-empty">Loading regions…</p>
-          </div>
-          <button
-            id="toggle-all-regions"
-            class="link-button toggle-all"
-            type="button"
-            hidden
-          ></button>
         </section>
       </aside>
 

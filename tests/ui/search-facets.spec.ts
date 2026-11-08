@@ -40,7 +40,81 @@ test('header and initial library controls are present', async ({ page }) => {
   ).toBeVisible();
   await expect(page.locator('#genre-search')).toBeVisible();
   await expect(page.locator('#region-search')).toBeVisible();
+  await expect(page.locator('#genre-toggle')).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await expect(page.locator('#genre-panel')).toBeVisible();
+  await expect(page.locator('#region-toggle')).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await expect(page.locator('#region-panel')).toBeVisible();
   await expectSummaryFor(page);
+});
+
+test.describe('mobile facet disclosures', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('filters are collapsed by default and toggle independently', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('.album-card').first()).toBeVisible();
+
+    await expect(page.locator('#genre-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await expect(page.locator('#genre-panel')).toBeHidden();
+    await expect(page.locator('#region-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await expect(page.locator('#region-panel')).toBeHidden();
+
+    await page.locator('#genre-toggle').click();
+    await expect(page.locator('#genre-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await expect(page.locator('#genre-panel')).toBeVisible();
+    await expect(page.locator('#region-panel')).toBeHidden();
+
+    await page.locator('#region-toggle').click();
+    await expect(page.locator('#region-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await expect(page.locator('#region-panel')).toBeVisible();
+
+    await page.locator('#genre-toggle').click();
+    await expect(page.locator('#genre-panel')).toBeHidden();
+    await expect(page.locator('#region-panel')).toBeVisible();
+  });
+
+  test('crossing the desktop breakpoint resets the disclosure state', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('.album-card').first()).toBeVisible();
+    await expect(page.locator('#genre-panel')).toBeHidden();
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.locator('#genre-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await expect(page.locator('#genre-panel')).toBeVisible();
+    await expect(page.locator('#region-panel')).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('#genre-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await expect(page.locator('#genre-panel')).toBeHidden();
+  });
 });
 
 test('genre facets filter, combine, support any/all, and clear', async ({
