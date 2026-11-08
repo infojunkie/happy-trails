@@ -84,8 +84,8 @@ npm start
 
 Open <http://127.0.0.1:3000>.
 
-The `.env` in this checkout is already configured for the `mediaserver`
-database on `rokanan`; the password is taken from `~/.pgpass` by
+The `.env.example` in this checkout is already configured for the `mediaserver`
+database on `localhost`; the password is taken from `~/.pgpass` by
 `node-postgres`, so no secret is stored in the file.
 
 The server also reads the workspace-level `../.env`, where the existing
@@ -131,7 +131,6 @@ Run it with the environment file mounted read-only:
 
 ```bash
 docker run --rm -p 3000:3000 \
-  --add-host rokanan:192.168.0.2 \
   -v "$PWD/.env:/app/.env:ro" \
   -v "$HOME/.pgpass:/home/node/.pgpass:ro" \
   happy-trails
@@ -146,9 +145,6 @@ Notes:
   override the port with `-e PORT=8080` and map `-p 8080:8080`.
 - `~/.pgpass` is not part of the image. Either mount it as shown above, or put
   `PGPASSWORD` / `DATABASE_URL` in the mounted `.env`.
-- `rokanan` is defined in this host's `/etc/hosts`, which Docker containers do
-  not inherit. The `--add-host` flag above supplies it (use the NAS IP); using
-  `PGHOST` with the IP directly, or `--network host` on Linux, also works.
 - The mounted `.env` must be readable by the container's `node` user (UID
   1000); mode `644` is sufficient. The same applies to a mounted `.pgpass` if
   the host user does not have UID 1000.
