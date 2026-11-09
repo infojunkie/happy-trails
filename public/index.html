@@ -56,7 +56,8 @@
         <span id="search-syntax" class="visually-hidden">
           Search syntax: use field colon value, quote multi-word values, and
           combine terms with AND or OR. Fields are album, artist, composer,
-          source, and trackartist. Bare terms search all fields.
+          source, and trackartist. A plain sequence of keywords searches all
+          fields as one phrase.
         </span>
 
         <label class="sort-field">
@@ -319,8 +320,10 @@
           <div>
             <h2 id="search-help-title">Search syntax</h2>
             <p class="search-help-intro">
-              Bare terms search every field. Add a field prefix to narrow the
-              search, and quote values that contain spaces or parentheses.
+              A plain list of keywords searches every field as one contiguous
+              phrase. Add a field prefix to narrow the search, quote field
+              values that contain spaces or parentheses, and use AND or OR to
+              combine terms independently.
             </p>
           </div>
           <button
@@ -355,10 +358,14 @@
         <h3>Operators</h3>
         <ul class="search-help-list">
           <li>
-            <code>AND</code> requires both sides; adjacent terms are implicitly
-            ANDed.
+            <code>AND</code> requires both sides; adjacent terms in a fielded
+            expression are implicitly ANDed.
           </li>
           <li><code>OR</code> matches either side.</li>
+          <li>
+            <code>abbey road</code> is a phrase; use
+            <code>abbey AND road</code> for independent words.
+          </li>
           <li>
             <code>AND</code> binds more tightly than <code>OR</code>;
             parentheses group expressions.

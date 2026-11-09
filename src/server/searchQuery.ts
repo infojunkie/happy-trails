@@ -10,9 +10,10 @@
  *   quoted     := '"' ... '"'
  *
  * Bare terms search every indexed field. Values may contain punctuation; spaces
- * require quotes. Unknown field names are treated as ordinary text so titles
- * containing colons still work. A malformed expression is reported as null and
- * the caller falls back to the pre-syntax search behavior.
+ * require quotes. A query consisting only of unquoted, fieldless keywords is
+ * treated as one quoted phrase. Unknown field names are treated as ordinary
+ * text so titles containing colons still work. A malformed expression is
+ * reported as null and the caller falls back to the pre-syntax search behavior.
  */
 
 export const SEARCH_FIELDS = [
@@ -261,5 +262,23 @@ class Parser {
 export function parseSearchQuery(input: string): SearchNode | null {
   const tokens = tokenize(input);
   if (!tokens) return null;
+
+  // A query made only of unquoted, fieldless keywords is a phrase, not an
+  // implicit AND. Use AND/OR or quotes to search the words independently.
+  // Rebuild the phrase from token values so an explicit `all:` prefix is not
+  // included in the text.
+  const keywords: string[] = [];
+  let keywordOnly = tokens.length > 0;
+  for (const token of tokens) {
+    if (token.type !== 'term' || token.field !== 'all' || token.quoted) {
+      keywordOnly = false;
+      break;
+    }
+    keywords.push(token.value);
+  }
+  if (keywordOnly) {
+    return { kind: 'term', field: 'all', value: keywords.join(' '), quoted: true };
+  }
+
   return new Parser(tokens).parse();
 }

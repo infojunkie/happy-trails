@@ -33,7 +33,8 @@ facets built from the comma-separated `genre` column.
 - Fielded search syntax: `album:"abbey road" artist:beatles`,
   `composer:jobim`, `source:"Bonus Tracks"`, `trackartist:"guest"`, combined
   with `AND`, `OR`, implicit AND, and parentheses. Quoted values are matched as
-  contiguous phrases; bare terms search all fields as before. The `?` button
+  contiguous phrases. A query made only of plain keywords is treated as one
+  phrase; use `AND` to combine independent words. The `?` button
   beside the search bar opens a syntax help popup with clickable examples.
 - Album and artist names are search shortcuts in cards and in the album dialog;
   genre tags activate the genre facet and region tags activate the region
@@ -239,8 +240,8 @@ either direction. `album_search` is an FTS5 table using the `trigram`
 tokenizer, which preserves substring semantics; phrases shorter than three
 characters fall back to an exact `instr()` scan.
 
-The search expression parser supports bare terms, `album:`, `artist:`,
-`composer:`, `source:`, and `trackartist:` fields, quoted phrases,
+The search expression parser supports plain keyword phrases, `album:`,
+`artist:`, `composer:`, `source:`, and `trackartist:` fields, quoted phrases,
 implicit/explicit `AND`, `OR`, and parentheses. Field terms target dedicated
 folded columns; each FTS term is evaluated once in a materialized CTE so `OR`
 expressions do not rescan the FTS index per album. Composer values come from
@@ -458,7 +459,7 @@ identifies the snapshot the counts came from.
 | `genreMode` | `any` (default) or `all`; controls whether an album must contain any or all selected genres. |
 | `region` | Repeatable or comma-separated. Matches albums containing any selected country/region tag. Combined with `genre` using AND. |
 | `regionMode` | `any` (default) or `all`; controls whether an album must contain any or all selected regions. |
-| `q` | Search expression, up to 200 characters. Supports bare terms and `album:`, `artist:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). |
+| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
 | `limit` | Default `48`, maximum `200`. |
@@ -494,9 +495,10 @@ listing; compare it with `/api/status` before deciding to reload.
 
 #### Search syntax
 
-The `q` parameter accepts `field:value` terms. A bare term searches all fields.
-Values containing spaces or parentheses must be quoted; a quoted value is
-matched as a contiguous phrase rather than as separate words.
+The `q` parameter accepts `field:value` terms. A plain list of keywords searches
+all fields as one contiguous phrase, and a single bare term likewise searches
+every field. Field values containing spaces or parentheses must be quoted; a
+quoted value is matched as a contiguous phrase rather than as separate words.
 
 | Field | Matches |
 | --- | --- |
@@ -507,7 +509,10 @@ matched as a contiguous phrase rather than as separate words.
 | `trackartist` | Track-level artists only (`guest`, `track_artist`, and `track-artist` are aliases). |
 | `all` / `any` | All indexed fields, equivalent to a bare term. |
 
-Operators are case-insensitive. Adjacent terms are implicitly ANDed; `AND`
+A query made only of unquoted keywords is treated as one contiguous phrase:
+`abbey road` behaves like `"abbey road"`. Use `abbey AND road` to search the
+words independently. For expressions containing fields, operators, or quotes,
+adjacent terms are implicitly ANDed. Operators are case-insensitive; `AND`
 binds more tightly than `OR`; parentheses group expressions. Matching is
 case-, accent-, and ligature-insensitive, including quoted phrases.
 

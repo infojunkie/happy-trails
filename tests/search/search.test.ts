@@ -75,6 +75,13 @@ test('parser understands fielded terms, phrases, operators, and parentheses', ()
     parseSearchQuery('(album:road OR album:street) artist:beatles')?.kind,
     'and',
   );
+  assert.deepEqual(parseSearchQuery('abbey road'), {
+    kind: 'term',
+    field: 'all',
+    value: 'abbey road',
+    quoted: true,
+  });
+  assert.equal(parseSearchQuery('abbey AND road')?.kind, 'and');
   assert.deepEqual(parseSearchQuery('composers:jobim'), {
     kind: 'term',
     field: 'composer',
@@ -85,7 +92,19 @@ test('parser understands fielded terms, phrases, operators, and parentheses', ()
     kind: 'term',
     field: 'all',
     value: 'foo:bar',
-    quoted: false,
+    quoted: true,
+  });
+  assert.deepEqual(parseSearchQuery('all:abbey'), {
+    kind: 'term',
+    field: 'all',
+    value: 'abbey',
+    quoted: true,
+  });
+  assert.deepEqual(parseSearchQuery('all:abbey road'), {
+    kind: 'term',
+    field: 'all',
+    value: 'abbey road',
+    quoted: true,
   });
   assert.equal(parseSearchQuery('album:'), null);
   assert.equal(parseSearchQuery('album:road OR (artist:beatles'), null);
@@ -139,13 +158,14 @@ test('fielded terms target only their fields', () => {
   assert.ok(names(trackArtist.albums).includes('Kind of Blue'));
 });
 
-test('quoted phrases are contiguous; bare terms are independent', () => {
-  const phrase = query({ q: 'album:"abbey road"' });
-  const words = query({ q: 'abbey road' });
-  for (const entry of phrase.albums) {
-    assert.match(entry.album.toLowerCase(), /abbey road/);
-  }
-  assert.deepEqual(keys(phrase.albums), keys(words.albums));
+test('plain keyword lists are phrases; explicit AND stays independent', () => {
+  const quoted = query({ q: '"abbey road"' });
+  const keywords = query({ q: 'abbey road' });
+  const independent = query({ q: 'abbey AND road' });
+
+  assert.ok(keywords.total > 0);
+  assert.deepEqual(keys(keywords.albums), keys(quoted.albums));
+  assert.ok(independent.total >= keywords.total);
   assert.equal(query({ q: 'album:"abbey tracks"' }).albums.length, 0);
 
   const short = query({ q: 'album:"ab"' });

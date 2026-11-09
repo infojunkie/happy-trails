@@ -157,7 +157,8 @@ parsed artists, every raw source title, every distinct track-level artist, and
 every distinct composer tag.
 Fielded terms target `search_album`, `search_artist`, `search_source`,
 `search_track_artist`, or `search_composer` instead. Bare terms target
-`search_text`, which also includes composer tags.
+`search_text`, which also includes composer tags. A plain list of keywords is
+parsed as one quoted phrase; explicit `AND`/`OR` terms stay independent.
 
 ### Genre filter
 
