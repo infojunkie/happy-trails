@@ -2,9 +2,12 @@ import { config, resolveDsmFrontendBase } from './config.js';
 import {
   loadPlaybackTrackIdForMusicId,
   loadPlaybackTrackIds,
+  loadPlaybackTrackIdsForMusicIds,
+  loadTracks,
 } from './db.js';
 import { audioStationUrl, type DsmClient } from './dsm.js';
 import { library } from './library.js';
+import { createTrackMatcher } from './trackSearch.js';
 
 export class PlaybackUnavailableError extends Error {
   constructor(message: string) {
@@ -55,14 +58,30 @@ export class PlaybackService {
     client: DsmClient,
     album: string,
     artist: string,
+    query: string | null = null,
   ): Promise<number> {
     const sources = library.sourceAlbumsFor(album, artist);
     const sourceAlbums = sources.length > 0 ? sources : [album];
-    const trackIds = await loadPlaybackTrackIds(sourceAlbums, artist);
-    if (trackIds.length === 0) {
-      throw new PlaybackUnavailableError(
-        'No playable tracks were found for this album',
+
+    let trackIds: number[];
+    if (query && query.trim()) {
+      const rows = await loadTracks(sourceAlbums, album, artist);
+      const matches = createTrackMatcher(album, query);
+      trackIds = await loadPlaybackTrackIdsForMusicIds(
+        rows.filter((row) => matches(row)).map((row) => row.id),
       );
+      if (trackIds.length === 0) {
+        throw new PlaybackUnavailableError(
+          'No tracks in this album match the current search',
+        );
+      }
+    } else {
+      trackIds = await loadPlaybackTrackIds(sourceAlbums, artist);
+      if (trackIds.length === 0) {
+        throw new PlaybackUnavailableError(
+          'No playable tracks were found for this album',
+        );
+      }
     }
 
     await client.updateWebPlayer(trackIds);

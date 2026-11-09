@@ -438,6 +438,23 @@ test('GET /api/albums/:key/tracks returns merged tracks and composer metadata', 
       ?.sourceAlbum,
     'Abbey Road // Bonus Tracks',
   );
+  assert.ok(body.tracks.every((track) => track.matches === true));
+
+  const filtered = await json<TracksResponse>(
+    main.server.baseUrl,
+    `/api/albums/${encodeURIComponent(abbey.key)}/tracks?q=${encodeURIComponent(
+      'composer:"George Harrison"',
+    )}`,
+  );
+  assert.equal(filtered.response.status, 200);
+  assert.equal(filtered.body.tracks.length, body.tracks.length);
+  const matched = filtered.body.tracks.filter((track) => track.matches);
+  const unmatched = filtered.body.tracks.filter((track) => !track.matches);
+  assert.ok(matched.length > 0);
+  assert.ok(unmatched.length > 0);
+  assert.ok(
+    matched.every((track) => track.composer?.includes('George Harrison')),
+  );
 
   const invalid = await json<{ error: string }>(
     main.server.baseUrl,
@@ -506,6 +523,27 @@ test('GET /play/:key handles invalid keys, sign-in, and playback handoff', async
     main.context.playbackCalls.some(
       (call) => call.album === 'Abbey Road' && call.artist === 'The Beatles',
     ),
+  );
+
+  const filteredQuery = 'composer:"George Harrison"';
+  const filteredRedirect = await fetch(
+    `${main.server.baseUrl}/play/${encodeURIComponent(abbey.key)}?q=${encodeURIComponent(filteredQuery)}`,
+    { redirect: 'manual' },
+  );
+  assert.equal(filteredRedirect.status, 303);
+  assert.match(
+    filteredRedirect.headers.get('location') ?? '',
+    /playQuery=composer%3A%22George\+Harrison%22/,
+  );
+
+  const filteredPlay = await fetch(
+    `${main.server.baseUrl}/play/${encodeURIComponent(abbey.key)}?q=${encodeURIComponent(filteredQuery)}`,
+    { redirect: 'manual', headers: { Cookie: cookie } },
+  );
+  assert.equal(filteredPlay.status, 303);
+  assert.equal(
+    main.context.playbackQueries.at(-1),
+    filteredQuery,
   );
 });
 

@@ -59,6 +59,12 @@ test('album dialog shows merged tracks, composer lines, and artist punctuation',
   await expect(page.locator('.dialog-genres .chip')).toHaveText(['Rock', 'Pop']);
   await expect(page.locator('.source-heading')).toContainText(['Main album', 'Bonus Tracks']);
   await expect(page.locator('#album-dialog .track-play')).toHaveCount(0);
+  await expect(
+    page.locator('#album-dialog .track-filter-option'),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('#album-dialog .dialog-track-summary'),
+  ).toHaveCount(0);
 
   const comeTogether = page
     .locator('.track-row', { hasText: 'Come Together' })
@@ -116,6 +122,64 @@ test('album dialog genre and region chips activate filters', async ({ page }) =>
   await expect(page.locator('#album-dialog')).toBeHidden();
   await expect(page).toHaveURL(/region=Brazil/);
   await expectSummaryFor(page, { q: 'artist:getz', region: 'Brazil' });
+});
+
+test('track filter defaults to matching tracks and updates album Play', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.locator('#session-button').click();
+  await page.locator('#login-username').fill('alice');
+  await page.locator('#login-password').fill('secret');
+  await page.locator('#login-submit').click();
+  await expect(page.locator('#session-button')).toHaveText('alice');
+
+  await page.goto(
+    `/?q=${encodeURIComponent('composer:"George Harrison"')}`,
+  );
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await openAlbum(page, 'Abbey Road');
+
+  await expect(
+    page.locator('.track-filter-option', { hasText: 'Matching tracks' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    page.locator('.track-filter-option', { hasText: 'Show all' }),
+  ).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.dialog-track-summary')).toHaveText(
+    'Showing 2 of 5 tracks matching this search',
+  );
+  await expect(page.locator('#album-dialog .track-row')).toHaveCount(2);
+  await expect(
+    page.locator('#album-dialog .track-title'),
+  ).toHaveText(['Something', 'While My Guitar Gently Weeps']);
+  await expect(page.locator('#album-dialog .dialog-play')).toHaveAttribute(
+    'href',
+    /q=composer%3A%22George%20Harrison%22/,
+  );
+
+  await page
+    .locator('.track-filter-option', { hasText: 'Show all' })
+    .click();
+  await expect(
+    page.locator('.track-filter-option', { hasText: 'Show all' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.dialog-track-summary')).toHaveText(
+    'Showing all 5 tracks (2 match)',
+  );
+  await expect(page.locator('#album-dialog .track-row')).toHaveCount(5);
+  await expect(
+    page.locator('#album-dialog .dialog-play'),
+  ).not.toHaveAttribute('href', /q=/);
+
+  await page
+    .locator('.track-filter-option', { hasText: 'Matching tracks' })
+    .click();
+  await expect(page.locator('#album-dialog .track-row')).toHaveCount(2);
+  await expect(page.locator('#album-dialog .dialog-play')).toHaveAttribute(
+    'href',
+    /q=composer%3A%22George%20Harrison%22/,
+  );
 });
 
 test('sign-in reveals Play links and sign-out removes them', async ({ page }) => {

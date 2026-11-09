@@ -92,8 +92,12 @@ export const api = {
     return getJson<AlbumsResponse>(`/api/albums?${params.toString()}`);
   },
 
-  tracks: (key: string): Promise<TracksResponse> =>
-    getJson<TracksResponse>(
-      `/api/albums/${encodeURIComponent(key)}/tracks`,
-    ),
+  tracks: (key: string, query = ''): Promise<TracksResponse> => {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    const search = params.toString();
+    return getJson<TracksResponse>(
+      `/api/albums/${encodeURIComponent(key)}/tracks${search ? `?${search}` : ''}`,
+    );
+  },
 };

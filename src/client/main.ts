@@ -51,6 +51,7 @@ interface State {
   session: SessionResponse;
   pendingPlayUrl: string | null;
   loginRequestedFromUrl: boolean;
+  dialogShowAllTracks: boolean;
   loadedVersion: number | null;
   serverVersion: number | null;
   libraryReady: boolean;
@@ -80,6 +81,7 @@ const state: State = {
   session: { authenticated: false, account: null },
   pendingPlayUrl: null,
   loginRequestedFromUrl: false,
+  dialogShowAllTracks: true,
   loadedVersion: null,
   serverVersion: null,
   libraryReady: false,
@@ -538,12 +540,15 @@ function readUrlState(): void {
   const login = params.get('login') === '1';
   const playTrackId = params.get('playTrack');
   const playKey = params.get('play');
+  const playQuery = params.get('playQuery');
   if (login && playTrackId && /^\d+$/.test(playTrackId)) {
     state.loginRequestedFromUrl = true;
     state.pendingPlayUrl = `/play/track/${encodeURIComponent(playTrackId)}`;
   } else if (login && playKey) {
     state.loginRequestedFromUrl = true;
-    state.pendingPlayUrl = `/play/${encodeURIComponent(playKey)}`;
+    state.pendingPlayUrl = `/play/${encodeURIComponent(playKey)}${
+      playQuery ? `?q=${encodeURIComponent(playQuery)}` : ''
+    }`;
   }
 
   searchInput.value = state.q;
@@ -1231,19 +1236,22 @@ function renderActiveFilters(): void {
 
 async function openAlbum(album: AlbumSummary): Promise<void> {
   const sequence = ++dialogSequence;
+  const query = state.q.trim();
+  const cacheKey = `${album.key}\u0000${query}`;
+  state.dialogShowAllTracks = query.length === 0;
   renderDialog(album, null, true);
   if (!dialog.open) dialog.showModal();
 
-  const cached = trackCache.get(album.key);
+  const cached = trackCache.get(cacheKey);
   if (cached) {
     renderDialog(album, cached, false);
     return;
   }
 
   try {
-    const response = await api.tracks(album.key);
+    const response = await api.tracks(album.key, query);
     if (sequence !== dialogSequence) return;
-    trackCache.set(album.key, response);
+    trackCache.set(cacheKey, response);
     renderDialog(album, response, false);
   } catch (error) {
     if (sequence !== dialogSequence) return;
@@ -1256,6 +1264,7 @@ function renderDialog(
   tracks: TracksResponse | null,
   loading: boolean,
   error?: string,
+  focusClose = true,
 ): void {
   const closeButton = el(
     'button',
@@ -1328,18 +1337,81 @@ function renderDialog(
     heading.append(el('div', { class: 'dialog-genres' }, ...regionButtons));
   }
 
-  if (state.playbackEnabled && state.session.authenticated) {
+  const query = state.q.trim();
+  const matchedCount = tracks
+    ? tracks.tracks.filter((track) => track.matches).length
+    : 0;
+  const allTracksMatch =
+    tracks !== null && matchedCount === tracks.tracks.length;
+  const showAllTracks =
+    tracks === null || state.dialogShowAllTracks || allTracksMatch;
+
+  if (tracks && query && !allTracksMatch) {
+    const modeButton = (showAll: boolean, label: string) => {
+      const button = el('button', {
+        class: 'track-filter-option',
+        type: 'button',
+        'aria-pressed': String(state.dialogShowAllTracks === showAll),
+        text: label,
+      });
+      if (state.dialogShowAllTracks === showAll) {
+        button.classList.add('is-active');
+      }
+      button.addEventListener('click', () => {
+        if (state.dialogShowAllTracks === showAll) return;
+        state.dialogShowAllTracks = showAll;
+        renderDialog(album, tracks, loading, error, false);
+        dialog
+          .querySelector<HTMLButtonElement>('.track-filter-option.is-active')
+          ?.focus();
+      });
+      return button;
+    };
+
+    heading.append(
+      el(
+        'div',
+        {
+          class: 'dialog-track-filter',
+          role: 'group',
+          'aria-label': 'Track filter',
+        },
+        modeButton(false, 'Matching tracks'),
+        modeButton(true, 'Show all'),
+      ),
+    );
+    heading.append(
+      el('p', {
+        class: 'dialog-track-summary',
+        text: state.dialogShowAllTracks
+          ? `Showing all ${tracks.tracks.length} tracks (${matchedCount} match)`
+          : `Showing ${matchedCount} of ${tracks.tracks.length} tracks matching this search`,
+      }),
+    );
+  }
+
+  const playQuery = query && !showAllTracks ? query : null;
+  if (
+    state.playbackEnabled &&
+    state.session.authenticated &&
+    (!playQuery || matchedCount > 0)
+  ) {
+    const playUrl = `/play/${encodeURIComponent(album.key)}${
+      playQuery ? `?q=${encodeURIComponent(playQuery)}` : ''
+    }`;
     heading.append(
       el(
         'a',
         {
           class: 'dialog-play',
-          href: `/play/${encodeURIComponent(album.key)}`,
+          href: playUrl,
           target: '_blank',
           rel: 'noopener',
         },
         el('span', { 'aria-hidden': 'true', text: '▶' }),
-        el('span', { text: 'Play in Audio Station' }),
+        el('span', {
+          text: 'Play in Audio Station',
+        }),
       ),
     );
   }
@@ -1366,11 +1438,21 @@ function renderDialog(
   } else if (error) {
     body.append(el('p', { class: 'dialog-status dialog-status-error', text: error }));
   } else if (tracks) {
-    body.append(renderTrackGroups(tracks));
+    const visibleTracks = showAllTracks
+      ? tracks.tracks
+      : tracks.tracks.filter((track) => track.matches);
+    body.append(
+      renderTrackGroups(
+        { ...tracks, tracks: visibleTracks },
+        query && !showAllTracks
+          ? 'No tracks in this album match this search.'
+          : undefined,
+      ),
+    );
   }
 
   dialog.replaceChildren(el('div', { class: 'dialog-inner' }, header, body));
-  if (dialog.open) closeButton.focus();
+  if (dialog.open && focusClose) closeButton.focus();
 }
 
 /** "Album // Bonus Tracks" -> "Bonus Tracks"; the plain album -> "Main album". */
@@ -1421,10 +1503,13 @@ function appendDiscSections(
   }
 }
 
-function renderTrackGroups(response: TracksResponse): HTMLElement {
+function renderTrackGroups(
+  response: TracksResponse,
+  emptyMessage = 'No tracks found for this album.',
+): HTMLElement {
   const { album, sourceAlbums, tracks } = response;
   if (tracks.length === 0) {
-    return el('p', { class: 'dialog-status', text: 'No tracks found for this album.' });
+    return el('p', { class: 'dialog-status', text: emptyMessage });
   }
 
   const container = el('div', { class: 'track-groups' });

@@ -1396,6 +1396,38 @@ button.chip:hover {
   margin-top: 10px;
 }
 
+.dialog-track-filter {
+  display: inline-flex;
+  gap: 3px;
+  width: fit-content;
+  margin-top: 10px;
+  padding: 3px;
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+
+.track-filter-option {
+  padding: 4px 9px;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.track-filter-option.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.dialog-track-summary {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
 .dialog-play {
   display: inline-flex;
   align-items: center;

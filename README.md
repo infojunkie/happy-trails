@@ -51,8 +51,11 @@ facets built from the comma-separated `genre` column.
 - Album dialog with the full track list, duration, sample rate, and bitrate.
   Composer tags appear as a separate italic **Composer** line when they differ
   from the track and album artists; each composer name is a link that runs a
-  top-level search. Merged multi-CD albums group tracks under their original
-  disc labels, since disc numbers frequently collide across the source titles.
+  top-level search. When a search narrows the tracks, the dialog defaults to
+  matching tracks and offers a **Matching tracks / Show all** toggle; if every
+  track matches, the toggle is omitted. Album Play follows the current toggle
+  state. Merged multi-CD albums group tracks under their original disc labels,
+  since disc numbers frequently collide across the source titles.
 - Album artwork from Synology AudioStation, proxied and cached by the server.
   Albums without artwork keep the generated gradient/initials cover.
 - Sign in with your own Synology account, then **Play** hands an album to
@@ -336,9 +339,12 @@ Play links point at `GET /play/:key` in a new tab. The card Play chips and the
 dialog Play button are only rendered while the app session is authenticated;
 signing out removes them. Without a signed-in app session, the route queues
 nothing and redirects to `/?login=1&play=…`; the app opens the sign-in dialog
-and continues to playback after a successful sign-in. With a session,
-the route resolves the album's source titles to AudioStation song ids by
-joining `music` to `track` on `path`, ordered by source title, disc, and track.
+and continues to playback after a successful sign-in. The dialog Play button
+follows the **Matching tracks / Show all** toggle: matching mode passes the
+current search as `q` and queues only matching tracks, while Show all queues the
+whole album. With a session, the route resolves the album's source titles to
+AudioStation song ids by joining `music` to `track` on `path`, ordered by source
+title, disc, and track.
 It uses that user's DSM client to replace the Audio Station web-player queue
 (`web_player.cgi` `method=updateplaylist`) with those `music_<track.id>` songs
 and `play=true`. The existing queue length is read first and passed as
@@ -523,9 +529,12 @@ all-field token search. `NOT`/negation is not supported.
 Returns the tracks of every raw album title merged into the album, ordered by
 disc, track number, and title. `sourceAlbums` lists the raw titles in display
 order, each track's `sourceAlbum` identifies the title it came from,
-`composer` is the nullable track-level composer tag, and `composers` contains
-the individual names parsed from it. `key` is the value from the album
-listing.
+`composer` is the nullable track-level composer tag, `composers` contains the
+individual names parsed from it, and `matches` says whether the track matches
+the optional `q` search expression. `key` is the value from the album listing.
+
+`q` uses the same syntax as `/api/albums`; filtering is evaluated per track, so
+`composer:beatles` flags only tracks with a matching composer.
 
 ```json
 {
@@ -541,6 +550,7 @@ listing.
       "albumArtist": "Arat Kilo",
       "composer": null,
       "composers": [],
+      "matches": true,
       "sourceAlbum": "Danama",
       "genre": "Jazz, Funk, Ethiopia, France",
       "year": 2025,
@@ -580,12 +590,13 @@ cookie.
 
 The target of the album Play links; it is an HTML/redirect endpoint rather
 than JSON. If the browser has no signed-in DSM session, it redirects to
-`/?login=1&play=…` so the app can show the sign-in dialog. Otherwise it queues
-every track of the album in Audio Station using that user's session (replacing
-the web-player queue) and redirects `303` to the Audio Station app. An invalid
-key shows an HTML `400` page; a playback failure shows an HTML error page with
-a link to Audio Station. This route changes playback state and is meant to be
-opened in a browser tab.
+`/?login=1&play=…` (plus `playQuery=…` when filtering is active) so the app can
+show the sign-in dialog. Otherwise it queues the album in Audio Station using
+that user's session (replacing the web-player queue) and redirects `303` to the
+Audio Station app. With a `q` query parameter, only tracks matching that
+expression are queued. An invalid key shows an HTML `400` page; a playback
+failure shows an HTML error page with a link to Audio Station. This route
+changes playback state and is meant to be opened in a browser tab.
 
 ### `GET /play/track/:id`
 

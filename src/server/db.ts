@@ -129,6 +129,16 @@ const PLAYBACK_TRACK_ID_QUERY = `
   LIMIT 1
 `;
 
+const PLAYBACK_IDS_BY_MUSIC_QUERY = `
+  SELECT t.id
+  FROM ${musicTable} m
+  JOIN ${trackTable} t ON t.path = m.path
+  WHERE m.id = ANY($1::int[])
+    AND m.fs_online IS NOT FALSE
+    AND t.is_virtual = false
+  ORDER BY array_position($1::int[], m.id)
+`;
+
 const FINGERPRINT_QUERY = `
   SELECT
     COUNT(*)::int AS tracks,
@@ -194,6 +204,25 @@ export async function loadPlaybackTrackIdForMusicId(
  * AudioStation song ids for an album, ordered by source title, then disc and
  * track. The ids feed the web player's `updateplaylist` call.
  */
+/** AudioStation song ids for `music` rows, preserving the given order. */
+export async function loadPlaybackTrackIdsForMusicIds(
+  musicIds: number[],
+): Promise<number[]> {
+  if (musicIds.length === 0) return [];
+  const result = await pool.query<{ id: number }>(
+    PLAYBACK_IDS_BY_MUSIC_QUERY,
+    [musicIds],
+  );
+  const seen = new Set<number>();
+  const ids: number[] = [];
+  for (const row of result.rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    ids.push(row.id);
+  }
+  return ids;
+}
+
 export async function loadPlaybackTrackIds(
   sourceAlbums: string[],
   artist: string,

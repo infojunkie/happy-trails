@@ -15,6 +15,7 @@ import {
   type TracksResponse,
 } from '../shared/types.js';
 import { parseArtists, parseComposers } from './artists.js';
+import { createTrackMatcher } from './trackSearch.js';
 import { config } from './config.js';
 import { covers } from './covers.js';
 import { loadTracks } from './db.js';
@@ -395,12 +396,16 @@ export function createApp(
       return;
     }
 
+    const query = (stringParam(req.query.q) ?? '')
+      .slice(0, MAX_SEARCH_LENGTH)
+      .trim();
     const sourceAlbums = dependencies.library.sourceAlbumsFor(decoded.album, decoded.artist);
     const rows = await dependencies.loadTracks(sourceAlbums, decoded.album, decoded.artist);
     if (rows.length === 0) {
       res.status(404).json({ error: 'Album not found' });
       return;
     }
+    const matchesTrack = createTrackMatcher(decoded.album, query);
 
     const body: TracksResponse = {
       album: decoded.album,
@@ -415,6 +420,7 @@ export function createApp(
         albumArtist: row.album_artist,
         composer: row.composer,
         composers: parseComposers(row.composer),
+        matches: matchesTrack(row),
         sourceAlbum: row.source_album ?? '(Unknown Album)',
         genre: row.genre,
         year: row.year,
@@ -510,6 +516,9 @@ export function createApp(
     const frontendTarget = dependencies.playback.audioStationUrlFor(
       requestOrigin(req),
     );
+    const playbackQuery = (stringParam(req.query.q) ?? '')
+      .slice(0, MAX_SEARCH_LENGTH)
+      .trim();
 
     const decoded = decodeAlbumKey(req.params.key);
     if (!decoded) {
@@ -541,10 +550,12 @@ export function createApp(
           );
         return;
       }
-      res.redirect(
-        303,
-        `/?login=1&play=${encodeURIComponent(req.params.key)}`,
-      );
+      const loginParams = new URLSearchParams({
+        login: '1',
+        play: req.params.key,
+      });
+      if (playbackQuery) loginParams.set('playQuery', playbackQuery);
+      res.redirect(303, `/?${loginParams.toString()}`);
       return;
     }
 
@@ -563,7 +574,12 @@ export function createApp(
     }
 
     try {
-      await dependencies.playback.playAlbum(session.client, decoded.album, decoded.artist);
+      await dependencies.playback.playAlbum(
+        session.client,
+        decoded.album,
+        decoded.artist,
+        playbackQuery || null,
+      );
       res.redirect(303, frontendTarget);
     } catch (error) {
       console.error('[play] could not start playback:', error);

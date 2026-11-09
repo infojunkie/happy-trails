@@ -58,6 +58,8 @@ export interface Track {
   composer: string | null;
   /** Individual composer names parsed from `composer`. */
   composers: string[];
+  /** Whether this track matches the active track-list search query. */
+  matches: boolean;
   /** Raw album title this track came from, including a " // <disc label>" suffix. */
   sourceAlbum: string;
   genre: string | null;
