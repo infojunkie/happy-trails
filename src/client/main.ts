@@ -139,6 +139,8 @@ let dialogSequence = 0;
 let searchTimer: number | undefined;
 let retryTimer: number | undefined;
 let statusPollTimer: number | undefined;
+let suppressDialogCloseHistory = false;
+let lastSyncedUrl = '';
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -340,7 +342,7 @@ async function reloadLibrary(): Promise<void> {
       state.serverVersion = newestVersion;
     }
 
-    if (dialog.open) dialog.close();
+    closeDialogForReload();
     trackCache.clear();
     renderFacets();
     renderRegions();
@@ -513,8 +515,7 @@ function handleLoginDeepLink(): void {
 /* Initial load                                                        */
 /* ------------------------------------------------------------------ */
 
-function readUrlState(): void {
-  const params = new URLSearchParams(location.search);
+function applyFilterParams(params: URLSearchParams): void {
   state.q = (params.get('q') ?? '').slice(0, 200);
   const sort = params.get('sort');
   state.sort = isSortKey(sort) ? sort : 'recent';
@@ -537,6 +538,19 @@ function readUrlState(): void {
   const regionMode = params.get('regionMode');
   state.regionMode = isFilterMode(regionMode) ? regionMode : 'any';
 
+  searchInput.value = state.q;
+  sortSelect.value = state.sort;
+  renderModeControls();
+}
+
+function readFilterState(): void {
+  applyFilterParams(new URLSearchParams(location.search));
+}
+
+function readUrlState(): void {
+  const params = new URLSearchParams(location.search);
+  applyFilterParams(params);
+
   const login = params.get('login') === '1';
   const playTrackId = params.get('playTrack');
   const playKey = params.get('play');
@@ -550,13 +564,27 @@ function readUrlState(): void {
       playQuery ? `?q=${encodeURIComponent(playQuery)}` : ''
     }`;
   }
-
-  searchInput.value = state.q;
-  sortSelect.value = state.sort;
-  renderModeControls();
 }
 
-function syncUrl(): void {
+function albumFromHistoryState(): AlbumSummary | null {
+  const candidate = (history.state as { album?: unknown } | null)?.album;
+  if (!candidate || typeof candidate !== 'object') return null;
+  const album = candidate as Partial<AlbumSummary>;
+  if (
+    typeof album.key !== 'string' ||
+    typeof album.album !== 'string' ||
+    typeof album.artist !== 'string'
+  ) {
+    return null;
+  }
+  return album as AlbumSummary;
+}
+
+function currentUrl(): string {
+  return `${location.pathname}${location.search}`;
+}
+
+function buildFilterUrl(): string {
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
   for (const key of state.selectedGenres) {
@@ -569,11 +597,60 @@ function syncUrl(): void {
   if (state.regionMode !== 'any') params.set('regionMode', state.regionMode);
   if (state.sort !== 'recent') params.set('sort', state.sort);
   const query = params.toString();
-  history.replaceState(
-    null,
-    '',
-    query ? `${location.pathname}?${query}` : location.pathname,
-  );
+  return query ? `${location.pathname}?${query}` : location.pathname;
+}
+
+interface SyncUrlOptions {
+  push?: boolean;
+  /** undefined preserves the current history state; null clears the modal. */
+  album?: AlbumSummary | null;
+}
+
+function syncUrl(options: SyncUrlOptions = {}): void {
+  const url = buildFilterUrl();
+  let nextState: unknown = history.state;
+  if (options.album !== undefined) {
+    nextState = options.album === null ? null : { album: options.album };
+  }
+
+  if (options.push) history.pushState(nextState, '', url);
+  else history.replaceState(nextState, '', url);
+  lastSyncedUrl = currentUrl();
+}
+
+/** Record a search/filter/sort state without changing the open album modal. */
+function pushFilterState(): void {
+  const url = buildFilterUrl();
+  if (url === currentUrl() && albumFromHistoryState() === null) return;
+  history.pushState(null, '', url);
+  lastSyncedUrl = currentUrl();
+}
+
+function handlePopState(): void {
+  window.clearTimeout(searchTimer);
+
+  const url = currentUrl();
+  const filtersChanged = url !== lastSyncedUrl;
+  lastSyncedUrl = url;
+
+  if (filtersChanged) {
+    readFilterState();
+    renderFacets();
+    renderRegions();
+    renderActiveFilters();
+  }
+
+  const album = albumFromHistoryState();
+  if (album) {
+    void openAlbum(album, { recordHistory: false });
+  } else if (dialog.open) {
+    closeDialogWithoutHistory();
+  }
+
+  if (filtersChanged) {
+    window.scrollTo({ top: 0 });
+    void loadAlbums(true);
+  }
 }
 
 async function loadLibrary(): Promise<void> {
@@ -808,6 +885,24 @@ function artistNodes(
   return nodes;
 }
 
+/**
+ * Close the album dialog as part of another navigation. The new search/filter
+ * state becomes the next history entry, while the album entry stays behind it
+ * so Back can reopen the dialog.
+ */
+function closeDialogWithoutHistory(): void {
+  if (!dialog.open) return;
+  suppressDialogCloseHistory = true;
+  dialog.close();
+}
+
+/** Refresh closes the dialog too, but should not traverse history. */
+function closeDialogForReload(): void {
+  if (!dialog.open) return;
+  closeDialogWithoutHistory();
+  syncUrl({ album: null });
+}
+
 function navigateToSearch(value: string): void {
   const query = value.trim();
   if (!query) return;
@@ -820,9 +915,9 @@ function navigateToSearch(value: string): void {
   state.selectedRegions = [];
   state.regionMode = 'any';
   searchInput.value = query;
-  if (dialog.open) dialog.close();
+  closeDialogWithoutHistory();
   renderModeControls();
-  syncUrl();
+  pushFilterState();
   renderFacets();
   renderRegions();
   renderActiveFilters();
@@ -831,14 +926,20 @@ function navigateToSearch(value: string): void {
 }
 
 function activateGenre(name: string): void {
-  if (dialog.open) dialog.close();
-  setGenreSelected(genreKey(name), true);
+  const key = genreKey(name);
+  const changed = !state.selectedGenres.includes(key);
+  closeDialogWithoutHistory();
+  setGenreSelected(key, true);
+  if (!changed) pushFilterState();
   window.scrollTo({ top: 0 });
 }
 
 function activateRegion(name: string): void {
-  if (dialog.open) dialog.close();
-  setRegionSelected(regionKey(name), true);
+  const key = regionKey(name);
+  const changed = !state.selectedRegions.includes(key);
+  closeDialogWithoutHistory();
+  setRegionSelected(key, true);
+  if (!changed) pushFilterState();
   window.scrollTo({ top: 0 });
 }
 
@@ -1119,7 +1220,7 @@ function setGenreSelected(
   else current.delete(key);
 
   state.selectedGenres = [...current];
-  syncUrl();
+  pushFilterState();
   if (options.rerenderFacets === false) updateFacetChrome();
   else renderFacets();
   renderActiveFilters();
@@ -1137,7 +1238,7 @@ function setRegionSelected(
   else current.delete(key);
 
   state.selectedRegions = [...current];
-  syncUrl();
+  pushFilterState();
   if (options.rerenderFacets === false) updateRegionChrome();
   else renderRegions();
   renderActiveFilters();
@@ -1152,7 +1253,7 @@ function clearFilters(): void {
   state.q = '';
   searchInput.value = '';
   renderModeControls();
-  syncUrl();
+  pushFilterState();
   renderFacets();
   renderRegions();
   renderActiveFilters();
@@ -1234,7 +1335,14 @@ function renderActiveFilters(): void {
 /* Album dialog                                                        */
 /* ------------------------------------------------------------------ */
 
-async function openAlbum(album: AlbumSummary): Promise<void> {
+async function openAlbum(
+  album: AlbumSummary,
+  options: { recordHistory?: boolean } = {},
+): Promise<void> {
+  if (options.recordHistory !== false) {
+    syncUrl({ push: true, album });
+  }
+
   const sequence = ++dialogSequence;
   const query = state.q.trim();
   const cacheKey = `${album.key}\u0000${query}`;
@@ -1745,12 +1853,13 @@ function applySearch(): void {
   const value = searchInput.value.trim();
   if (value === state.q) return;
   state.q = value;
-  syncUrl();
+  pushFilterState();
   renderActiveFilters();
   void loadAlbums(true);
 }
 
 function bindEvents(): void {
+  window.addEventListener('popstate', handlePopState);
   setAllFacetsCollapsed(narrowFiltersQuery.matches);
   narrowFiltersQuery.addEventListener('change', (event) => {
     setAllFacetsCollapsed(event.matches);
@@ -1777,7 +1886,7 @@ function bindEvents(): void {
   sortSelect.addEventListener('change', () => {
     if (!isSortKey(sortSelect.value) || sortSelect.value === state.sort) return;
     state.sort = sortSelect.value;
-    syncUrl();
+    pushFilterState();
     void loadAlbums(true);
   });
 
@@ -1795,7 +1904,7 @@ function bindEvents(): void {
     input.addEventListener('change', () => {
       if (!input.checked || !isFilterMode(input.value)) return;
       state.genreMode = input.value;
-      syncUrl();
+      pushFilterState();
       void loadAlbums(true);
     });
   }
@@ -1804,7 +1913,7 @@ function bindEvents(): void {
     input.addEventListener('change', () => {
       if (!input.checked || !isFilterMode(input.value)) return;
       state.regionMode = input.value;
-      syncUrl();
+      pushFilterState();
       void loadAlbums(true);
     });
   }
@@ -1819,7 +1928,7 @@ function bindEvents(): void {
     state.selectedGenres = [];
     state.genreMode = 'any';
     renderModeControls();
-    syncUrl();
+    pushFilterState();
     renderFacets();
     renderActiveFilters();
     void loadAlbums(true);
@@ -1835,7 +1944,7 @@ function bindEvents(): void {
     state.selectedRegions = [];
     state.regionMode = 'any';
     renderModeControls();
-    syncUrl();
+    pushFilterState();
     renderRegions();
     renderActiveFilters();
     void loadAlbums(true);
@@ -1888,7 +1997,7 @@ function bindEvents(): void {
     if (target.closest('[data-remove-query]')) {
       state.q = '';
       searchInput.value = '';
-      syncUrl();
+      pushFilterState();
       renderActiveFilters();
       void loadAlbums(true);
       return;
@@ -1969,6 +2078,15 @@ function bindEvents(): void {
   });
   dialog.addEventListener('close', () => {
     dialogSequence += 1;
+    if (suppressDialogCloseHistory) {
+      suppressDialogCloseHistory = false;
+      return;
+    }
+    // Opening an album pushes a history entry; closing it by any UI gesture
+    // consumes that entry so Back continues from the previous app state.
+    if (albumFromHistoryState()) {
+      history.back();
+    }
   });
 
   document.addEventListener('keydown', (event) => {
@@ -1996,8 +2114,16 @@ async function boot(): Promise<void> {
   await loadLibrary();
   startStatusPolling();
   handleLoginDeepLink();
+
+  // A reload keeps history.state, so restore a dialog that was open when the
+  // page was refreshed.
+  const album = albumFromHistoryState();
+  if (album && state.libraryReady) {
+    void openAlbum(album, { recordHistory: false });
+  }
 }
 
 readUrlState();
+lastSyncedUrl = currentUrl();
 bindEvents();
 void boot();

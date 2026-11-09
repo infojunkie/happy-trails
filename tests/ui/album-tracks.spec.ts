@@ -142,12 +142,63 @@ test('album dialog shows Artwork only when the folder has Artwork.pdf', async ({
   await expect(artwork).toHaveAttribute('rel', 'noopener');
 
   await page.locator('#album-dialog .dialog-close').click();
+  await expect
+    .poll(() => page.evaluate(() => window.history.state?.album ?? null))
+    .toBeNull();
   await page.goto(`/?q=${encodeURIComponent('album:"kind of blue"')}`);
   await expect(page.locator('.album-card').first()).toBeVisible();
   await openAlbum(page, 'Kind of Blue');
   await expect(
     page.locator('#album-dialog .dialog-artwork'),
   ).toHaveCount(0);
+});
+
+test('Back closes an album dialog and Forward reopens it', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#search').fill('album:"abbey road"');
+  await page.locator('#search').press('Enter');
+  await expectSummaryFor(page, { q: 'album:"abbey road"' });
+
+  await openAlbum(page, 'Abbey Road');
+  await expect(page.locator('#album-dialog')).toBeVisible();
+
+  await page.goBack();
+  await expect(page.locator('#album-dialog')).toBeHidden();
+  await expect(page.locator('#search')).toHaveValue('album:"abbey road"');
+
+  await page.goForward();
+  await expect(page.locator('#album-dialog')).toBeVisible();
+  await expect(page.locator('.dialog-title')).toHaveText('Abbey Road');
+
+  // Closing by button consumes the modal entry rather than leaving a stale one.
+  await page.locator('#album-dialog .dialog-close').click();
+  await expect(page.locator('#album-dialog')).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => window.history.state?.album ?? null))
+    .toBeNull();
+
+  await page.goBack();
+  await expect(page.locator('#search')).toHaveValue('');
+  await expectSummaryFor(page);
+});
+
+test('Back from a dialog search reopens the album dialog', async ({ page }) => {
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await openAlbum(page, 'Abbey Road');
+
+  await page
+    .locator('#album-dialog .composer-link', { hasText: 'John Lennon' })
+    .first()
+    .click();
+  await expect(page.locator('#album-dialog')).toBeHidden();
+  await expect(page.locator('#search')).toHaveValue('John Lennon');
+  await expectSummaryFor(page, { q: 'John Lennon' });
+
+  await page.goBack();
+  await expect(page.locator('#album-dialog')).toBeVisible();
+  await expect(page.locator('.dialog-title')).toHaveText('Abbey Road');
+  await expect(page.locator('#search')).toHaveValue('album:"abbey road"');
 });
 
 test('track filter defaults to matching tracks and updates album Play', async ({
@@ -239,6 +290,9 @@ test('sign-in reveals Play links and sign-out removes them', async ({ page }) =>
   await expect(trackPlay).toHaveAttribute('href', /^\/play\/track\/\d+$/);
   await expect(trackPlay).toHaveAttribute('target', '_blank');
   await page.locator('#album-dialog .dialog-close').click();
+  await expect
+    .poll(() => page.evaluate(() => window.history.state?.album ?? null))
+    .toBeNull();
 
   await page.reload();
   await expect(page.locator('.album-card').first()).toBeVisible();

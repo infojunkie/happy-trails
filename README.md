@@ -68,6 +68,9 @@ facets built from the comma-separated `genre` column.
   blue play control that queues just that track. No audio player lives in this
   app. Play controls are hidden until the app session is authenticated.
 - Shareable URL state (`?genre=Jazz&genreMode=all&region=France&q=...&sort=artist`).
+- Browser Back/Forward replays searches, filters, sorts, and album dialogs.
+  Opening an album records a history entry; closing it consumes that entry, and
+  Forward reopens it.
 - Light/dark colour schemes, keyboard navigation, `/` focuses search.
 - Responsive layout for narrow screens.
 
@@ -341,6 +344,24 @@ without buffering them in server memory. Availability is cached briefly in
 memory; missing files are retried sooner than present ones. The service
 account needs read access to the music share.
 
+### Navigation history
+
+Every applied search, facet change, match-mode change, sort change, and clear
+action pushes a browser history entry whose URL carries the filter state.
+Typing in the search box is debounced, so each applied query is a separate
+state. Loading more albums and scroll position are not part of the recorded
+state.
+
+Opening an album pushes another entry. The full album summary is stored in
+`history.state` (the URL is unchanged), so Back closes the dialog and returns to
+the previous search/filter state, while Forward reopens it even though the
+album list may have been reloaded. Closing the dialog with its close button,
+Escape, or the backdrop calls `history.back()`, which consumes the modal entry
+instead of leaving a stale one. Searches and filter changes started from inside
+the dialog close it for navigation but keep the dialog entry behind the new
+state, so Back reopens the album. A page reload also restores an open dialog
+from `history.state`.
+
 ### Sign-in and playback handoff
 
 Users sign in with their own DSM account from the app's header. The browser
@@ -422,7 +443,7 @@ npm run test:ui:headed         # Playwright with a visible browser
 - API tests start the real Express app via `createApp()` with an injected fixture index.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, and combinations.
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, help popups, and the sticky error banner are checked against stable data.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, Back/Forward search and dialog restoration, help popups, and the sticky error banner are checked against stable data.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts`; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running.
 - `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.

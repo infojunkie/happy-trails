@@ -243,6 +243,41 @@ test('search help popup lists fields and runs examples', async ({ page }) => {
   await expectFirstApiAlbum(page, example);
 });
 
+test('Back and Forward restore search and sort states', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await expectSummaryFor(page);
+
+  await page.locator('#search').fill('beatles');
+  await page.locator('#search').press('Enter');
+  await expectSummaryFor(page, { q: 'beatles' });
+  await expect(page).toHaveURL(/[?&]q=beatles/);
+
+  await page.locator('#search').fill('miles');
+  await page.locator('#search').press('Enter');
+  await expectSummaryFor(page, { q: 'miles' });
+
+  await page.goBack();
+  await expect(page.locator('#search')).toHaveValue('beatles');
+  await expectSummaryFor(page, { q: 'beatles' });
+
+  await page.goBack();
+  await expect(page.locator('#search')).toHaveValue('');
+  await expectSummaryFor(page);
+
+  await page.goForward();
+  await expect(page.locator('#search')).toHaveValue('beatles');
+  await expectSummaryFor(page, { q: 'beatles' });
+
+  await page.locator('#sort').selectOption('album');
+  await expectSummaryFor(page, { q: 'beatles', sort: 'album' });
+  await expect(page).toHaveURL(/sort=album/);
+
+  await page.goBack();
+  await expect(page.locator('#sort')).toHaveValue('recent');
+  await expectSummaryFor(page, { q: 'beatles' });
+});
+
 test('sort and URL state survive navigation', async ({ page }) => {
   await page.goto('/?q=artist%3Abeatles&sort=album');
   await expect(page.locator('.album-card').first()).toBeVisible();
