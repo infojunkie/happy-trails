@@ -1239,23 +1239,48 @@ async function openAlbum(album: AlbumSummary): Promise<void> {
   const query = state.q.trim();
   const cacheKey = `${album.key}\u0000${query}`;
   state.dialogShowAllTracks = query.length === 0;
-  renderDialog(album, null, true);
-  if (!dialog.open) dialog.showModal();
 
   const cached = trackCache.get(cacheKey);
-  if (cached) {
-    renderDialog(album, cached, false);
-    return;
-  }
+  let currentTracks: TracksResponse | null = cached ?? null;
+  let loading = !cached;
+  let currentError: string | undefined;
+  let artworkAvailable = false;
+
+  const render = (focusClose: boolean): void => {
+    if (sequence !== dialogSequence) return;
+    renderDialog(
+      album,
+      currentTracks,
+      loading,
+      currentError,
+      focusClose,
+      artworkAvailable,
+    );
+  };
+
+  render(true);
+  if (!dialog.open) dialog.showModal();
+
+  void api.artworkAvailable(album.key).then((available) => {
+    if (sequence !== dialogSequence || !available) return;
+    artworkAvailable = true;
+    render(false);
+  });
+
+  if (cached) return;
 
   try {
     const response = await api.tracks(album.key, query);
     if (sequence !== dialogSequence) return;
     trackCache.set(cacheKey, response);
-    renderDialog(album, response, false);
+    currentTracks = response;
+    loading = false;
+    render(false);
   } catch (error) {
     if (sequence !== dialogSequence) return;
-    renderDialog(album, null, false, describe(error));
+    loading = false;
+    currentError = describe(error);
+    render(false);
   }
 }
 
@@ -1265,6 +1290,7 @@ function renderDialog(
   loading: boolean,
   error?: string,
   focusClose = true,
+  artworkAvailable = false,
 ): void {
   const closeButton = el(
     'button',
@@ -1360,7 +1386,14 @@ function renderDialog(
       button.addEventListener('click', () => {
         if (state.dialogShowAllTracks === showAll) return;
         state.dialogShowAllTracks = showAll;
-        renderDialog(album, tracks, loading, error, false);
+        renderDialog(
+          album,
+          tracks,
+          loading,
+          error,
+          false,
+          artworkAvailable,
+        );
         dialog
           .querySelector<HTMLButtonElement>('.track-filter-option.is-active')
           ?.focus();
@@ -1390,6 +1423,7 @@ function renderDialog(
     );
   }
 
+  const actions: HTMLElement[] = [];
   const playQuery = query && !showAllTracks ? query : null;
   if (
     state.playbackEnabled &&
@@ -1399,7 +1433,7 @@ function renderDialog(
     const playUrl = `/play/${encodeURIComponent(album.key)}${
       playQuery ? `?q=${encodeURIComponent(playQuery)}` : ''
     }`;
-    heading.append(
+    actions.push(
       el(
         'a',
         {
@@ -1414,6 +1448,27 @@ function renderDialog(
         }),
       ),
     );
+  }
+
+  if (artworkAvailable) {
+    actions.push(
+      el(
+        'a',
+        {
+          class: 'dialog-artwork',
+          href: `/api/albums/${encodeURIComponent(album.key)}/artwork`,
+          target: '_blank',
+          rel: 'noopener',
+          title: 'Open the album artwork PDF',
+        },
+        el('span', { 'aria-hidden': 'true', text: '▤' }),
+        el('span', { text: 'Artwork' }),
+      ),
+    );
+  }
+
+  if (actions.length > 0) {
+    heading.append(el('div', { class: 'dialog-actions' }, ...actions));
   }
 
   const header = el(

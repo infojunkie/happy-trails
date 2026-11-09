@@ -124,6 +124,32 @@ test('album dialog genre and region chips activate filters', async ({ page }) =>
   await expectSummaryFor(page, { q: 'artist:getz', region: 'Brazil' });
 });
 
+test('album dialog shows Artwork only when the folder has Artwork.pdf', async ({
+  page,
+}) => {
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await openAlbum(page, 'Abbey Road');
+
+  const artwork = page.locator('#album-dialog .dialog-artwork');
+  await expect(artwork).toBeVisible();
+  await expect(artwork).toContainText('Artwork');
+  await expect(artwork).toHaveAttribute(
+    'href',
+    /^\/api\/albums\/[^/]+\/artwork$/,
+  );
+  await expect(artwork).toHaveAttribute('target', '_blank');
+  await expect(artwork).toHaveAttribute('rel', 'noopener');
+
+  await page.locator('#album-dialog .dialog-close').click();
+  await page.goto(`/?q=${encodeURIComponent('album:"kind of blue"')}`);
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await openAlbum(page, 'Kind of Blue');
+  await expect(
+    page.locator('#album-dialog .dialog-artwork'),
+  ).toHaveCount(0);
+});
+
 test('track filter defaults to matching tracks and updates album Play', async ({
   page,
 }) => {

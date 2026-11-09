@@ -100,4 +100,16 @@ export const api = {
       `/api/albums/${encodeURIComponent(key)}/tracks${search ? `?${search}` : ''}`,
     );
   },
+
+  artworkAvailable: async (key: string): Promise<boolean> => {
+    try {
+      const response = await fetch(
+        `/api/albums/${encodeURIComponent(key)}/artwork`,
+        { method: 'HEAD', headers: { Accept: 'application/pdf' } },
+      );
+      return response.ok;
+    } catch {
+      return false;
+    }
+  },
 };

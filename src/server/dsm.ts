@@ -1,5 +1,6 @@
 import https from 'node:https';
-import type { IncomingHttpHeaders } from 'node:http';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
+import type { Readable } from 'node:stream';
 
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const LOGIN_BACKOFF_MS = 30_000;
@@ -23,6 +24,13 @@ export interface DsmSettings {
 export interface CoverImage {
   body: Buffer;
   contentType: string;
+}
+
+/** A FileStation download, streamed so large PDFs are not buffered in memory. */
+export interface FileStream {
+  stream: Readable;
+  status: number;
+  headers: IncomingHttpHeaders;
 }
 
 export class DsmError extends Error {
@@ -61,6 +69,18 @@ type CoverResult =
   | { kind: 'auth' }
   | { kind: 'error'; message: string };
 
+type FileInfoResult =
+  | { kind: 'exists' }
+  | { kind: 'missing' }
+  | { kind: 'auth' }
+  | { kind: 'error'; message: string };
+
+type FileStreamResult =
+  | { kind: 'file'; file: FileStream }
+  | { kind: 'missing' }
+  | { kind: 'auth' }
+  | { kind: 'error'; message: string };
+
 interface LoginPayload {
   success?: unknown;
   data?: { synotoken?: unknown; account?: unknown };
@@ -76,12 +96,41 @@ interface WebPlayerPayload extends ErrorPayload {
   data?: { songs?: unknown };
 }
 
+interface FileInfoEntry {
+  code?: unknown;
+  isdir?: unknown;
+}
+
+interface FileInfoPayload extends ErrorPayload {
+  data?: { files?: unknown };
+}
+
 function jsonBody(buffer: Buffer): unknown {
   try {
     return JSON.parse(buffer.toString('utf8')) as unknown;
   } catch {
     return null;
   }
+}
+
+/** Read at most `limit` bytes of an error response; discard the rest. */
+function readSmallResponse(
+  response: IncomingMessage,
+  limit = 64 * 1024,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+
+    response.on('data', (chunk: Buffer) => {
+      if (size >= limit) return;
+      const remaining = limit - size;
+      chunks.push(chunk.subarray(0, remaining));
+      size += Math.min(chunk.length, remaining);
+    });
+    response.on('end', () => resolve(Buffer.concat(chunks)));
+    response.on('error', reject);
+  });
 }
 
 function errorCode(payload: unknown): number | undefined {
@@ -118,6 +167,48 @@ export class DsmClient {
       if (result.kind === 'missing') return null;
 
       // Expired/invalid sessions are retried once with a fresh login.
+      this.session = null;
+      if (attempt === 1) {
+        if (result.kind === 'error') throw new DsmError(result.message);
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Whether an exact file path exists in the shared-folder namespace used by
+   * FileStation (for example `/music/Artist/Album/Artwork.pdf`).
+   */
+  async fileExists(path: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await this.ensureSession();
+      const result = await this.requestFileInfo(session, path);
+
+      if (result.kind === 'exists') return true;
+      if (result.kind === 'missing') return false;
+
+      this.session = null;
+      if (attempt === 1) {
+        if (result.kind === 'error') throw new DsmError(result.message);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Open a FileStation download as a stream. Returns null when the file is not
+   * found. `range` is forwarded so the browser can seek inside large PDFs.
+   */
+  async openFile(path: string, range?: string): Promise<FileStream | null> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await this.ensureSession();
+      const result = await this.requestFileStream(session, path, range);
+
+      if (result.kind === 'file') return result.file;
+      if (result.kind === 'missing') return null;
+
       this.session = null;
       if (attempt === 1) {
         if (result.kind === 'error') throw new DsmError(result.message);
@@ -282,6 +373,148 @@ export class DsmClient {
       kind: 'error',
       message: `unexpected cover response (HTTP ${response.status}, ${contentType || 'unknown type'})`,
     };
+  }
+
+  private async requestFileInfo(
+    session: Session,
+    path: string,
+  ): Promise<FileInfoResult> {
+    const url = this.endpoint('/webapi/entry.cgi');
+    url.searchParams.set('api', 'SYNO.FileStation.List');
+    url.searchParams.set('version', '2');
+    url.searchParams.set('method', 'getinfo');
+    url.searchParams.set('path', path);
+    url.searchParams.set('additional', '["size","type"]');
+    url.searchParams.set('SynoToken', session.token);
+
+    const response = await this.request(url, {
+      Accept: 'application/json',
+      ...(session.cookie ? { Cookie: session.cookie } : {}),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return { kind: 'auth' };
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return {
+        kind: 'error',
+        message: `FileStation returned HTTP ${response.status}`,
+      };
+    }
+
+    const payload = jsonBody(response.body) as FileInfoPayload | null;
+    if (payload?.success !== true) {
+      const code = errorCode(payload);
+      if (code === 408) return { kind: 'missing' };
+      if (code !== undefined && AUTH_ERROR_CODES.has(code)) {
+        return { kind: 'auth' };
+      }
+      return {
+        kind: 'error',
+        message: `FileStation rejected the file query${code === undefined ? '' : ` (code ${code})`}`,
+      };
+    }
+
+    const files = payload.data?.files;
+    const entry = Array.isArray(files)
+      ? (files[0] as FileInfoEntry | undefined)
+      : undefined;
+    if (!entry) return { kind: 'missing' };
+
+    // getinfo reports a missing path inside a successful response.
+    if (entry.code === 408) return { kind: 'missing' };
+    if (entry.code !== undefined) {
+      const code = typeof entry.code === 'number' ? entry.code : undefined;
+      if (code !== undefined && AUTH_ERROR_CODES.has(code)) {
+        return { kind: 'auth' };
+      }
+      return {
+        kind: 'error',
+        message: `FileStation could not inspect the file${code === undefined ? '' : ` (code ${code})`}`,
+      };
+    }
+    return entry.isdir === false ? { kind: 'exists' } : { kind: 'missing' };
+  }
+
+  private async requestFileStream(
+    session: Session,
+    path: string,
+    range?: string,
+  ): Promise<FileStreamResult> {
+    const url = this.endpoint('/webapi/entry.cgi');
+    url.searchParams.set('api', 'SYNO.FileStation.Download');
+    url.searchParams.set('version', '2');
+    url.searchParams.set('method', 'download');
+    url.searchParams.set('path', path);
+    url.searchParams.set('mode', 'open');
+    url.searchParams.set('SynoToken', session.token);
+
+    const response = await this.openResponse(url, {
+      Accept: 'application/pdf',
+      ...(range ? { Range: range } : {}),
+      ...(session.cookie ? { Cookie: session.cookie } : {}),
+    });
+
+    const status = response.statusCode ?? 0;
+    const contentType = String(
+      response.headers['content-type'] ?? '',
+    )
+      .toLowerCase()
+      .split(';', 1)[0];
+
+    if ((status === 200 || status === 206) && contentType === 'application/pdf') {
+      return {
+        kind: 'file',
+        file: { stream: response, status, headers: response.headers },
+      };
+    }
+
+    if (status === 401 || status === 403) {
+      response.resume();
+      return { kind: 'auth' };
+    }
+    if (status === 404) {
+      response.resume();
+      return { kind: 'missing' };
+    }
+
+    // Synology returns HTTP 200 with a JSON error body for some failures, and
+    // an HTML error page (usually 502) when the path is not accessible.
+    const body = await readSmallResponse(response);
+    const code = errorCode(jsonBody(body));
+    if (code === 408) return { kind: 'missing' };
+    if (code !== undefined && AUTH_ERROR_CODES.has(code)) {
+      return { kind: 'auth' };
+    }
+    if (contentType === 'text/html') return { kind: 'missing' };
+    return {
+      kind: 'error',
+      message: `unexpected file response (HTTP ${status}, ${contentType || 'unknown type'})`,
+    };
+  }
+
+  private openResponse(
+    url: URL,
+    headers: Record<string, string>,
+  ): Promise<IncomingMessage> {
+    return new Promise((resolve, reject) => {
+      const request = https.request(
+        url,
+        {
+          method: 'GET',
+          agent: this.agent,
+          headers,
+          timeout: this.settings.timeoutMs,
+        },
+        (response) => resolve(response),
+      );
+
+      request.on('timeout', () => {
+        request.destroy(new Error('DSM request timed out'));
+      });
+      request.on('error', reject);
+      request.end();
+    });
   }
 
   private async webPlayerQueueLength(session: Session): Promise<number> {

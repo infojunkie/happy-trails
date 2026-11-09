@@ -1448,6 +1448,38 @@ button.chip:hover {
   filter: brightness(1.08);
 }
 
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.dialog-actions .dialog-play {
+  margin-top: 0;
+}
+
+.dialog-artwork {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 7px 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dialog-artwork:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .dialog-close {
   display: grid;
   place-items: center;

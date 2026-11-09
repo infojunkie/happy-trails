@@ -59,6 +59,9 @@ facets built from the comma-separated `genre` column.
   since disc numbers frequently collide across the source titles.
 - Album artwork from Synology AudioStation, proxied and cached by the server.
   Albums without artwork keep the generated gradient/initials cover.
+- An **Artwork** button in the album dialog when the album folder contains
+  `Artwork.pdf`. The server finds it through Synology FileStation and streams
+  the PDF to the browser, which opens it with its normal PDF viewer.
 - Sign in with your own Synology account, then **Play** hands an album to
   Audio Station: the server replaces the Audio Station web-player queue with
   the album's tracks and opens Audio Station. Each track row also has a small
@@ -74,8 +77,8 @@ facets built from the comma-separated `genre` column.
 - Read access to a PostgreSQL database containing the `music` table described
   by [`music.sql`](docs/music.sql).
 - Optional: read access to the `track` table and a Synology DSM URL for Audio
-  Station playback. A DSM service account is optional and used only for album
-  covers; users sign in with their own account to play.
+  Station playback. A DSM service account is optional and used for album covers
+  and artwork lookups; users sign in with their own account to play.
 
 ## Quick start
 
@@ -98,8 +101,9 @@ Synology settings live as `DSADDR` / `DSUSER` / `DSPASSWD` (or set `DSM_URL` /
 `DSM_USER` / `DSM_PASS` in this app's `.env`):
 
 - `DSM_URL` (or `DSADDR`) is required for user sign-in and playback.
-- `DSM_USER` / `DSM_PASS` are an optional service account used only for album
-  covers. Users sign in with their own DSM account in the app to play.
+- `DSM_USER` / `DSM_PASS` are an optional service account used for album
+  covers and artwork lookups. It needs read access to the music share.
+  Users sign in with their own DSM account in the app to play.
 
 Without a DSM URL, the app still runs with generated covers and no Play links.
 
@@ -170,7 +174,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `TRACK_TABLE` | `track` | Table used to map a music path to an AudioStation cover id. |
 | `DSM_URL` | — | Synology DSM base URL; required for user sign-in and album covers. Falls back to `DSADDR`. |
 | `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise `[path][:port]` is applied to the request origin (Origin header, with Referer/Host fallback): path defaults to `/`, and an omitted port preserves the origin port. Examples: `/`, `/audio`, `:5001`, `/audio:5001`. |
-| `DSM_USER` / `DSM_PASS` | — | Optional service account used only for album covers. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
+| `DSM_USER` / `DSM_PASS` | — | Optional service account used for album covers and artwork lookups. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
 | `DSM_TLS_REJECT_UNAUTHORIZED` | `false` | Verify the NAS TLS certificate (the stock certificate is self-signed). |
 | `DSM_TIMEOUT_MS` | `10000` | Timeout for Synology requests. |
 | `COVER_CACHE_TTL_MS` | `86400000` | Server-side cover cache TTL. |
@@ -325,6 +329,18 @@ The UI then keeps the generated gradient cover. Cover bytes are cached in a
 bounded LRU (`COVER_CACHE_ENTRIES`) and served with a one-day browser cache;
 the client requests them lazily as cards become visible.
 
+Album booklet PDFs use Synology FileStation. The representative media path is
+`/volume1/music/...`; FileStation addresses the same file as `/music/...`, so
+the server strips the volume prefix and asks `SYNO.FileStation.List`
+(`getinfo`) for `Artwork.pdf` in that folder. The dialog checks with a `HEAD`
+request and only renders the **Artwork** button when the file exists. The
+button opens `GET /api/albums/:key/artwork`, which streams the file through
+`SYNO.FileStation.Download` (`mode=open`) and forwards browser range requests,
+so the browser's own PDF viewer can open and seek in even very large booklets
+without buffering them in server memory. Availability is cached briefly in
+memory; missing files are retried sooner than present ones. The service
+account needs read access to the music share.
+
 ### Sign-in and playback handoff
 
 Users sign in with their own DSM account from the app's header. The browser
@@ -394,8 +410,9 @@ The suite is deterministic and does not require PostgreSQL, DSM, or network acce
 npm run test:install-browsers  # once per machine/CI
 npm run lint                   # ESLint
 npm run typecheck              # server, client, and tests
-npm test                       # API + search + UI
+npm test                       # API + search + artwork + UI
 npm run test:api               # Express endpoints
+npm run test:artwork           # media-path to FileStation path mapping
 npm run test:config            # DSM frontend URL parsing
 npm run test:search            # parser + SQLite search/tag combinations
 npm run test:ui                # Playwright UI tests
@@ -404,14 +421,16 @@ npm run test:ui:headed         # Playwright with a visible browser
 
 - API tests start the real Express app via `createApp()` with an injected fixture index.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, and combinations.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, help popups, and the sticky error banner are checked against stable data.
+- Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, help popups, and the sticky error banner are checked against stable data.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts`; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running.
 - `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.
 
 ## API
 
-All endpoints return JSON.
+Most endpoints return JSON; cover and artwork endpoints return images or PDFs,
+and the `/play` endpoints redirect to DSM or render a small HTML error page.
 
 ### `GET /api/status`
 
@@ -577,6 +596,25 @@ album has no artwork, covers are not configured, or the path cannot be resolved
 to an AudioStation song; `400` for an invalid album key. The client falls back
 to its generated cover on any failure.
 
+### `HEAD /api/albums/:key/artwork`
+
+Reports whether the album folder contains `Artwork.pdf`. Returns `200` with
+`Content-Type: application/pdf` when present, `404` when absent, DSM/FileStation
+is not configured, or the album has no representative path, and `400` for an
+invalid album key. The five-minute browser cache matches the server's short
+availability cache.
+
+### `GET /api/albums/:key/artwork`
+
+Streams the album's `Artwork.pdf` with
+`Content-Disposition: inline; filename="Artwork.pdf"` and
+`Content-Type: application/pdf`, so the browser opens it in its default PDF
+viewer. `Range` requests are forwarded to FileStation; a `206` response includes
+`Content-Range`. Returns `404` when the PDF is absent or FileStation is not
+configured, `400` for an invalid album key, and `502` when Synology fails while
+opening the file. Files are relayed as streams, so large booklets are not
+buffered in memory.
+
 ### Session endpoints
 
 `GET /api/session` returns `{ "authenticated": boolean, "account": string | null }`
@@ -623,10 +661,11 @@ happy-trails/
 │   ├── server/
 │   │   ├── app.ts        Express routes and static files
 │   │   ├── artists.ts    Configurable multi-artist parser
+│   │   ├── artwork.ts    FileStation Artwork.pdf lookup and streaming
 │   │   ├── config.ts     Environment configuration
 │   │   ├── covers.ts     Bounded cover cache and cover lookup
 │   │   ├── db.ts         Pool and SQL queries
-│   │   ├── dsm.ts        Synology login, covers, and web-player client
+│   │   ├── dsm.ts        Synology login, covers, FileStation, and web-player client
 │   │   ├── index.ts      Startup and shutdown
 │   │   ├── library.ts    Index lifecycle, rebuilds, and change detection
 │   │   ├── playback.ts   Album/track-to-Audio-Station handoff
@@ -648,6 +687,7 @@ happy-trails/
 │   └── styles.css        Compiled client files are written to public/client/
 ├── tests/
 │   ├── api/              Express endpoint tests
+│   ├── artwork/          FileStation path-mapping tests
 │   ├── config/           DSM frontend URL parsing tests
 │   ├── search/           Parser and SQLite search tests
 │   ├── ui/               Playwright browser tests
@@ -673,12 +713,14 @@ happy-trails/
   user clicks the enabled Refresh control. A rebuild failure leaves the old
   snapshot in place and is reported through `error`.
 - Static files are served with ETags. JSON API responses use `Cache-Control:
-  no-store`; cover images use a one-day private browser cache.
+  no-store`; cover images use a one-day private browser cache, and artwork
+  availability uses five minutes.
 - Covers require the `track` table and, if configured, the optional DSM
-  service account. Playback requires the `track` table, a `DSM_URL`, and each
-  user's own DSM sign-in. If the NAS is unreachable, cover requests fail (the
-  UI keeps its generated placeholders) and Play shows an HTML error page; the
-  rest of the app is unaffected.
+  service account. Artwork PDFs require that account plus FileStation read
+  access to the music share. Playback requires the `track` table, a `DSM_URL`,
+  and each user's own DSM sign-in. If the NAS is unreachable, cover requests
+  fail (the UI keeps its generated placeholders), the Artwork button stays
+  hidden, and Play shows an HTML error page; the rest of the app is unaffected.
 - Sign-in sessions live in server memory with an 8-hour TTL; restarting the
   server signs everyone out. Passwords are kept in memory (inside the user's
   DSM client) so expired tokens can be renewed, but are never written to disk,

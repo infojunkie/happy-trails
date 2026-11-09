@@ -71,6 +71,7 @@ const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true })
 
 let main: RunningFixture;
 let covers: RunningFixture;
+let artwork: RunningFixture;
 
 before(async () => {
   main = await runFixture();
@@ -82,11 +83,17 @@ before(async () => {
       ],
     ]),
   });
+  artwork = await runFixture({
+    artworkFiles: new Map([
+      ['covers/abbey.jpg', Buffer.from('%PDF-1.4 fixture artwork')],
+    ]),
+  });
 });
 
 after(async () => {
   await closeFixture(main);
   await closeFixture(covers);
+  await closeFixture(artwork);
 });
 
 test('GET /api/status exposes library and playback state', async () => {
@@ -412,6 +419,51 @@ test('GET /api/albums/:key/cover handles invalid, missing, and present covers', 
   );
   assert.equal(missing.status, 404);
   assert.equal(covers.context.coverCalls.length, before);
+});
+
+test('artwork endpoints report and stream Artwork.pdf', async () => {
+  const invalid = await fetch(
+    `${artwork.server.baseUrl}/api/albums/nope/artwork`,
+    { method: 'HEAD' },
+  );
+  assert.equal(invalid.status, 400);
+
+  const abbey = await findAlbum(artwork.server.baseUrl, 'Abbey Road');
+  const artworkUrl = `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(abbey.key)}/artwork`;
+  const head = await fetch(artworkUrl, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get('content-type'), 'application/pdf');
+  assert.equal(
+    head.headers.get('content-disposition'),
+    'inline; filename="Artwork.pdf"',
+  );
+  assert.match(head.headers.get('cache-control') ?? '', /max-age=300/);
+
+  const download = await fetch(artworkUrl, {
+    headers: { Range: 'bytes=0-3' },
+  });
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get('content-type'), 'application/pdf');
+  assert.equal(await download.text(), '%PDF-1.4 fixture artwork');
+  assert.deepEqual(artwork.context.artworkRangeCalls, ['bytes=0-3']);
+
+  const kindOfBlue = await findAlbum(artwork.server.baseUrl, 'Kind of Blue');
+  const missingHead = await fetch(
+    `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(kindOfBlue.key)}/artwork`,
+    { method: 'HEAD' },
+  );
+  assert.equal(missingHead.status, 404);
+  const missingGet = await fetch(
+    `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(kindOfBlue.key)}/artwork`,
+  );
+  assert.equal(missingGet.status, 404);
+
+  const unconfigured = await findAlbum(main.server.baseUrl, 'Abbey Road');
+  const unavailable = await fetch(
+    `${main.server.baseUrl}/api/albums/${encodeURIComponent(unconfigured.key)}/artwork`,
+    { method: 'HEAD' },
+  );
+  assert.equal(unavailable.status, 404);
 });
 
 test('GET /api/albums/:key/tracks returns merged tracks and composer metadata', async () => {

@@ -3,6 +3,9 @@ import { createFixtureContext } from './library.js';
 
 const port = Number.parseInt(process.env.UI_PORT ?? '4173', 10);
 const context = await createFixtureContext({
+  artworkFiles: new Map([
+    ['covers/abbey.jpg', Buffer.from('%PDF-1.4\nfixture artwork\n')],
+  ]),
   // Ensure both facet-search inputs are visible in the UI (more than 12 tags).
   extraRows: [
     {

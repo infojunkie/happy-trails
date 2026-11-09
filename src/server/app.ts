@@ -14,6 +14,7 @@ import {
   type SessionResponse,
   type TracksResponse,
 } from '../shared/types.js';
+import { artwork } from './artwork.js';
 import { parseArtists, parseComposers } from './artists.js';
 import { createTrackMatcher } from './trackSearch.js';
 import { config } from './config.js';
@@ -45,6 +46,7 @@ export interface AppDependencies {
   >;
   loadTracks: typeof loadTracks;
   covers: Pick<typeof covers, 'getCover'>;
+  artwork: Pick<typeof artwork, 'hasArtwork' | 'openArtwork'>;
   userSessions: Pick<
     typeof userSessions,
     | 'enabled'
@@ -66,6 +68,7 @@ const defaultDependencies: AppDependencies = {
   library,
   loadTracks,
   covers,
+  artwork,
   userSessions,
   playback,
   config,
@@ -387,6 +390,96 @@ export function createApp(
     res.setHeader('Cache-Control', 'private, max-age=86400');
     res.type(image.contentType);
     res.send(image.body);
+  });
+
+  app.head('/api/albums/:key/artwork', async (req, res) => {
+    const decoded = decodeAlbumKey(req.params.key);
+    if (!decoded) {
+      res.status(400).end();
+      return;
+    }
+
+    const coverPath = dependencies.library.coverPathFor(
+      decoded.album,
+      decoded.artist,
+    );
+    if (!coverPath) {
+      res.status(404).end();
+      return;
+    }
+
+    // The button appears when the album folder contains an Artwork.pdf.
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    try {
+      if (!(await dependencies.artwork.hasArtwork(coverPath))) {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline; filename="Artwork.pdf"');
+      res.status(200).end();
+    } catch {
+      res.status(502).end();
+    }
+  });
+
+  app.get('/api/albums/:key/artwork', async (req, res) => {
+    const decoded = decodeAlbumKey(req.params.key);
+    if (!decoded) {
+      res.status(400).end();
+      return;
+    }
+
+    const coverPath = dependencies.library.coverPathFor(
+      decoded.album,
+      decoded.artist,
+    );
+    if (!coverPath) {
+      res.status(404).end();
+      return;
+    }
+
+    const range =
+      typeof req.headers.range === 'string' ? req.headers.range : undefined;
+    let file;
+    try {
+      file = await dependencies.artwork.openArtwork(coverPath, range);
+    } catch (error) {
+      console.error('[artwork] could not open PDF:', error);
+      res.status(502).end();
+      return;
+    }
+
+    if (!file) {
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.status(404).end();
+      return;
+    }
+
+    res.status(file.status);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="Artwork.pdf"');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    const passthroughHeaders = [
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'last-modified',
+      'etag',
+    ] as const;
+    for (const name of passthroughHeaders) {
+      const value = file.headers[name];
+      if (typeof value === 'string') res.setHeader(name, value);
+    }
+
+    file.stream.on('error', (error) => {
+      console.error('[artwork] PDF stream failed:', error);
+      if (!res.headersSent) res.status(502).end();
+      else res.destroy();
+    });
+    res.on('close', () => file.stream.destroy());
+    file.stream.pipe(res);
   });
 
   app.get('/api/albums/:key/tracks', async (req, res) => {

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
 import type { Request } from 'express';
 import type { AppDependencies } from '../../src/server/app.js';
 import type { AlbumRow, TrackRow } from '../../src/server/db.js';
@@ -290,6 +291,8 @@ export interface FixtureOptions {
   playbackUrl?: string | null;
   playbackError?: Error | null;
   coverImages?: Map<string, CoverImage>;
+  /** Representative track paths whose album folder contains Artwork.pdf. */
+  artworkFiles?: Map<string, Buffer>;
   ready?: boolean;
   extraRows?: AlbumRow[];
 }
@@ -302,6 +305,8 @@ export interface FixtureContext {
   trackPlaybackCalls: number[];
   playbackOrigins: Array<string | null>;
   coverCalls: string[];
+  artworkCalls: string[];
+  artworkRangeCalls: Array<string | undefined>;
   close(): void;
 }
 
@@ -394,6 +399,8 @@ export async function createFixtureContext(
   const trackPlaybackCalls: number[] = [];
   const playbackOrigins: Array<string | null> = [];
   const coverCalls: string[] = [];
+  const artworkCalls: string[] = [];
+  const artworkRangeCalls: Array<string | undefined> = [];
   const playbackUrl =
     options.playbackUrl === undefined
       ? 'https://audio.example/?launchApp=SYNO.SDS.AudioStation.Application'
@@ -417,6 +424,25 @@ export async function createFixtureContext(
       getCover: async (filePath) => {
         coverCalls.push(filePath);
         return options.coverImages?.get(filePath) ?? null;
+      },
+    },
+    artwork: {
+      hasArtwork: async (filePath) => {
+        artworkCalls.push(filePath);
+        return options.artworkFiles?.has(filePath) ?? false;
+      },
+      openArtwork: async (filePath, range) => {
+        artworkRangeCalls.push(range);
+        const body = options.artworkFiles?.get(filePath);
+        if (!body) return null;
+        return {
+          stream: Readable.from(body),
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'content-length': String(body.length),
+          },
+        };
       },
     },
     userSessions,
@@ -453,6 +479,8 @@ export async function createFixtureContext(
     trackPlaybackCalls,
     playbackOrigins,
     coverCalls,
+    artworkCalls,
+    artworkRangeCalls,
     close: () => index.close(),
   };
 }
