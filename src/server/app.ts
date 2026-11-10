@@ -61,7 +61,13 @@ export interface AppDependencies {
     typeof playback,
     'enabled' | 'audioStationUrlFor' | 'playAlbum' | 'playTrack'
   >;
-  config: Pick<typeof config, 'defaultPageSize' | 'maxPageSize' | 'dsmUrl'>;
+  config: Pick<
+    typeof config,
+    | 'defaultPageSize'
+    | 'maxPageSize'
+    | 'dsmUrl'
+    | 'dsmFrontendAllowedOrigins'
+  >;
 }
 
 const defaultDependencies: AppDependencies = {
@@ -74,31 +80,43 @@ const defaultDependencies: AppDependencies = {
   config,
 };
 
-function validOrigin(value: string | undefined): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:'
-      ? url.origin
-      : null;
-  } catch {
-    return null;
-  }
+/** Host header values are plain host[:port]; reject anything else early. */
+function normalizeHost(value: string | null | undefined): string | null {
+  const host = (value ?? '').trim().toLowerCase();
+  if (!host || !/^[a-z0-9._\-[\]:]+$/.test(host)) return null;
+  return host.endsWith('.') ? host.slice(0, -1) : host;
 }
 
 /**
- * The request origin used for path/port DSM_FRONTEND_URL values. Prefer the
- * Origin header; fall back to Referer and Host because top-level navigations do
- * not normally send Origin.
+ * The origin used for a ":port" DSM_FRONTEND_URL. It comes from the Host the
+ * browser used (or X-Forwarded-Host when a reverse proxy rewrites Host), and
+ * must exactly match a configured DSM_FRONTEND_ALLOWED_ORIGINS entry. Origin
+ * and Referer are deliberately ignored: they are attacker-controlled on a
+ * cross-site navigation. The matched entry supplies the scheme.
  */
-function requestOrigin(req: Request): string | null {
-  return (
-    validOrigin(req.get('origin')) ??
-    validOrigin(req.get('referer')) ??
-    validOrigin(
-      req.get('host') ? `${req.protocol}://${req.get('host')}` : undefined,
-    )
-  );
+function requestOrigin(
+  req: Request,
+  allowedOrigins: readonly string[],
+): string | null {
+  const candidates = [
+    normalizeHost(req.get('host')),
+    normalizeHost(req.get('x-forwarded-host')?.split(',')[0]),
+  ];
+
+  for (const host of candidates) {
+    if (!host) continue;
+    for (const allowed of allowedOrigins) {
+      try {
+        const url = new URL(allowed);
+        const candidate = new URL(`${url.protocol}//${host}`);
+        // URL normalises case, default ports, and IPv6 brackets.
+        if (candidate.host === url.host) return url.origin;
+      } catch {
+        // Ignore malformed headers; the allowlist itself is validated above.
+      }
+    }
+  }
+  return null;
 }
 
 function stringParam(value: unknown): string | undefined {
@@ -530,7 +548,7 @@ export function createApp(
   app.get('/play/track/:id', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const frontendTarget = dependencies.playback.audioStationUrlFor(
-      requestOrigin(req),
+      requestOrigin(req, dependencies.config.dsmFrontendAllowedOrigins),
     );
     const rawId = req.params.id;
     const trackId = /^\d+$/.test(rawId) ? Number(rawId) : Number.NaN;
@@ -607,7 +625,7 @@ export function createApp(
   app.get('/play/:key', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const frontendTarget = dependencies.playback.audioStationUrlFor(
-      requestOrigin(req),
+      requestOrigin(req, dependencies.config.dsmFrontendAllowedOrigins),
     );
     const playbackQuery = (stringParam(req.query.q) ?? '')
       .slice(0, MAX_SEARCH_LENGTH)

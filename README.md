@@ -176,7 +176,8 @@ All variables are optional; see [`.env.example`](.env.example).
 | `MUSIC_TABLE` | `music` | Table to read. Must be a plain identifier. |
 | `TRACK_TABLE` | `track` | Table used to map a music path to an AudioStation cover id. |
 | `DSM_URL` | — | Synology DSM base URL; required for user sign-in and album covers. Falls back to `DSADDR`. |
-| `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise `[path][:port]` is applied to the request origin (Origin header, with Referer/Host fallback): path defaults to `/`, and an omitted port preserves the origin port. Examples: `/`, `/audio`, `:5001`, `/audio:5001`. |
+| `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise use `:port` to keep the host the browser used and change only the port (for example `:5001`); path rewriting is not supported. With `:port`, the host must match `DSM_FRONTEND_ALLOWED_ORIGINS`. |
+| `DSM_FRONTEND_ALLOWED_ORIGINS` | — | Comma-separated exact origins the app is served from (`scheme://host[:port]`, no path), for example `https://mediatheque.example:8443,https://nas-local:8443`. Required when `DSM_FRONTEND_URL` is `:port`. A request whose `Host` (or `X-Forwarded-Host`, for proxies that rewrite it) matches an entry uses that origin; any other host disables the redirect. The entry's scheme is also used for the redirect, so list the scheme DSM is served under (normally the same as the app). `Origin` and `Referer` are never trusted for this. |
 | `DSM_USER` / `DSM_PASS` | — | Optional service account used for album covers and artwork lookups. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
 | `DSM_TLS_REJECT_UNAUTHORIZED` | `false` | Verify the NAS TLS certificate (the stock certificate is self-signed). |
 | `DSM_TIMEOUT_MS` | `10000` | Timeout for Synology requests. |
@@ -436,6 +437,7 @@ npm run test:api               # Express endpoints
 npm run test:artwork           # media-path to FileStation path mapping
 npm run test:config            # DSM frontend URL parsing
 npm run test:search            # parser + SQLite search/tag combinations
+npm run test:security          # proof-of-vulnerability audit suite
 npm run test:ui                # Playwright UI tests
 npm run test:ui:headed         # Playwright with a visible browser
 ```

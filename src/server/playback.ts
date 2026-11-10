@@ -31,22 +31,19 @@ export class PlaybackService {
   }
 
   get enabled(): boolean {
-    return (
-      config.dsmFrontendUrl !== null ||
-      config.dsmFrontendPath !== null
-    );
+    return config.dsmFrontendUrl !== null || config.dsmFrontendPort !== null;
   }
 
   /**
    * Resolve the Audio Station target for a request. A fixed frontend URL is
-   * returned unchanged; a path/port configuration uses the request origin.
-   * Returns null when the origin cannot be resolved.
+   * returned unchanged; a ":port" configuration applies the port to the
+   * allow-listed origin the browser used. Returns null when the origin cannot
+   * be resolved.
    */
   audioStationUrlFor(origin: string | null): string | null {
     const base = resolveDsmFrontendBase(
       {
         url: config.dsmFrontendUrl,
-        originPath: config.dsmFrontendPath,
         originPort: config.dsmFrontendPort,
       },
       origin,

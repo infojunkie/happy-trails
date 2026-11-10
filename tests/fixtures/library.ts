@@ -295,6 +295,8 @@ export interface FixtureOptions {
   artworkFiles?: Map<string, Buffer>;
   ready?: boolean;
   extraRows?: AlbumRow[];
+  /** Origins allowed to select an origin-based playback redirect target. */
+  allowedFrontendOrigins?: string[];
 }
 
 export interface FixtureContext {
@@ -468,6 +470,7 @@ export async function createFixtureContext(
       defaultPageSize: 48,
       maxPageSize: 200,
       dsmUrl: authEnabled ? 'https://dsm.example' : null,
+      dsmFrontendAllowedOrigins: options.allowedFrontendOrigins ?? [],
     },
   };
 

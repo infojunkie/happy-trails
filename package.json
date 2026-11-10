@@ -1,6 +1,6 @@
 {
   "name": "happy-trails",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "private": true,
   "description": "Browse the Synology mediaserver music library.",
   "type": "module",
@@ -23,6 +23,7 @@
     "test:artwork": "node --import tsx --test tests/artwork/*.test.ts",
     "test:config": "node --import tsx --test tests/config/*.test.ts",
     "test:search": "node --import tsx --test tests/search/*.test.ts",
+    "test:security": "node --import tsx --test tests/security/*.test.ts",
     "pretest:ui": "npm run build:client",
     "test:ui": "playwright test",
     "test:ui:headed": "playwright test --headed",
