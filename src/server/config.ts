@@ -30,6 +30,27 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw);
 }
 
+/**
+ * Parse TRUST_PROXY for Express's "trust proxy" setting.
+ *
+ * A boolean enables/disables it, a number is a hop count, and anything else
+ * is passed to Express as a preset ("loopback") or comma-separated subnet
+ * list. Enable this only when the app sits behind a trusted reverse proxy, so
+ * X-Forwarded-For cannot be spoofed by direct clients.
+ */
+export function parseTrustProxy(
+  rawValue: string | undefined,
+): boolean | number | string {
+  const raw = (rawValue ?? '').trim();
+  if (!raw) return false;
+
+  const lower = raw.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(lower)) return true;
+  if (['0', 'false', 'no', 'off'].includes(lower)) return false;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  return raw;
+}
+
 function identifierFromEnv(name: string, fallback: string): string {
   const value = process.env[name]?.trim() || fallback;
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
@@ -279,6 +300,17 @@ export const config = {
   statementTimeoutMs: integerFromEnv('DB_STATEMENT_TIMEOUT_MS', 30_000, 1),
   defaultPageSize: integerFromEnv('PAGE_SIZE', 48, 1),
   maxPageSize: integerFromEnv('MAX_PAGE_SIZE', 200, 1),
+  /** Failed sign-ins allowed per client IP per window. */
+  loginRateLimitMax: integerFromEnv('LOGIN_RATE_LIMIT_MAX', 20, 1),
+  /** Failed sign-ins allowed per account per window. */
+  loginAccountLimitMax: integerFromEnv('LOGIN_ACCOUNT_LIMIT_MAX', 5, 1),
+  loginRateLimitWindowMs: integerFromEnv(
+    'LOGIN_RATE_LIMIT_WINDOW_MS',
+    15 * 60_000,
+    1_000,
+  ),
+  /** Express "trust proxy" value; off unless the app is behind a proxy. */
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   /** Words that separate multiple artists; ARTIST_SEPARATOR_WORDS adds more. */
   artistSeparatorWords: artistSeparatorWords(),
   /** Names kept intact; ARTIST_EXCEPTIONS adds more, separated by "|". */

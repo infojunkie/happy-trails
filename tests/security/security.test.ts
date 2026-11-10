@@ -5,8 +5,8 @@
  * the real Express app (or the real playback/session services), with database
  * and Synology access replaced by the existing fixtures.
  *
- * F1 is now fixed: its test asserts the secure allow-listed behaviour so the
- * fix cannot regress. The remaining tests intentionally assert the *current,
+ * F1 and F2 are now fixed: their tests assert the secure behaviour so the
+ * fixes cannot regress. The remaining tests intentionally assert the *current,
  * insecure* behaviour; when a finding is fixed, invert its assertion here and
  * move the test into the regular suite.
  *
@@ -46,6 +46,9 @@ const { createFixtureContext } = await import('../fixtures/library.js');
 const { playback } = await import('../../src/server/playback.js');
 const { UserSessionStore } = await import('../../src/server/userSessions.js');
 const { DsmError } = await import('../../src/server/dsm.js');
+const { LoginRateLimiter } = await import(
+  '../../src/server/loginRateLimit.js'
+);
 
 interface RunningServer {
   baseUrl: string;
@@ -264,10 +267,10 @@ test('CSRF: a cross-site top-level GET queues an album without a token', async (
 });
 
 /* ------------------------------------------------------------------ */
-/* 3. No login rate limiting or lockout                               */
+/* 3. Login rate limiting — regression test for the fix               */
 /* ------------------------------------------------------------------ */
 
-test('brute force: /api/session/login accepts unlimited attempts', async () => {
+test('F2 fix: /api/session/login rate limits repeated failures', async () => {
   const fixture = await createFixtureContext({
     loginError: new DsmError('bad credentials', 400),
   });
@@ -282,26 +285,35 @@ test('brute force: /api/session/login accepts unlimited attempts', async () => {
   const app = createApp({
     ...fixture.dependencies,
     userSessions: countingSessions,
+    loginRateLimiter: new LoginRateLimiter({
+      ipMax: 5,
+      accountMax: 3,
+      windowMs: 60_000,
+    }),
   });
   const server = await startServer(app);
 
   try {
     const statuses: number[] = [];
-    for (let index = 0; index < 30; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       const response = await fetch(`${server.baseUrl}/api/session/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'alice', password: `guess-${index}` }),
       });
       statuses.push(response.status);
+      if (response.status === 429) {
+        assert.ok(
+          Number(response.headers.get('retry-after')) > 0,
+          '429 must include Retry-After',
+        );
+      }
     }
 
-    assert.equal(attempts, 30, 'every attempt reached the login handler');
-    assert.ok(
-      statuses.every((status): boolean => status === 401),
-      `expected 401 for every attempt, got ${statuses.join(',')}`,
-    );
-    assert.ok(!statuses.includes(429), 'no rate limit was applied');
+    assert.deepEqual(statuses, [
+      401, 401, 401, 429, 429, 429, 429, 429, 429, 429,
+    ]);
+    assert.equal(attempts, 3, 'limited requests never reach DSM login');
   } finally {
     await server.close();
     fixture.close();

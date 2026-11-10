@@ -4,6 +4,7 @@ import {
   formatOriginTarget,
   parseAllowedFrontendOrigins,
   parseDsmFrontendUrl,
+  parseTrustProxy,
   resolveDsmFrontendBase,
 } from '../../src/server/config.js';
 
@@ -104,6 +105,21 @@ test('allowed frontend origins reject paths, credentials, and non-http URLs', ()
       value,
     );
   }
+});
+
+test('TRUST_PROXY accepts booleans, hop counts, and subnet lists', () => {
+  assert.equal(parseTrustProxy(undefined), false);
+  assert.equal(parseTrustProxy(''), false);
+  assert.equal(parseTrustProxy('false'), false);
+  assert.equal(parseTrustProxy('0'), false);
+  assert.equal(parseTrustProxy('true'), true);
+  assert.equal(parseTrustProxy('on'), true);
+  assert.equal(parseTrustProxy('2'), 2);
+  assert.equal(parseTrustProxy('loopback'), 'loopback');
+  assert.equal(
+    parseTrustProxy('10.0.0.0/8, 172.16.0.0/12'),
+    '10.0.0.0/8, 172.16.0.0/12',
+  );
 });
 
 test('formatOriginTarget applies the configured port', () => {

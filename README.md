@@ -172,6 +172,10 @@ All variables are optional; see [`.env.example`](.env.example).
 | `DATABASE_URL` | — | Full libpq URL. If unset, standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` apply. |
 | `HOST` | `127.0.0.1` | Interface to bind. Use `0.0.0.0` to expose the app on the LAN. |
 | `PORT` | `3000` | HTTP port. |
+| `TRUST_PROXY` | off | Express `trust proxy` setting. Set it to the reverse proxy's address/CIDR, a preset such as `loopback`, or a hop count when the app sits behind a trusted proxy, so `req.ip` is the real client IP for login rate limiting (and `req.secure` is correct for cookie flags). Do not enable it on a directly exposed port. |
+| `LOGIN_RATE_LIMIT_MAX` | `20` | Failed sign-ins allowed per client IP per window; further attempts get `429` with `Retry-After`. |
+| `LOGIN_ACCOUNT_LIMIT_MAX` | `5` | Failed sign-ins allowed per account per window, regardless of client IP. |
+| `LOGIN_RATE_LIMIT_WINDOW_MS` | `900000` | Login rate-limit window (15 minutes). |
 | `MUSIC_SCHEMA` | `public` | Schema containing the tables. Must be a plain identifier. |
 | `MUSIC_TABLE` | `music` | Table to read. Must be a plain identifier. |
 | `TRACK_TABLE` | `track` | Table used to map a music path to an AudioStation cover id. |
@@ -190,6 +194,51 @@ All variables are optional; see [`.env.example`](.env.example).
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
+
+### Behind DSM's reverse proxy
+
+When DSM (nginx) terminates TLS and forwards to the app, Express sees the
+proxy as the socket peer. Set `TRUST_PROXY` so login rate limiting sees the
+real client IP and `mw_session` gets the `Secure` flag. Per-account rate
+limiting works either way.
+
+1. **Keep the app port off the LAN.** Bind the published container port to
+   loopback so clients must go through the proxy and cannot forge forwarding
+   headers themselves:
+
+   ```bash
+   docker run --rm -p 127.0.0.1:3000:3000 ...
+   ```
+
+   In Container Manager, bind the published port to `localhost`.
+
+2. **Trust exactly one hop:**
+
+   ```dotenv
+   TRUST_PROXY=1
+   ```
+
+   DSM's reverse proxy normally sends `X-Forwarded-For` (appending the real
+   client) and `X-Forwarded-Proto`. You can confirm by temporarily logging
+   `req.socket.remoteAddress` and `req.headers['x-forwarded-for']` for one
+   request; `req.ip` should be the browser's address, not the Docker gateway.
+
+3. **If the port must be exposed**, use the proxy's address or subnet instead
+   of a hop count, so only proxy connections can influence `req.ip`:
+
+   ```bash
+   docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}'
+   # TRUST_PROXY=172.17.0.1  (or the bridge subnet, e.g. 172.17.0.0/16)
+   ```
+
+4. **`TRUST_PROXY=loopback`** is only right when the proxy connects from
+   `127.0.0.1` (Docker host networking or the app running directly on DSM).
+   With ordinary bridge networking the app sees the bridge gateway, so
+   `loopback` silently disables per-IP limiting and cookie `Secure`.
+
+Never use `TRUST_PROXY=true`: with an appending proxy, Express would trust a
+client-supplied `X-Forwarded-For` entry. Leave `TRUST_PROXY` unset when the app
+is accessed directly.
 
 ## How it works
 

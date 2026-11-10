@@ -5,6 +5,7 @@ import type { AppDependencies } from '../../src/server/app.js';
 import type { AlbumRow, TrackRow } from '../../src/server/db.js';
 import type { DsmClient, CoverImage } from '../../src/server/dsm.js';
 import { DsmError } from '../../src/server/dsm.js';
+import { LoginRateLimiter } from '../../src/server/loginRateLimit.js';
 import { SqliteIndex } from '../../src/server/sqlite.js';
 import type { StatusResponse } from '../../src/shared/types.js';
 
@@ -297,6 +298,10 @@ export interface FixtureOptions {
   extraRows?: AlbumRow[];
   /** Origins allowed to select an origin-based playback redirect target. */
   allowedFrontendOrigins?: string[];
+  /** Override the login rate limiter (defaults to very generous limits). */
+  loginRateLimiter?: AppDependencies['loginRateLimiter'];
+  /** Express "trust proxy" value; false by default in fixtures. */
+  trustProxy?: boolean | number | string;
 }
 
 export interface FixtureContext {
@@ -471,7 +476,15 @@ export async function createFixtureContext(
       maxPageSize: 200,
       dsmUrl: authEnabled ? 'https://dsm.example' : null,
       dsmFrontendAllowedOrigins: options.allowedFrontendOrigins ?? [],
+      trustProxy: options.trustProxy ?? false,
     },
+    loginRateLimiter:
+      options.loginRateLimiter ??
+      new LoginRateLimiter({
+        ipMax: 1_000,
+        accountMax: 1_000,
+        windowMs: 60_000,
+      }),
   };
 
   return {

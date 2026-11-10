@@ -22,6 +22,10 @@ import { covers } from './covers.js';
 import { loadTracks } from './db.js';
 import { DsmError } from './dsm.js';
 import { library } from './library.js';
+import {
+  loginRateLimiter,
+  type LoginRateLimiter,
+} from './loginRateLimit.js';
 import { decodeAlbumKey } from './search.js';
 import { playback } from './playback.js';
 import { userSessions } from './userSessions.js';
@@ -67,7 +71,9 @@ export interface AppDependencies {
     | 'maxPageSize'
     | 'dsmUrl'
     | 'dsmFrontendAllowedOrigins'
+    | 'trustProxy'
   >;
+  loginRateLimiter: Pick<LoginRateLimiter, 'check' | 'record'>;
 }
 
 const defaultDependencies: AppDependencies = {
@@ -78,6 +84,7 @@ const defaultDependencies: AppDependencies = {
   userSessions,
   playback,
   config,
+  loginRateLimiter,
 };
 
 /** Host header values are plain host[:port]; reject anything else early. */
@@ -206,6 +213,17 @@ function loginErrorMessage(error: unknown): {
   return { status: 502, message: 'Could not reach Synology DSM.' };
 }
 
+/** DSM error codes that mean the credentials/account did not authenticate. */
+const CREDENTIAL_FAILURE_CODES = new Set([400, 401, 402, 403, 404]);
+
+function isCredentialFailure(error: unknown): boolean {
+  return (
+    error instanceof DsmError &&
+    error.code !== undefined &&
+    CREDENTIAL_FAILURE_CODES.has(error.code)
+  );
+}
+
 function playErrorPage(
   title: string,
   message: string,
@@ -245,6 +263,12 @@ export function createApp(
 ): express.Express {
   const app = express();
   app.disable('x-powered-by');
+  if (dependencies.config.trustProxy !== false) {
+    // Needed for req.ip (login rate limiting) and req.secure (cookie flags)
+    // behind a trusted reverse proxy. Never enable this on a directly exposed
+    // port without restricting it to the proxy address/CIDR.
+    app.set('trust proxy', dependencies.config.trustProxy);
+  }
 
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -296,8 +320,22 @@ export function createApp(
       return;
     }
 
+    const clientIp = req.ip ?? null;
+    const retryAfterSeconds = dependencies.loginRateLimiter.check(
+      clientIp,
+      username,
+    );
+    if (retryAfterSeconds > 0) {
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      res
+        .status(429)
+        .json({ error: 'Too many sign-in attempts. Try again later.' });
+      return;
+    }
+
     try {
       const { sessionId, account } = await dependencies.userSessions.login(username, password);
+      dependencies.loginRateLimiter.record(clientIp, username, true);
       res.cookie(
         dependencies.userSessions.cookieName,
         sessionId,
@@ -306,6 +344,10 @@ export function createApp(
       const result: SessionResponse = { authenticated: true, account };
       res.json(result);
     } catch (error) {
+      // A DSM outage must not lock accounts out; only failed credentials do.
+      if (isCredentialFailure(error)) {
+        dependencies.loginRateLimiter.record(clientIp, username, false);
+      }
       const { status, message } = loginErrorMessage(error);
       console.error('[session] sign-in failed:', message);
       res.status(status).json({ error: message });

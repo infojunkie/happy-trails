@@ -17,16 +17,17 @@ reproduction suite is `tests/security/security.test.ts` and runs with
 
 ## Executive summary
 
-> **Remediation status:** F1 has been fixed in the working tree. The design is
-> an exact allow list of app origins (`DSM_FRONTEND_ALLOWED_ORIGINS`) plus a
-> port-only `DSM_FRONTEND_URL`; `Origin` and `Referer` are no longer read. Its
-> test now asserts the secure behaviour and guards against regression. The
-> finding below records the original issue and the fix.
+> **Remediation status:** F1 and F2 have been fixed in the working tree. F1
+> uses an exact allow list of app origins (`DSM_FRONTEND_ALLOWED_ORIGINS`) plus
+> a port-only `DSM_FRONTEND_URL`; `Origin` and `Referer` are no longer read.
+> F2 adds per-IP and per-account login rate limiting with `429`/`Retry-After`.
+> Their tests now assert the secure behaviour and guard against regression.
+> The findings below record the original issues and the fixes.
 
 | ID | Finding | Severity |
 |----|---------|----------|
 | F1 | Open redirect via attacker-controlled `Origin`/`Referer`/`Host` on `/play/*` (origin-based `DSM_FRONTEND_URL` deployments) — **fixed** | **Medium** |
-| F2 | Login has no rate limiting or lockout; each attempt creates a fresh DSM client, so the built-in backoff never applies across attempts | **Medium** |
+| F2 | Login has no rate limiting or lockout; each attempt creates a fresh DSM client, so the built-in backoff never applies across attempts — **fixed** | **Medium** |
 | F3 | State-changing `GET /play/:key` and `GET /play/track/:id` have no CSRF token or Origin/Referer check; `SameSite=Lax` still sends the cookie on cross-site top-level navigation | **Low** |
 | F4 | `/api/status` and 503 responses disclose raw internal error text (DB host/user/schema details) to unauthenticated clients | **Low** |
 | F5 | No `X-Frame-Options` / `Content-Security-Policy`; the app (including its DSM sign-in dialog) can be framed | **Low** |
@@ -134,32 +135,47 @@ the same list, and an unlisted `Host` yields 503 without queueing playback.
 
 ---
 
-### F2 — No login throttling; per-attempt DSM client defeats backoff (Medium)
+### F2 — No login throttling; per-attempt DSM client defeats backoff (Medium) — **fixed**
 
 **Where:** `src/server/app.ts:257-295`,
 `src/server/userSessions.ts:53-76`, `src/server/dsm.ts:249-274`.
 
-**What:** `POST /api/session/login` performs no rate limiting, account lockout,
-CAPTCHA, or delay. Each call to `UserSessionStore.login` constructs a **new**
-`DsmClient`, and the 30-second login backoff in `DsmClient.ensureSession` is
-per-instance state — so it never applies to subsequent login attempts. The
-endpoint also distinguishes "incorrect username or password" from disabled /
-not-allowed / 2FA-required accounts (`src/server/app.ts:159-189`), which
-assists account probing. Because every attempt is proxied to the NAS, an
-attacker can also deliberately trigger Synology's auto-block and lock out the
-legitimate owner.
+**What (original issue):** `POST /api/session/login` performed no rate
+limiting, account lockout, CAPTCHA, or delay. Each call to
+`UserSessionStore.login` constructs a **new** `DsmClient`, and the 30-second
+login backoff in `DsmClient.ensureSession` is per-instance state — so it never
+applied to subsequent login attempts. The endpoint also distinguishes
+"incorrect username or password" from disabled / not-allowed / 2FA-required
+accounts (`src/server/app.ts:159-189`), which assists account probing. Because
+every attempt is proxied to the NAS, an attacker could also deliberately
+trigger Synology's auto-block and lock out the legitimate owner.
 
 **Impact:** password spraying / credential stuffing against DSM accounts, and
 an amplification vector against the NAS. Severity depends on exposure; a
 LAN-only deployment is lower risk.
 
-**Proof:** `brute force: /api/session/login accepts unlimited attempts` sends
-30 failed logins and asserts every one reaches the login handler and returns
-401 with no 429.
+**Original proof:** `brute force: /api/session/login accepts unlimited
+attempts` sent 30 failed logins and asserted every one reached the login
+handler and returned 401 with no 429.
 
-**Fix:** add per-IP and per-account rate limiting (respecting a correctly
-configured `trust proxy`), and apply backoff at the username/IP level rather
-than per `DsmClient`. Return one neutral message for all credential failures.
+**Fix (implemented):** `src/server/loginRateLimit.ts` adds an in-memory
+fixed-window limiter. Failures are counted per client IP and per account
+(case-insensitively); an attempt is rejected with `429` and `Retry-After` as
+soon as either bucket reaches its limit, before any DSM request is made. A
+successful sign-in clears that account's failures; DSM transport errors are
+not counted, so a NAS outage cannot lock users out. Limits default to 20
+failures per IP and 5 per account in a 15-minute window and are configurable
+with `LOGIN_RATE_LIMIT_MAX`, `LOGIN_ACCOUNT_LIMIT_MAX`, and
+`LOGIN_RATE_LIMIT_WINDOW_MS`. The new `TRUST_PROXY` setting configures Express
+`trust proxy` so `req.ip` sees the real client behind a reverse proxy (and
+fixes `req.secure` for F7 as a side effect). The limiter state is in memory and
+bounded to 10,000 keys.
+
+**Regression tests:** `POST /api/session/login rate limits per account and per
+IP` and `TRUST_PROXY uses X-Forwarded-For for per-IP limits` in
+`tests/api/login-rate-limit.test.ts` (plus unit tests for expiry, per-account
+reset, and case folding), and `F2 fix: /api/session/login rate limits repeated
+failures` in the security suite.
 
 ---
 
@@ -269,19 +285,23 @@ falling back to `application/octet-stream`; add the CSP from F5.
 
 ### F7 — Session cookie not `Secure` behind TLS termination; no HSTS (Low)
 
-**Where:** `src/server/userSessions.ts:96-104` (`secure: req.secure`);
-no `app.set('trust proxy', ...)` anywhere (`src/server/app.ts`).
+**Where:** `src/server/userSessions.ts:96-104` (`secure: req.secure`).
+`TRUST_PROXY` now exists and is passed to `app.set('trust proxy', ...)`
+(`src/server/app.ts`), but it defaults to off.
 
 **What:** Express computes `req.secure` from the socket unless `trust proxy`
 is enabled. In the documented Docker deployment the app listens on plain HTTP
-and is commonly placed behind a TLS-terminating reverse proxy; in that setup
-`req.secure` is `false` even for HTTPS clients, so `mw_session` is issued
-without the `Secure` attribute and the browser will also send it over plain
-HTTP if such an endpoint exists. No `Strict-Transport-Security` header is set.
+and is commonly placed behind a TLS-terminating reverse proxy; with the default
+configuration `req.secure` is `false` even for HTTPS clients, so `mw_session`
+is issued without the `Secure` attribute and the browser will also send it
+over plain HTTP if such an endpoint exists. No `Strict-Transport-Security`
+header is set.
 
-**Impact:** session-cookie exposure on any plaintext path to the app; also
-relevant to F1 (origin-based redirects use `req.protocol`, which is `http`
-behind the proxy).
+**Impact:** session-cookie exposure on any plaintext path to the app.
+
+**Mitigation:** set `TRUST_PROXY` to the proxy's address/CIDR (or `loopback`),
+which also gives login rate limiting the real client IP. The test below still
+documents the default (unconfigured) behaviour.
 
 **Proof:** `cookie: no Secure flag behind a TLS-terminating proxy` sends
 `X-Forwarded-Proto: https` and asserts the `Set-Cookie` header lacks `Secure`;
@@ -289,9 +309,9 @@ it also verifies the store does consult `req.secure`. The companion test
 `cookie: session cookie is HttpOnly and SameSite=Lax` records the flags that
 are correct.
 
-**Fix:** configure `trust proxy` for the exact proxy address/CIDR (do not set
-it to `true` on an internet-reachable port), then keep `secure: req.secure`.
-Add HSTS at the proxy or app. Consider the `__Host-` cookie prefix.
+**Fix:** set `TRUST_PROXY` to the exact proxy address/CIDR (do not set it to
+`true` on an internet-reachable port), then keep `secure: req.secure`. Add
+HSTS at the proxy or app. Consider the `__Host-` cookie prefix.
 
 ---
 
@@ -401,7 +421,7 @@ server modules, starts the real Express app with the fixture services, and
 uses raw `node:http` requests where header control (`Host`, `Referer`,
 `X-Forwarded-Host`) or dot-segment paths are required.
 
-The F1 test now asserts the fixed behaviour and guards the allow-list design.
+The F1 and F2 tests now assert the fixed behaviour and guard those designs.
 The remaining tests intentionally assert the current insecure behaviour; each
 test names its finding in `docs/security-audit.md`. They are not part of
 `npm test`; when another finding is remediated, invert its assertion and move
