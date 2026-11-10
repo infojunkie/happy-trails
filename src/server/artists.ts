@@ -50,11 +50,57 @@ function buildWordSeparators(words: readonly string[]): RegExp[] {
   return patterns;
 }
 
+/** Build a pattern matching a standalone possessive determiner. */
+function buildPossessivePattern(words: readonly string[]): RegExp | null {
+  const seen = new Set<string>();
+  const alternatives: string[] = [];
+
+  // Longest first in case one configured word is a prefix of another.
+  for (const word of [...words].sort((a, b) => b.length - a.length)) {
+    const base = word.trim();
+    if (!base) continue;
+
+    const key = base.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    alternatives.push(escapeRegExp(base).replace(/\\?\s+/g, '\\s+'));
+  }
+
+  return alternatives.length > 0
+    ? new RegExp(
+        `\\s+(?:${alternatives.join('|')})(?![\\p{L}\\p{N}])`,
+        'iu',
+      )
+    : null;
+}
+
+/** Patterns for separator words that can trail the text before a possessive. */
+function buildTrailingWordSeparators(words: readonly string[]): RegExp[] {
+  const seen = new Set<string>();
+  const patterns: RegExp[] = [];
+
+  for (const word of words) {
+    const base = word.trim().replace(/\.+$/, '');
+    if (!base) continue;
+
+    const key = base.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const escaped = escapeRegExp(base).replace(/\\?\s+/g, '\\s+');
+    const flags = base.length === 1 ? 'u' : 'iu';
+    patterns.push(new RegExp(`\\s+${escaped}\\.?\\s*$`, flags));
+  }
+
+  return patterns;
+}
+
 function buildExceptionPatterns(names: readonly string[]): RegExp[] {
   const seen = new Set<string>();
   const patterns: RegExp[] = [];
 
-  // Longest first, so "Earth, Wind & Fire" wins over a hypothetical "Earth".
+  // Longest first, so a longer exception wins over a shorter prefix.
   for (const name of [...names].sort((a, b) => b.length - a.length)) {
     const base = name.trim();
     if (!base) continue;
@@ -75,7 +121,56 @@ function buildExceptionPatterns(names: readonly string[]): RegExp[] {
 }
 
 const WORD_SEPARATORS = buildWordSeparators(config.artistSeparatorWords);
+const TRAILING_WORD_SEPARATORS = buildTrailingWordSeparators(
+  config.artistSeparatorWords,
+);
+const POSSESSIVE_PATTERN = buildPossessivePattern(config.artistPossessives);
 const EXCEPTION_PATTERNS = buildExceptionPatterns(config.artistExceptions);
+const TRAILING_SEPARATOR_PUNCTUATION = /[\s,;:/|&+\-–—]+$/u;
+
+/**
+ * Remove separator punctuation/words left at the end after a possessive cut,
+ * so "Quincy Jones & His Orchestra" becomes "Quincy Jones", not "Quincy Jones &".
+ */
+function stripTrailingSeparators(value: string): string {
+  let text = value.trimEnd();
+  let changed = true;
+
+  while (changed && text) {
+    changed = false;
+
+    for (const pattern of TRAILING_WORD_SEPARATORS) {
+      const next = text.replace(pattern, '');
+      if (next !== text) {
+        text = next.trimEnd();
+        changed = true;
+      }
+    }
+
+    const next = text.replace(TRAILING_SEPARATOR_PUNCTUATION, '').trimEnd();
+    if (next !== text) {
+      text = next;
+      changed = true;
+    }
+  }
+
+  return text;
+}
+
+/**
+ * A possessive determiner introduces a backing-ensemble description such as
+ * "His Orchestra" or "son Orchestre". Everything from that token onward is
+ * discarded; only the artists before it are parsed.
+ */
+function truncateAtPossessive(value: string): string {
+  const pattern = POSSESSIVE_PATTERN;
+  if (!pattern) return value;
+
+  const match = pattern.exec(value);
+  if (!match || match.index === 0) return value;
+
+  return stripTrailingSeparators(value.slice(0, match.index));
+}
 
 /**
  * Replace configured exception names with opaque placeholders so none of the
@@ -117,6 +212,8 @@ function maskExceptions(value: string): {
  * - Configured words (`ARTIST_SEPARATOR_WORDS`) are separators when they are
  *   standalone words surrounded by whitespace. One-letter words are matched
  *   case-sensitively.
+ * - A configured possessive (`ARTIST_POSSESSIVES`) discards itself and every
+ *   token after it, so "Quincy Jones & His Orchestra" becomes "Quincy Jones".
  * - Names in `ARTIST_EXCEPTIONS` are kept intact and returned verbatim.
  */
 export function parseArtists(value: string | null | undefined): string[] {
@@ -124,7 +221,7 @@ export function parseArtists(value: string | null | undefined): string[] {
   if (!raw) return [];
 
   const masked = maskExceptions(raw);
-  let text = masked.text;
+  let text = truncateAtPossessive(masked.text);
 
   for (const pattern of WORD_SEPARATORS) {
     text = text.replace(pattern, SPLIT_TOKEN);

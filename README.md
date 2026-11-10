@@ -41,9 +41,12 @@ facets built from the comma-separated `genre` column.
   facet everywhere. Name links clear both filters, while tag chips keep the
   current search query.
 - Multi-artist values are parsed into individual artists, including
-  comma-separated lists; a configurable exception list keeps names such as
-  `Earth, Wind & Fire` together. Each detected name is its own search link in
-  cards, the dialog header, and track artist lines.
+  comma-separated lists. Separator words include `accompanied by`, Spanish
+  `y`, and Arabic `و`. A configured possessive (`his`, `son`, `sua`, `su`, …)
+  discards the rest of the billing, so `Quincy Jones & His Orchestra` becomes
+  `Quincy Jones`; `ARTIST_EXCEPTIONS` can keep specifically configured names
+  intact. Each detected name is its own search link in cards, the dialog
+  header, and track artist lines.
 - The server checks for database changes every 60 seconds by default and
   silently rebuilds the snapshot when needed. The header **Refresh** control
   enables when a newer snapshot is available and reloads the current view; it
@@ -190,8 +193,9 @@ All variables are optional; see [`.env.example`](.env.example).
 | `LIBRARY_CHECK_MS` | `60000` | How often the `music` table is checked for changes; a detected change triggers a silent rebuild. `LIBRARY_REFRESH_MS` is accepted as a legacy fallback. |
 | `PAGE_SIZE` | `48` | Default albums per page. |
 | `MAX_PAGE_SIZE` | `200` | Upper bound accepted from clients. |
-| `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
-| `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
+| `ARTIST_SEPARATOR_WORDS` | `feat., accompanied by, com, part., avec, with, et, e, con, y, و, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
+| `ARTIST_POSSESSIVES` | `his, her, their, its, son, sa, ses, leur, leurs, seu, sua, seus, suas, su, sus` | Additional possessives; once one is found, it and every following token are discarded from the parsed artist names. |
+| `ARTIST_EXCEPTIONS` | — | Artist names kept intact and parsed verbatim. There are no defaults. Separate entries with a vertical-bar character because names may contain commas. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
@@ -311,22 +315,33 @@ while `AC/DC`, `Jay-Z`, and `R.E.M.` stay intact. A comma followed by
 whitespace is also a separator, so `A, B, C` becomes three names; `A,B`
 without the following space is left intact.
 
-Names listed in `ARTIST_EXCEPTIONS` are masked before separator processing and
-restored verbatim, so `Earth, Wind & Fire` and `Florence + The Machine` stay
-intact. The defaults also include Simon & Garfunkel and Crosby, Stills, Nash &
-Young; `ARTIST_EXCEPTIONS` adds more (separated by a vertical-bar character
-because the names contain commas).
-Matching is case-insensitive and whole-name only, but the original spelling is
-preserved.
+Configured possessive determiners introduce a backing-ensemble description.
+After exceptions are masked, the first possessive and every token after it are
+discarded: `Quincy Jones & His Orchestra` becomes `Quincy Jones`,
+`Louis Prima et son Orchestre` becomes `Louis Prima`, and
+`Badly Drawn Boy feat. Jools Holland & His Rhythm & Blues Orchestra` becomes
+`Badly Drawn Boy` and `Jools Holland`. The defaults cover English (`his`,
+`her`, `their`, `its`), French (`son`, `sa`, `ses`, `leur`, `leurs`),
+Portuguese (`seu`, `sua`, `seus`, `suas`), and Spanish (`su`, `sus`);
+`ARTIST_POSSESSIVES` adds more. Everything after the possessive is ignored,
+including named backing bands.
+
+Names listed in `ARTIST_EXCEPTIONS` are masked before possessive and separator
+processing and restored verbatim. There are no default exceptions; configure
+site-specific names that must stay intact, separated by a vertical-bar
+character because names may contain commas. Matching is case-insensitive and
+whole-name only, but the original spelling is preserved.
 
 Words listed in `ARTIST_SEPARATOR_WORDS` are separators when they are
 standalone words surrounded by whitespace; the defaults are
-`feat., com, part., avec, with, et, e, con, vs., mit`, and
-`ARTIST_SEPARATOR_WORDS` adds more. One-letter words are matched
+`feat., accompanied by, com, part., avec, with, et, e, con, y, و, vs., mit`,
+and `ARTIST_SEPARATOR_WORDS` adds more. One-letter words are matched
 case-sensitively, so `E Street Band` is not
 split. Parsed names are exposed as
 `artists` in the API and rendered as separate search links (joined by ` · `);
-the original string remains in `artist`/`albumArtist`.
+the original string remains in `artist`/`albumArtist`. See
+[`docs/artist-names.md`](docs/artist-names.md) for the current edge cases and
+the Discogs-based proposals.
 
 ### Change detection and refresh
 
@@ -481,8 +496,9 @@ The suite is deterministic and does not require PostgreSQL, DSM, or network acce
 npm run test:install-browsers  # once per machine/CI
 npm run lint                   # ESLint
 npm run typecheck              # server, client, and tests
-npm test                       # API + search + artwork + UI
+npm test                       # API + artist + search + artwork + UI
 npm run test:api               # Express endpoints
+npm run test:artists           # artist separators, possessives, and exceptions
 npm run test:artwork           # media-path to FileStation path mapping
 npm run test:config            # DSM frontend URL parsing
 npm run test:search            # parser + SQLite search/tag combinations
@@ -492,6 +508,7 @@ npm run test:ui:headed         # Playwright with a visible browser
 ```
 
 - API tests start the real Express app via `createApp()` with an injected fixture index.
+- Artist tests cover punctuation separators, the new separator words, possessive truncation, and the empty default exception list.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, and combinations.
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
 - UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, Back/Forward search and dialog restoration, help popups, and the sticky error banner are checked against stable data.
@@ -759,6 +776,7 @@ happy-trails/
 │   └── styles.css        Compiled client files are written to public/client/
 ├── tests/
 │   ├── api/              Express endpoint tests
+│   ├── artists/          Artist splitting, possessive, and exception tests
 │   ├── artwork/          FileStation path-mapping tests
 │   ├── config/           DSM frontend URL parsing tests
 │   ├── search/           Parser and SQLite search tests

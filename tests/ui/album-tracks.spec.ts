@@ -27,7 +27,11 @@ test('album cards preserve original artist punctuation and link the parts', asyn
   const earth = page.locator('.album-card', { hasText: 'Earth, Wind & Fire' }).first();
   await expect(earth).toBeVisible();
   await expect(earth.locator('.album-artist')).toHaveText('Earth, Wind & Fire');
-  await expect(earth.locator('.album-artist .artist-link')).toHaveCount(1);
+  await expect(earth.locator('.album-artist .artist-link')).toHaveText([
+    'Earth',
+    'Wind',
+    'Fire',
+  ]);
 });
 
 test('album chips activate the corresponding filters', async ({ page }) => {

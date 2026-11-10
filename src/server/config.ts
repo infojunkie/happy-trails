@@ -61,6 +61,7 @@ function identifierFromEnv(name: string, fallback: string): string {
 
 const DEFAULT_ARTIST_SEPARATOR_WORDS = [
   'feat.',
+  'accompanied by',
   'com',
   'part.',
   'avec',
@@ -68,38 +69,69 @@ const DEFAULT_ARTIST_SEPARATOR_WORDS = [
   'et',
   'e',
   'con',
+  'y',
+  'و',
   'vs.',
   'mit',
 ];
 
-function artistSeparatorWords(): string[] {
-  const raw = process.env.ARTIST_SEPARATOR_WORDS?.trim();
-  const extra = raw
+function commaSeparatedEnv(name: string): string[] {
+  const raw = process.env[name]?.trim();
+  return raw
     ? raw
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean)
     : [];
-  return [...DEFAULT_ARTIST_SEPARATOR_WORDS, ...extra];
+}
+
+function artistSeparatorWords(): string[] {
+  return [
+    ...DEFAULT_ARTIST_SEPARATOR_WORDS,
+    ...commaSeparatedEnv('ARTIST_SEPARATOR_WORDS'),
+  ];
+}
+
+/**
+ * Possessive determiners that introduce a backing-ensemble description. Once
+ * one is seen, the rest of the artist string is ignored. Defaults cover the
+ * third-person forms used in English, French, Portuguese, and Spanish.
+ */
+const DEFAULT_ARTIST_POSSESSIVES = [
+  'his',
+  'her',
+  'their',
+  'its',
+  'son',
+  'sa',
+  'ses',
+  'leur',
+  'leurs',
+  'seu',
+  'sua',
+  'seus',
+  'suas',
+  'su',
+  'sus',
+];
+
+function artistPossessives(): string[] {
+  return [
+    ...DEFAULT_ARTIST_POSSESSIVES,
+    ...commaSeparatedEnv('ARTIST_POSSESSIVES'),
+  ];
 }
 
 /** Artist names whose punctuation must not be treated as a separator. */
-const DEFAULT_ARTIST_EXCEPTIONS = [
-  'Earth, Wind & Fire',
-  'Simon & Garfunkel',
-  'Crosby, Stills, Nash & Young',
-];
-
 function artistExceptions(): string[] {
   const raw = process.env.ARTIST_EXCEPTIONS?.trim();
   // Exceptions contain commas, so this list uses "|" as its separator.
-  const extra = raw
+  return raw
     ? raw
         .split('|')
         .map((value) => value.trim())
         .filter(Boolean)
     : [];
-  return [...DEFAULT_ARTIST_EXCEPTIONS, ...extra];
 }
 
 /** Extra genre tags to classify as countries/regions; REGION_TAGS adds more. */
@@ -313,7 +345,9 @@ export const config = {
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   /** Words that separate multiple artists; ARTIST_SEPARATOR_WORDS adds more. */
   artistSeparatorWords: artistSeparatorWords(),
-  /** Names kept intact; ARTIST_EXCEPTIONS adds more, separated by "|". */
+  /** Possessives that discard the rest of the artist string. */
+  artistPossessives: artistPossessives(),
+  /** Names kept intact; ARTIST_EXCEPTIONS supplies them, separated by "|". */
   artistExceptions: artistExceptions(),
   /** Additional genre tags to treat as countries/regions. */
   regionTags: regionTags(),
