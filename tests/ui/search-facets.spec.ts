@@ -230,7 +230,8 @@ test('search help popup lists fields and runs examples', async ({ page }) => {
   await expect(page.locator('#search-help-dialog')).toBeVisible();
   await expect(page.locator('#search-help-title')).toHaveText('Search syntax');
   await expect(page.locator('.search-help-fields')).toContainText('composer:');
-  await expect(page.locator('.syntax-example')).toHaveCount(5);
+  await expect(page.locator('.search-help-fields')).toContainText('serie:');
+  await expect(page.locator('.syntax-example')).toHaveCount(6);
 
   await page
     .locator('[data-search-example=\'album:"abbey road"\']')

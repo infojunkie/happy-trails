@@ -54,3 +54,40 @@ export function normalizeAlbumName(album: string): string {
   const base = album.replace(/\s+\/\/.*$/, '').trim();
   return base.length > 0 ? base : album;
 }
+
+/** Any content inside curly braces, e.g. "Album {Blue Note}". */
+const CURLY_SERIES = /\{([^{}]+)\}/g;
+
+/**
+ * A leading year followed by a label and the word "Edition" inside square
+ * brackets, e.g. "[2016 Rock Candy Edition]" -> "Rock Candy".
+ */
+const YEAR_EDITION_SERIES = /\[\s*\d{4}\s+([^[\]]+?)\s+Edition\s*\]/gi;
+
+/**
+ * Series/label names embedded in an album title. Values appear in title order
+ * and are trimmed, whitespace-collapsed, and deduplicated.
+ */
+export function albumSeries(album: string): string[] {
+  const matches: Array<{ index: number; value: string }> = [];
+
+  for (const match of album.matchAll(CURLY_SERIES)) {
+    const value = (match[1] ?? '').trim().replace(/\s+/g, ' ');
+    if (value) matches.push({ index: match.index ?? 0, value });
+  }
+  for (const match of album.matchAll(YEAR_EDITION_SERIES)) {
+    const value = (match[1] ?? '').trim().replace(/\s+/g, ' ');
+    if (value) matches.push({ index: match.index ?? 0, value });
+  }
+
+  matches.sort((left, right) => left.index - right.index);
+
+  const seen = new Set<string>();
+  const series: string[] = [];
+  for (const { value } of matches) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    series.push(value);
+  }
+  return series;
+}

@@ -29,6 +29,7 @@ CREATE TABLE albums (
   search_source TEXT NOT NULL,        -- folded raw source titles
   search_track_artist TEXT NOT NULL,  -- folded track-level artists
   search_composer TEXT NOT NULL,      -- folded composer tags
+  search_serie TEXT NOT NULL,         -- folded series/label names
   album_rank  INTEGER NOT NULL,       -- Intl.Collator rank for album
   artist_rank INTEGER NOT NULL,       -- Intl.Collator rank for artist
   key_rank    INTEGER NOT NULL        -- Intl.Collator rank for key
@@ -46,6 +47,13 @@ CREATE TABLE album_sources (           -- raw titles merged into an album
   position     INTEGER NOT NULL,       -- natural display order
   source_album TEXT NOT NULL,          -- e.g. "X // Bonus Tracks"
   cover_path   TEXT,
+  PRIMARY KEY (album_id, position)
+) STRICT;
+
+CREATE TABLE album_comments (          -- distinct track comments, sorted
+  album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  comment  TEXT NOT NULL,
   PRIMARY KEY (album_id, position)
 ) STRICT;
 
@@ -82,6 +90,7 @@ CREATE VIRTUAL TABLE album_search USING fts5(
   search_source,
   search_track_artist,
   search_composer,
+  search_serie,
   content = 'albums',
   content_rowid = 'id',
   tokenize = 'trigram'
@@ -97,8 +106,11 @@ The separate folded columns are what make fielded search possible. `album`
 includes the merged title and all raw source titles; `source` contains only the
 raw titles; `artist` combines the effective album artist, parsed artists, and
 track-level artists; `trackartist` contains only the track-level names;
-`composer` contains the distinct composer tag values from the tracks. The
-field names are parsed in [`src/server/searchQuery.ts`](../src/server/searchQuery.ts).
+`composer` contains the distinct composer tag values from the tracks; `serie`
+contains series/label names parsed from the album title (the contents of
+`{...}`, and the label between a leading year and "Edition" in `[...]`, so
+`[2016 Rock Candy Edition]` yields `Rock Candy`). The field names are parsed in
+[`src/server/searchQuery.ts`](../src/server/searchQuery.ts).
 
 ## Why trigram?
 
@@ -155,8 +167,8 @@ SELECT a.key, a.album, a.artist, a.year, a.track_count, a.duration, a.latest
 `search_text` contains the merged album title, the effective album artist, all
 parsed artists, every raw source title, every distinct track-level artist, and
 every distinct composer tag.
-Fielded terms target `search_album`, `search_artist`, `search_source`,
-`search_track_artist`, or `search_composer` instead. Bare terms target
+Fielded terms target `search_album`, `search_artist`, `search_serie`,
+`search_source`, `search_track_artist`, or `search_composer` instead. Bare terms target
 `search_text`, which also includes composer tags. A plain list of keywords is
 parsed as one quoted phrase; explicit `AND`/`OR` terms stay independent.
 
@@ -268,17 +280,26 @@ SELECT source_album FROM album_sources
  ORDER BY position;
 
 SELECT cover_path FROM albums WHERE key = ?;
+
+SELECT comment FROM album_comments
+ WHERE album_id = ?
+ ORDER BY position;
 ```
+
+`album_comments` holds the distinct, trimmed `comment` values collected from
+all rows merged into the album, sorted so the listing is deterministic. The
+album listing's correlated subquery returns them as a JSON array.
 
 ## Build and publication
 
 `SqliteIndex.build()` performs the same row parsing as before (merging
 ` // …` titles, splitting tags, classifying country/region tags, parsing
-artists, collecting composer tags), then:
+artists, collecting composer tags, and parsing series/label names), then:
 
 1. Creates a fresh `:memory:` database and schema.
-2. Inserts genres, regions, albums, parsed artists, source titles, and both tag
-   mappings in one transaction, yielding to the event loop between chunks.
+2. Inserts genres, regions, albums, parsed artists, source titles, comments,
+   and both tag mappings in one transaction, yielding to the event loop
+   between chunks.
 3. Calculates ranks and stores build metadata.
 4. Creates the FTS triggers and rebuilds `album_search`.
 5. Returns the database; `Library` swaps it in and closes the previous one.

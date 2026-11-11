@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
+import { albumSeries } from '../../src/server/search.js';
 import { parseSearchQuery } from '../../src/server/searchQuery.js';
 import type { AlbumsQuery } from '../../src/server/sqlite.js';
 import type { AlbumSummary } from '../../src/shared/types.js';
@@ -86,6 +87,18 @@ test('parser understands fielded terms, phrases, operators, and parentheses', ()
     kind: 'term',
     field: 'composer',
     value: 'jobim',
+    quoted: false,
+  });
+  assert.deepEqual(parseSearchQuery('serie:"rock candy"'), {
+    kind: 'term',
+    field: 'serie',
+    value: 'rock candy',
+    quoted: true,
+  });
+  assert.deepEqual(parseSearchQuery('label:blue'), {
+    kind: 'term',
+    field: 'serie',
+    value: 'blue',
     quoted: false,
   });
   assert.deepEqual(parseSearchQuery('foo:bar'), {
@@ -309,6 +322,61 @@ test('genre and region facets exclude and separate location tags', () => {
   assert.ok(regions.some((region) => region.name === 'Corsica'));
   assert.ok(regions.some((region) => region.name === 'Catalonia'));
   assert.ok(regions.every((region) => region.albumCount > 0));
+});
+
+test('album series parsing extracts braces and year-Edition brackets', () => {
+  assert.deepEqual(albumSeries('Dark Magus {Legacy}'), ['Legacy']);
+  assert.deepEqual(albumSeries('A Love Supreme [2016 Rock Candy Edition]'), [
+    'Rock Candy',
+  ]);
+  assert.deepEqual(albumSeries('X [2016 rock candy EDITION]'), ['rock candy']);
+  assert.deepEqual(albumSeries('X [Japan Edition] [2015 Remastered]'), []);
+  assert.deepEqual(albumSeries('X [2016 Edition]'), []);
+  assert.deepEqual(albumSeries('X [2016 Rock Candy Editions]'), []);
+  assert.deepEqual(albumSeries('X { A   B }'), ['A B']);
+  assert.deepEqual(albumSeries('X {A} {A}'), ['A']);
+  // A bracket group does not consume text from a different group.
+  assert.deepEqual(
+    albumSeries('X [2016 Remaster] [2017 Deluxe Edition]'),
+    ['Deluxe'],
+  );
+  // Values appear in title order, across both forms.
+  assert.deepEqual(
+    albumSeries('X {A} [2017 30th Anniversary Deluxe Edition] {B}'),
+    ['A', '30th Anniversary Deluxe', 'B'],
+  );
+});
+
+test('serie and label search the parsed album series', () => {
+  const blueNote = query({ q: 'serie:"blue note"' });
+  assert.ok(names(blueNote.albums).includes('Blue Train {Blue Note}'));
+
+  const rockCandy = query({ q: 'label:"rock candy"' });
+  assert.ok(
+    names(rockCandy.albums).includes(
+      'A Love Supreme [2016 Rock Candy Edition]',
+    ),
+  );
+
+  // Only the label is indexed: the year and the word "Edition" are stripped.
+  assert.equal(query({ q: 'serie:2016' }).total, 0);
+  assert.equal(query({ q: 'serie:"rock candy edition"' }).total, 0);
+});
+
+test('album comments are aggregated, deduplicated, and sorted', () => {
+  const albums = query({ q: 'album:"abbey road"' }).albums;
+  const abbey = albums.find((album) => album.album === 'Abbey Road');
+  assert.ok(abbey);
+  // Comments shared by both source titles appear once; the rest are merged.
+  assert.deepEqual(abbey.comments, [
+    'Bonus disc notes',
+    'https://example.com/abbey-road',
+    'Original mix notes',
+  ]);
+
+  const songhai = query({ q: 'album:songhai' }).albums;
+  assert.ok(songhai.length > 0);
+  assert.deepEqual(songhai[0]?.comments, []);
 });
 
 test('sorting and pagination return slices of the full ordered result', () => {

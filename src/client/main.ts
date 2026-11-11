@@ -13,6 +13,7 @@ import {
 import { artistSegments, regionKey } from '../shared/text.js';
 import { api } from './api.js';
 import { $, el } from './dom.js';
+import { linkifiedText } from './linkify.js';
 import {
   formatBitrate,
   formatCount,
@@ -1392,6 +1393,29 @@ async function openAlbum(
   }
 }
 
+/**
+ * The album's deduplicated track comments, shown in the dialog header beneath
+ * the tag pills. Comments are kept whole; the dialog body scrolls separately.
+ */
+function renderDialogComments(comments: string[]): HTMLElement | null {
+  if (comments.length === 0) return null;
+
+  const list = el('ul', {
+    class: 'dialog-comments',
+    'aria-label': 'Track comments',
+  });
+  for (const comment of comments) {
+    list.append(
+      el(
+        'li',
+        { class: 'dialog-comment', title: comment },
+        ...linkifiedText(comment),
+      ),
+    );
+  }
+  return list;
+}
+
 function renderDialog(
   album: AlbumSummary,
   tracks: TracksResponse | null,
@@ -1431,45 +1455,46 @@ function renderDialog(
     }),
   );
 
-  if (album.genres.length > 0) {
-    const genreButtons = album.genres.slice(0, 6).map((name) => {
-      const key = genreKey(name);
-      const chip = el(
-        'button',
-        {
-          class: 'chip chip-small',
-          type: 'button',
-          title: `Filter by ${name}`,
-          'aria-pressed': state.selectedGenres.includes(key) ? 'true' : 'false',
-        },
-        el('span', { text: name }),
-      );
-      if (state.selectedGenres.includes(key)) chip.classList.add('is-active');
-      chip.addEventListener('click', () => activateGenre(name));
-      return chip;
-    });
-    heading.append(el('div', { class: 'dialog-genres' }, ...genreButtons));
+  // Genres and regions share one wrapping row, regions following genres.
+  const tagButtons: HTMLElement[] = [];
+  for (const name of album.genres.slice(0, 6)) {
+    const key = genreKey(name);
+    const chip = el(
+      'button',
+      {
+        class: 'chip chip-small',
+        type: 'button',
+        title: `Filter by ${name}`,
+        'aria-pressed': state.selectedGenres.includes(key) ? 'true' : 'false',
+      },
+      el('span', { text: name }),
+    );
+    if (state.selectedGenres.includes(key)) chip.classList.add('is-active');
+    chip.addEventListener('click', () => activateGenre(name));
+    tagButtons.push(chip);
+  }
+  for (const name of album.regions.slice(0, 6)) {
+    const key = regionKey(name);
+    const chip = el(
+      'button',
+      {
+        class: 'chip chip-small chip-region',
+        type: 'button',
+        title: `Filter by region: ${name}`,
+        'aria-pressed': state.selectedRegions.includes(key) ? 'true' : 'false',
+      },
+      el('span', { text: name }),
+    );
+    if (state.selectedRegions.includes(key)) chip.classList.add('is-active');
+    chip.addEventListener('click', () => activateRegion(name));
+    tagButtons.push(chip);
+  }
+  if (tagButtons.length > 0) {
+    heading.append(el('div', { class: 'dialog-genres' }, ...tagButtons));
   }
 
-  if (album.regions.length > 0) {
-    const regionButtons = album.regions.slice(0, 6).map((name) => {
-      const key = regionKey(name);
-      const chip = el(
-        'button',
-        {
-          class: 'chip chip-small chip-region',
-          type: 'button',
-          title: `Filter by region: ${name}`,
-          'aria-pressed': state.selectedRegions.includes(key) ? 'true' : 'false',
-        },
-        el('span', { text: name }),
-      );
-      if (state.selectedRegions.includes(key)) chip.classList.add('is-active');
-      chip.addEventListener('click', () => activateRegion(name));
-      return chip;
-    });
-    heading.append(el('div', { class: 'dialog-genres' }, ...regionButtons));
-  }
+  const comments = renderDialogComments(album.comments ?? []);
+  if (comments) heading.append(comments);
 
   const query = state.q.trim();
   const matchedCount = tracks

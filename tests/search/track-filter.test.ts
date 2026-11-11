@@ -65,6 +65,26 @@ test('boolean expressions are evaluated per track', () => {
   );
 });
 
+test('serie and label match the parsed album series', () => {
+  const track = tracks[0];
+  assert.ok(track);
+
+  const blueNote = createTrackMatcher(
+    'Blue Train {Blue Note}',
+    'serie:"blue note"',
+  );
+  assert.equal(blueNote(track), true);
+
+  const rockCandy = createTrackMatcher(
+    'A Love Supreme [2016 Rock Candy Edition]',
+    'label:"rock candy"',
+  );
+  assert.equal(rockCandy(track), true);
+
+  const unrelated = createTrackMatcher('Abbey Road', 'serie:"blue note"');
+  assert.equal(unrelated(track), false);
+});
+
 test('no-match and malformed queries return no tracks', () => {
   assert.deepEqual(matches('foo:bar'), []);
   assert.deepEqual(matches('album:"abbey tracks"'), []);

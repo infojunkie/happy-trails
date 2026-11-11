@@ -38,7 +38,7 @@
             autocomplete="off"
             spellcheck="false"
             aria-describedby="search-syntax"
-            title='album:"exact phrase" artist:name composer:name source:label trackartist:name — supports AND, OR, and parentheses'
+            title='album:"exact phrase" artist:name serie:name composer:name source:label trackartist:name — supports AND, OR, and parentheses'
           />
           <kbd class="search-hint" aria-hidden="true">/</kbd>
         </label>
@@ -55,9 +55,9 @@
         </button>
         <span id="search-syntax" class="visually-hidden">
           Search syntax: use field colon value, quote multi-word values, and
-          combine terms with AND or OR. Fields are album, artist, composer,
-          source, and trackartist. A plain sequence of keywords searches all
-          fields as one phrase.
+          combine terms with AND or OR. Fields are album, artist, serie,
+          composer, source, and trackartist. A plain sequence of keywords
+          searches all fields as one phrase.
         </span>
 
         <label class="sort-field">
@@ -342,6 +342,12 @@
           <dd>Album title and raw source titles.</dd>
           <dt><code>artist:</code></dt>
           <dd>Album artist, parsed artists, and track artists.</dd>
+          <dt><code>serie:</code></dt>
+          <dd>
+            Series/label names from <code>{…}</code> and year-Edition brackets
+            such as <code>[2016 Rock Candy Edition]</code>. Alias:
+            <code>label:</code>.
+          </dd>
           <dt><code>composer:</code></dt>
           <dd>Composer tags from the tracks. Alias: <code>composers:</code>.</dd>
           <dt><code>source:</code></dt>
@@ -417,6 +423,14 @@
           >
             <code>composer:"Antonio Carlos Jobim"</code>
             <span>a composer tag</span>
+          </button>
+          <button
+            type="button"
+            class="syntax-example"
+            data-search-example='serie:"Rock Candy"'
+          >
+            <code>serie:"Rock Candy"</code>
+            <span>an edition series</span>
           </button>
         </div>
 

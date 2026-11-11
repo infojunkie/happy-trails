@@ -18,6 +18,7 @@ const context = await createFixtureContext({
       genres: 'Electronic,Krautrock,Germany',
       track_artists: ['Kraftwerk'],
       composers: ['Ralf Hütter, Florian Schneider'],
+      comments: null,
       cover_path: '',
     },
     {
@@ -30,6 +31,7 @@ const context = await createFixtureContext({
       genres: 'Folk,Fado,Portugal',
       track_artists: ['Madredeus'],
       composers: ['Pedro Ayres Magalhães'],
+      comments: null,
       cover_path: '',
     },
     {
@@ -42,6 +44,7 @@ const context = await createFixtureContext({
       genres: 'Jazz,Chanson,Italy',
       track_artists: ['Paolo Conte'],
       composers: ['Paolo Conte'],
+      comments: null,
       cover_path: '',
     },
   ],

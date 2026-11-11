@@ -31,7 +31,8 @@ facets built from the comma-separated `genre` column.
   matching (`Soren` finds `Søren`, `caetera` finds `cætera`, `Bjork` finds
   `Björk`). Track-level artists are searchable too.
 - Fielded search syntax: `album:"abbey road" artist:beatles`,
-  `composer:jobim`, `source:"Bonus Tracks"`, `trackartist:"guest"`, combined
+  `composer:jobim`, `serie:"Rock Candy"`, `source:"Bonus Tracks"`,
+  `trackartist:"guest"`, combined
   with `AND`, `OR`, implicit AND, and parentheses. Quoted values are matched as
   contiguous phrases. A query made only of plain keywords is treated as one
   phrase; use `AND` to combine independent words. The `?` button
@@ -57,6 +58,9 @@ facets built from the comma-separated `genre` column.
   track matches, the toggle is omitted. Album Play follows the current toggle
   state. Merged multi-CD albums group tracks under their original disc labels,
   since disc numbers frequently collide across the source titles.
+- Track comments are aggregated across an album's tracks, deduplicated, and
+  shown in the album dialog header beneath the tag pills. Absolute `http(s)`
+  URLs inside comments are clickable and open in a new tab.
 - Album artwork from Synology AudioStation, proxied and cached by the server.
   Albums without artwork keep the generated gradient/initials cover.
 - An **Artwork** button in the album dialog when the album folder contains
@@ -259,6 +263,8 @@ SELECT
   STRING_AGG(DISTINCT m.genre, ',') AS genres,
   ARRAY_AGG(DISTINCT m.artist)
     FILTER (WHERE m.artist IS NOT NULL AND m.artist <> '') AS track_artists,
+  ARRAY_AGG(DISTINCT btrim(m.comment))
+    FILTER (WHERE btrim(m.comment) <> '') AS comments,
   MIN(m.path) AS cover_path
 FROM "public"."music" m
 WHERE m.fs_online IS NOT FALSE
@@ -272,9 +278,13 @@ tag is a country/region name. Album titles are normalised by stripping a
 whitespace-separated ` // ...` suffix; rows that end up with the same title and
 artist are merged: track counts and durations are summed, the newest upload
 date wins, and tags are unioned. Parsed artists and the original raw titles are
-kept in `album_artists` and `album_sources`. The original raw titles, all
-track-level artists, and composer tags are folded into the FTS search text, so
-labels such as "The Vanilla Tapes", guest artists, and composers still match.
+kept in `album_artists` and `album_sources`. Distinct non-empty `comment`
+values are trimmed, deduplicated across the album's tracks and merged source
+titles, and stored per album in `album_comments`; the album dialog renders them
+in sorted order in its header and linkifies absolute `http(s)` URLs. The
+original raw titles, all track-level artists, and composer tags are folded into
+the FTS search text, so labels such as "The Vanilla Tapes", guest artists, and
+composers still match.
 See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
@@ -298,11 +308,17 @@ tokenizer, which preserves substring semantics; phrases shorter than three
 characters fall back to an exact `instr()` scan.
 
 The search expression parser supports plain keyword phrases, `album:`,
-`artist:`, `composer:`, `source:`, and `trackartist:` fields, quoted phrases,
-implicit/explicit `AND`, `OR`, and parentheses. Field terms target dedicated
-folded columns; each FTS term is evaluated once in a materialized CTE so `OR`
-expressions do not rescan the FTS index per album. Composer values come from
-the track-level `composer` column populated from FLAC/ID3 tags.
+`artist:`, `serie:`, `composer:`, `source:`, and `trackartist:` fields, quoted
+phrases, implicit/explicit `AND`, `OR`, and parentheses. Field terms target
+dedicated folded columns; each FTS term is evaluated once in a materialized CTE
+so `OR` expressions do not rescan the FTS index per album. Composer values come
+from the track-level `composer` column populated from FLAC/ID3 tags.
+
+Series/label values are parsed from the album title: the contents of `{...}`,
+and the label between a leading year and the word "Edition" inside `[...]`
+(`[2016 Rock Candy Edition]` → `Rock Candy`). They are folded into
+`search_serie` and searched with `serie:` (alias `label:`) and are also part of
+the all-field text.
 
 Artist parsing applies to the effective album artist and to each track artist.
 A punctuation run is a separator only when whitespace surrounds it, so
@@ -550,7 +566,7 @@ identifies the snapshot the counts came from.
 | `genreMode` | `any` (default) or `all`; controls whether an album must contain any or all selected genres. |
 | `region` | Repeatable or comma-separated. Matches albums containing any selected country/region tag. Combined with `genre` using AND. |
 | `regionMode` | `any` (default) or `all`; controls whether an album must contain any or all selected regions. |
-| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). |
+| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `serie:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
 | `limit` | Default `48`, maximum `200`. |
@@ -575,14 +591,17 @@ listing; compare it with `/api/status` before deciding to reload.
       "duration": 3046,
       "latest": "2026-10-13T19:25:15",
       "genres": ["Jazz", "Funk"],
-      "regions": ["Ethiopia", "France"]
+      "regions": ["Ethiopia", "France"],
+      "comments": ["https://aratkilo.bandcamp.com/album/danama"]
     }
   ]
 }
 ```
 
 `duration` is in seconds. `key` is an opaque base64url value identifying the
-`(album, artist)` pair.
+`(album, artist)` pair. `comments` contains the album's distinct non-empty
+track comments, deduplicated and sorted; the client renders `http(s)` URLs in
+them as external links.
 
 #### Search syntax
 
@@ -595,6 +614,7 @@ quoted value is matched as a contiguous phrase rather than as separate words.
 | --- | --- |
 | `album` | Merged album title and all raw source titles. |
 | `artist` | Effective album artist, parsed artists, and track-level artists. |
+| `serie` | Series/label names parsed from the album title: the contents of `{...}`, and the label between a leading year and "Edition" in `[...]` (`[2016 Rock Candy Edition]` matches `Rock Candy`). `label` is an alias. |
 | `composer` | Composer tag values from the FLAC/ID3 metadata (`composers` is an alias). |
 | `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). |
 | `trackartist` | Track-level artists only (`guest`, `track_artist`, and `track-artist` are aliases). |
@@ -611,6 +631,7 @@ case-, accent-, and ligature-insensitive, including quoted phrases.
 album:"abbey road"
 artist:beatles OR artist:stones
 composer:"Antonio Carlos Jobim"
+serie:"Rock Candy"
 (album:road OR album:street) artist:beatles
 source:"Vanilla Tapes"
 trackartist:"Ferenc Snétberger"
@@ -750,6 +771,7 @@ happy-trails/
 │   │   ├── api.ts        API client
 │   │   ├── dom.ts        Safe createElement helper
 │   │   ├── format.ts     Duration/date/bitrate formatting
+│   │   ├── linkify.ts    Plain-text comment URL linkification
 │   │   └── main.ts       State, rendering, and events
 │   └── shared/
 │       ├── text.ts       Folding and region keys shared with the browser

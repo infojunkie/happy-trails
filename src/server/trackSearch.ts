@@ -1,6 +1,6 @@
 import { parseArtists } from './artists.js';
 import type { TrackRow } from './db.js';
-import { foldSearch, searchTokens } from './search.js';
+import { albumSeries, foldSearch, searchTokens } from './search.js';
 import {
   parseSearchQuery,
   type SearchField,
@@ -40,11 +40,13 @@ function trackFields(track: TrackRow, album: string): TrackFields {
   ].join(' ');
   const albumText = [album, source].join(' ');
   const composer = track.composer ?? '';
+  const series = albumSeries(album);
 
   return {
-    all: foldSearch([albumText, allArtists, composer].join(' ')),
+    all: foldSearch([albumText, allArtists, composer, ...series].join(' ')),
     album: foldSearch(albumText),
     artist: foldSearch(allArtists),
+    serie: foldSearch(series.join(' ')),
     source: foldSearch(source),
     trackartist: foldSearch(
       [track.artist ?? '', ...trackArtists].join(' '),

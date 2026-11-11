@@ -284,6 +284,23 @@ test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () 
   assert.equal(invalidSort.total, all.total);
 });
 
+test('GET /api/albums aggregates and deduplicates track comments', async () => {
+  const all = await albums(main.server.baseUrl, '/api/albums?limit=200');
+  assert.ok(all.albums.every((album) => Array.isArray(album.comments)));
+
+  // "Abbey Road" merges the main and bonus-disc source titles. The shared
+  // URL appears once; each source's own comment is kept.
+  const abbey = await findAlbum(main.server.baseUrl, 'Abbey Road');
+  assert.deepEqual(abbey.comments, [
+    'Bonus disc notes',
+    'https://example.com/abbey-road',
+    'Original mix notes',
+  ]);
+
+  const kindOfBlue = await findAlbum(main.server.baseUrl, 'Kind of Blue');
+  assert.deepEqual(kindOfBlue.comments, ['UDSACD 2122']);
+});
+
 test('GET /api/albums applies genre and region modes', async () => {
   const jazz = await albums(main.server.baseUrl, '/api/albums?genre=Jazz');
   const folk = await albums(main.server.baseUrl, '/api/albums?genre=Folk');
@@ -347,6 +364,24 @@ test('GET /api/albums applies the search expression and combines with tags', asy
   assert.ok(composer.total > 0);
   assert.ok(
     composer.albums.some((album) => album.album === 'Getz/Gilberto'),
+  );
+
+  const serie = await albums(
+    main.server.baseUrl,
+    `/api/albums?q=${encodeURIComponent('serie:"blue note"')}`,
+  );
+  assert.ok(
+    serie.albums.some((album) => album.album === 'Blue Train {Blue Note}'),
+  );
+
+  const label = await albums(
+    main.server.baseUrl,
+    `/api/albums?q=${encodeURIComponent('label:"rock candy"')}`,
+  );
+  assert.ok(
+    label.albums.some((album) =>
+      album.album.startsWith('A Love Supreme [2016 Rock Candy Edition]'),
+    ),
   );
 
   const phrase = await albums(

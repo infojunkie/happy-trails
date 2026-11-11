@@ -1396,6 +1396,34 @@ button.chip:hover {
   margin-top: 10px;
 }
 
+.dialog-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: min(28vh, 14em);
+  margin: 10px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.dialog-comment {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.dialog-comment .comment-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dialog-comment .comment-link:hover {
+  text-decoration-thickness: 2px;
+}
+
 .dialog-track-filter {
   display: inline-flex;
   gap: 3px;

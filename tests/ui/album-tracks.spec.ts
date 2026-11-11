@@ -30,6 +30,47 @@ test('album cards preserve original artist punctuation and link the parts', asyn
   await expect(earth.locator('.album-artist .artist-link')).toHaveCount(1);
 });
 
+test('album dialog aggregates and deduplicates track comments and links URLs', async ({
+  page,
+}) => {
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  await openAlbum(page, 'Abbey Road');
+
+  const comments = page.locator('#album-dialog .dialog-comments');
+  await expect(comments).toBeVisible();
+  // Both merged source titles contribute; their shared URL is shown once.
+  await expect(comments.locator('.dialog-comment')).toHaveCount(3);
+  const commentTexts = await comments.locator('.dialog-comment').allTextContents();
+  expect(new Set(commentTexts)).toEqual(
+    new Set([
+      'Original mix notes',
+      'Bonus disc notes',
+      'https://example.com/abbey-road',
+    ]),
+  );
+
+  const link = comments.locator('a.comment-link');
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveAttribute('href', 'https://example.com/abbey-road');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toBeVisible();
+
+  // Comments sit below the tag pills and above the Play/Artwork row.
+  await expect(page.locator('#album-dialog .dialog-actions')).toBeVisible();
+  const previousClass = await comments.evaluate(
+    (node) => node.previousElementSibling?.className ?? '',
+  );
+  expect(previousClass).toContain('dialog-genres');
+  const nextClass = await comments.evaluate(
+    (node) => node.nextElementSibling?.className ?? '',
+  );
+  expect(nextClass).toContain('dialog-actions');
+
+  await page.goto(`/?q=${encodeURIComponent('album:songhai')}`);
+  await openAlbum(page, 'Songhai');
+  await expect(page.locator('#album-dialog .dialog-comments')).toHaveCount(0);
+});
+
 test('album chips activate the corresponding filters', async ({ page }) => {
   await page.goto(`/?q=${encodeURIComponent('artist:getz')}`);
   const card = page.locator('.album-card', { hasText: 'Getz/Gilberto' }).first();
@@ -118,6 +159,14 @@ test('album dialog genre and region chips activate filters', async ({ page }) =>
   await page.goto(`/?q=${encodeURIComponent('artist:getz')}`);
   await expect(page.locator('.album-card').first()).toBeVisible();
   await openAlbum(page, 'Getz/Gilberto');
+  // Genres and regions share a single wrapping row, regions after genres.
+  const tagRow = page.locator('#album-dialog .dialog-heading > .dialog-genres');
+  await expect(tagRow).toHaveCount(1);
+  await expect(tagRow.locator('.chip')).toHaveText([
+    'Jazz',
+    'Bossa Nova',
+    'Brazil',
+  ]);
   await page.locator('.dialog-genres .chip-region', { hasText: 'Brazil' }).click();
   await expect(page.locator('#album-dialog')).toBeHidden();
   await expect(page).toHaveURL(/region=Brazil/);

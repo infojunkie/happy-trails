@@ -11,6 +11,7 @@ import type { AlbumRow } from './db.js';
 import { isRegionTag } from './regions.js';
 import {
   albumKey,
+  albumSeries,
   foldSearch,
   genreKey,
   normalizeAlbumName,
@@ -65,6 +66,7 @@ const SCHEMA_SQL = `
     search_source TEXT NOT NULL,
     search_track_artist TEXT NOT NULL,
     search_composer TEXT NOT NULL,
+    search_serie TEXT NOT NULL,
     album_rank  INTEGER NOT NULL,
     artist_rank INTEGER NOT NULL,
     key_rank    INTEGER NOT NULL
@@ -82,6 +84,13 @@ const SCHEMA_SQL = `
     position     INTEGER NOT NULL,
     source_album TEXT NOT NULL,
     cover_path   TEXT,
+    PRIMARY KEY (album_id, position)
+  ) STRICT;
+
+  CREATE TABLE album_comments (
+    album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    comment  TEXT NOT NULL,
     PRIMARY KEY (album_id, position)
   ) STRICT;
 
@@ -139,6 +148,7 @@ const SCHEMA_SQL = `
     search_source,
     search_track_artist,
     search_composer,
+    search_serie,
     content = 'albums',
     content_rowid = 'id',
     tokenize = 'trigram'
@@ -153,40 +163,44 @@ const TRIGGER_SQL = `
   CREATE TRIGGER albums_ai AFTER INSERT ON albums BEGIN
     INSERT INTO album_search(
       rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer
+      search_source, search_track_artist, search_composer, search_serie
     ) VALUES (
       new.id, new.search_text, new.search_album, new.search_artist,
-      new.search_source, new.search_track_artist, new.search_composer
+      new.search_source, new.search_track_artist, new.search_composer,
+      new.search_serie
     );
   END;
 
   CREATE TRIGGER albums_ad AFTER DELETE ON albums BEGIN
     INSERT INTO album_search(
       album_search, rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer
+      search_source, search_track_artist, search_composer, search_serie
     ) VALUES (
       'delete', old.id, old.search_text, old.search_album, old.search_artist,
-      old.search_source, old.search_track_artist, old.search_composer
+      old.search_source, old.search_track_artist, old.search_composer,
+      old.search_serie
     );
   END;
 
   CREATE TRIGGER albums_au AFTER UPDATE OF
     search_text, search_album, search_artist,
-    search_source, search_track_artist, search_composer
+    search_source, search_track_artist, search_composer, search_serie
   ON albums BEGIN
     INSERT INTO album_search(
       album_search, rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer
+      search_source, search_track_artist, search_composer, search_serie
     ) VALUES (
       'delete', old.id, old.search_text, old.search_album, old.search_artist,
-      old.search_source, old.search_track_artist, old.search_composer
+      old.search_source, old.search_track_artist, old.search_composer,
+      old.search_serie
     );
     INSERT INTO album_search(
       rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer
+      search_source, search_track_artist, search_composer, search_serie
     ) VALUES (
       new.id, new.search_text, new.search_album, new.search_artist,
-      new.search_source, new.search_track_artist, new.search_composer
+      new.search_source, new.search_track_artist, new.search_composer,
+      new.search_serie
     );
   END;
 `;
@@ -209,6 +223,7 @@ interface AlbumAccumulator {
   sourcePaths: Map<string, string>;
   trackArtists: Set<string>;
   composers: Set<string>;
+  comments: Set<string>;
   genreKeys: Set<string>;
   regionKeys: Set<string>;
   year: number | null;
@@ -228,6 +243,7 @@ interface DbAlbumRow {
   artists: string;
   genres: string;
   regions: string;
+  comments: string;
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -267,6 +283,14 @@ function rankValues(values: Iterable<string>): Map<string, number> {
   }
 
   return ranks;
+}
+
+/** Collator order with a code-unit tie-break, so the output is deterministic. */
+function compareComments(left: string, right: string): number {
+  return (
+    collator.compare(left, right) ||
+    (left < right ? -1 : left > right ? 1 : 0)
+  );
 }
 
 function parseStringArray(value: unknown): string[] {
@@ -342,6 +366,7 @@ async function accumulateAlbums(
         sourcePaths: new Map(),
         trackArtists: new Set(),
         composers: new Set(),
+        comments: new Set(),
         genreKeys: new Set(),
         regionKeys: new Set(),
         year: null,
@@ -361,6 +386,10 @@ async function accumulateAlbums(
     for (const composer of row.composers ?? []) {
       const name = composer.trim();
       if (name) acc.composers.add(name);
+    }
+    for (const comment of row.comments ?? []) {
+      const text = comment.trim();
+      if (text) acc.comments.add(text);
     }
     acc.trackCount += row.track_count;
     acc.duration += row.duration;
@@ -464,15 +493,18 @@ export class SqliteIndex {
         INSERT INTO albums(
           key, album, artist, year, track_count, duration, latest, cover_path,
           search_text, search_album, search_artist, search_source,
-          search_track_artist, search_composer, album_rank, artist_rank,
-          key_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          search_track_artist, search_composer, search_serie, album_rank,
+          artist_rank, key_rank
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertAlbumArtist = db.prepare(
         'INSERT INTO album_artists(album_id, position, artist) VALUES (?, ?, ?)',
       );
       const insertAlbumSource = db.prepare(
         'INSERT INTO album_sources(album_id, position, source_album, cover_path) VALUES (?, ?, ?, ?)',
+      );
+      const insertAlbumComment = db.prepare(
+        'INSERT INTO album_comments(album_id, position, comment) VALUES (?, ?, ?)',
       );
       const insertAlbumGenre = db.prepare(
         'INSERT INTO album_genres(album_id, position, genre_key) VALUES (?, ?, ?)',
@@ -503,7 +535,9 @@ export class SqliteIndex {
           null;
         const trackArtists = [...acc.trackArtists];
         const composers = [...acc.composers];
-        // Include source titles, track artists, and composer tags.
+        const comments = [...acc.comments].sort(compareComments);
+        const series = albumSeries(acc.album);
+        // Include source titles, track artists, composer tags, and series.
         const searchText = foldSearch(
           [
             acc.album,
@@ -512,6 +546,7 @@ export class SqliteIndex {
             ...sourceAlbums,
             ...trackArtists,
             ...composers,
+            ...series,
           ].join(' '),
         );
         const searchAlbum = foldSearch(
@@ -523,6 +558,7 @@ export class SqliteIndex {
         const searchSource = foldSearch(sourceAlbums.join(' '));
         const searchTrackArtist = foldSearch(trackArtists.join(' '));
         const searchComposer = foldSearch(composers.join(' '));
+        const searchSerie = foldSearch(series.join(' '));
         const genreKeys = [...acc.genreKeys];
         const regionKeys = [...acc.regionKeys];
 
@@ -541,6 +577,7 @@ export class SqliteIndex {
           searchSource,
           searchTrackArtist,
           searchComposer,
+          searchSerie,
           albumRanks.get(acc.album) ?? 0,
           artistRanks.get(acc.artist) ?? 0,
           keyRanks.get(key) ?? 0,
@@ -563,6 +600,9 @@ export class SqliteIndex {
             acc.sourcePaths.get(sourceAlbum) ?? null,
           );
         }
+        for (let position = 0; position < comments.length; position += 1) {
+          insertAlbumComment.run(albumId, position, comments[position] ?? '');
+        }
         for (let position = 0; position < genreKeys.length; position += 1) {
           insertAlbumGenre.run(albumId, position, genreKeys[position] ?? '');
         }
@@ -582,12 +622,12 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(totalTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '4');
+      insertMeta.run('schema_version', '6');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 4');
+      db.exec('PRAGMA user_version = 6');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -788,7 +828,13 @@ export class SqliteIndex {
                 JOIN regions r ON r.key = ar.region_key
                WHERE ar.album_id = a.id
                ORDER BY ar.position
-            )) AS regions
+            )) AS regions,
+           (SELECT json_group_array(comment) FROM (
+              SELECT ac.comment AS comment
+                FROM album_comments ac
+               WHERE ac.album_id = a.id
+               ORDER BY ac.position
+            )) AS comments
          FROM albums a
          ${whereSql}
          ORDER BY ${ORDER_BY[query.sort]}
@@ -807,6 +853,7 @@ export class SqliteIndex {
       latest: row.latest,
       genres: parseStringArray(row.genres),
       regions: parseStringArray(row.regions),
+      comments: parseStringArray(row.comments),
     }));
 
     return { total, albums, libraryVersion: this.version };

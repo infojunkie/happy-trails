@@ -20,6 +20,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Rock,Pop',
     track_artists: ['The Beatles'],
     composers: ['John Lennon, Paul McCartney', 'George Harrison'],
+    comments: ['https://example.com/abbey-road', 'Original mix notes'],
     cover_path: 'covers/abbey.jpg',
   },
   {
@@ -32,6 +33,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Rock',
     track_artists: ['The Beatles'],
     composers: ['George Harrison'],
+    comments: ['https://example.com/abbey-road', 'Bonus disc notes'],
     cover_path: 'covers/abbey-bonus.jpg',
   },
   {
@@ -44,6 +46,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Jazz,USA',
     track_artists: ['Miles Davis', 'John Coltrane'],
     composers: ['Miles Davis'],
+    comments: ['UDSACD 2122'],
     cover_path: 'covers/kind.jpg',
   },
   {
@@ -56,6 +59,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Jazz,Bossa Nova,Brazil',
     track_artists: ['Stan Getz', 'João Gilberto', 'Antonio Carlos Jobim'],
     composers: ['Antonio Carlos Jobim, Vinicius de Moraes'],
+    comments: [],
     cover_path: '',
   },
   {
@@ -68,6 +72,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Flamenco,Folk,Mali,Spain',
     track_artists: ['Ketama', 'Toumani Diabaté', 'Danny Thompson'],
     composers: ['Toumani Diabaté'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -80,6 +85,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Pop,Electronic,Iceland',
     track_artists: ['Björk'],
     composers: ['Björk'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -92,6 +98,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Jazz,Poland',
     track_artists: ['Michał Urbaniak'],
     composers: ['Thelonious Monk'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -104,6 +111,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Jazz,Denmark',
     track_artists: ['Søren Lee', 'Rick Margitza'],
     composers: ['Søren Lee'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -116,6 +124,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Jazz,England',
     track_artists: ['Laurie Holloway Trio'],
     composers: ['Laurie Holloway'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -128,6 +137,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Rock,England',
     track_artists: ['RJ Thompson'],
     composers: ['RJ Thompson'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -140,6 +150,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Folk,Corsica,France',
     track_artists: ['I Muvrini'],
     composers: ['Traditional'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -152,6 +163,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Rock,Catalonia,Spain',
     track_artists: ['Sopa de Cabra'],
     composers: ['Gerard Quintana'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -164,6 +176,7 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Rock,Punk,England',
     track_artists: ['The Clash'],
     composers: ['Joe Strummer, Mick Jones'],
+    comments: null,
     cover_path: '',
   },
   {
@@ -176,6 +189,33 @@ export const fixtureRows: AlbumRow[] = [
     genres: 'Soul,Funk,USA',
     track_artists: ['Earth, Wind & Fire'],
     composers: ['Maurice White'],
+    comments: null,
+    cover_path: '',
+  },
+  {
+    album: 'Blue Train {Blue Note}',
+    artist: 'John Coltrane',
+    year: 1958,
+    track_count: 5,
+    duration: 2500,
+    latest: '2014-06-01T10:00:00',
+    genres: 'Jazz,USA',
+    track_artists: ['John Coltrane'],
+    composers: ['John Coltrane'],
+    comments: null,
+    cover_path: '',
+  },
+  {
+    album: 'A Love Supreme [2016 Rock Candy Edition]',
+    artist: 'John Coltrane',
+    year: 1965,
+    track_count: 4,
+    duration: 2100,
+    latest: '2014-07-01T10:00:00',
+    genres: 'Jazz,USA',
+    track_artists: ['John Coltrane'],
+    composers: ['John Coltrane'],
+    comments: null,
     cover_path: '',
   },
 ];
@@ -340,6 +380,7 @@ export async function createFixtureContext(
     ...row,
     track_artists: row.track_artists ? [...row.track_artists] : row.track_artists,
     composers: row.composers ? [...row.composers] : row.composers,
+    comments: row.comments ? [...row.comments] : row.comments,
   }));
   const index = await SqliteIndex.build(rows, 1);
   const status: StatusResponse = {

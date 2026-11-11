@@ -35,6 +35,8 @@ export interface AlbumRow {
   track_artists: string[] | null;
   /** Distinct composer tag values from the tracks. */
   composers: string[] | null;
+  /** Distinct non-empty track comments, trimmed. */
+  comments: string[] | null;
   /** Representative file path, used to resolve an AudioStation cover id. */
   cover_path: string;
 }
@@ -68,6 +70,8 @@ const ALBUM_QUERY = `
       FILTER (WHERE m.artist IS NOT NULL AND m.artist <> '') AS track_artists,
     ARRAY_AGG(DISTINCT m.composer)
       FILTER (WHERE m.composer IS NOT NULL AND m.composer <> '') AS composers,
+    ARRAY_AGG(DISTINCT btrim(m.comment))
+      FILTER (WHERE btrim(m.comment) <> '') AS comments,
     MIN(m.path) AS cover_path
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
