@@ -24,8 +24,8 @@ export class CoverService {
     this.dsm = config.dsm ? new DsmClient(config.dsm) : null;
     console.log(
       this.dsm
-        ? `[covers] Synology AudioStation covers enabled (${config.dsm?.url})`
-        : '[covers] Synology covers disabled (set DSM_URL/DSM_USER/DSM_PASS or DSADDR/DSUSER/DSPASSWD)',
+        ? `[artwork] Synology AudioStation covers enabled (${config.dsm?.url})`
+        : '[artwork] Synology covers disabled (set DSM_URL/DSM_USER/DSM_PASS or DSADDR/DSUSER/DSPASSWD)',
     );
   }
 
@@ -94,7 +94,7 @@ export class CoverService {
     if (now - this.lastErrorLog < ERROR_LOG_INTERVAL_MS) return;
     this.lastErrorLog = now;
     console.error(
-      '[covers] failed to load cover:',
+      '[artwork] failed to load cover:',
       error instanceof Error ? error.message : error,
     );
   }

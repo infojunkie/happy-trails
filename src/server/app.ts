@@ -6,10 +6,8 @@ import express, {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  isFilterMode,
   isSortKey,
   type AlbumsResponse,
-  type FilterMode,
   type GenresResponse,
   type SessionResponse,
   type TracksResponse,
@@ -31,7 +29,6 @@ import { playback } from './playback.js';
 import { userSessions } from './userSessions.js';
 
 const MAX_SEARCH_LENGTH = 200;
-const MAX_SELECTED_GENRES = 50;
 const MAX_OFFSET = 1_000_000;
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -44,9 +41,11 @@ export interface AppDependencies {
     | 'status'
     | 'genres'
     | 'regions'
+    | 'series'
     | 'queryAlbums'
     | 'sourceAlbumsFor'
     | 'coverPathFor'
+    | 'serieKeysFor'
   >;
   loadTracks: typeof loadTracks;
   covers: Pick<typeof covers, 'getCover'>;
@@ -144,22 +143,6 @@ function integerParam(
   const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
-}
-
-/** Accepts `?genre=Rock&genre=Jazz` as well as `?genre=Rock,Jazz`. */
-function facetParams(value: unknown): string[] {
-  const values = Array.isArray(value) ? value : [value];
-  const names = new Set<string>();
-  for (const item of values) {
-    if (typeof item !== 'string') continue;
-    for (const part of item.split(',')) {
-      const name = part.trim();
-      if (!name) continue;
-      names.add(name);
-      if (names.size >= MAX_SELECTED_GENRES) return [...names];
-    }
-  }
-  return [...names];
 }
 
 function unavailable(res: Response, dependencies: AppDependencies): void {
@@ -374,6 +357,7 @@ export function createApp(
       totalAlbums: status.albumCount,
       genres: dependencies.library.genres(),
       regions: dependencies.library.regions(),
+      series: dependencies.library.series(),
       libraryVersion: status.libraryVersion,
     };
     res.json(body);
@@ -395,22 +379,7 @@ export function createApp(
       1,
       dependencies.config.maxPageSize,
     );
-    const genres = facetParams(req.query.genre);
-    const regions = facetParams(req.query.region);
-    const genreModeParam = stringParam(req.query.genreMode);
-    const regionModeParam = stringParam(req.query.regionMode);
-    const genreMode: FilterMode = isFilterMode(genreModeParam)
-      ? genreModeParam
-      : 'any';
-    const regionMode: FilterMode = isFilterMode(regionModeParam)
-      ? regionModeParam
-      : 'any';
-
     const result = dependencies.library.queryAlbums({
-      genres,
-      genreMode,
-      regions,
-      regionMode,
       q,
       sort,
       offset,
@@ -558,7 +527,11 @@ export function createApp(
       res.status(404).json({ error: 'Album not found' });
       return;
     }
-    const matchesTrack = createTrackMatcher(decoded.album, query);
+    const matchesTrack = createTrackMatcher(
+      decoded.album,
+      query,
+      dependencies.library.serieKeysFor(decoded.album, decoded.artist),
+    );
 
     const body: TracksResponse = {
       album: decoded.album,

@@ -482,7 +482,6 @@ p {
   top: calc(var(--header-height) + 14px);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - var(--header-height) - 28px);
   padding: 16px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -497,7 +496,7 @@ p {
 }
 
 .facet-section-genres {
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .facet-section.is-collapsed {
@@ -518,16 +517,12 @@ p {
   flex: 0 0 auto;
 }
 
-.facet-section-regions {
+.facet-section-regions,
+.facet-section-series {
   flex: 0 0 auto;
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
-}
-
-.genre-list.region-list {
-  flex: 0 1 auto;
-  max-height: 180px;
 }
 
 .facets-header {
@@ -628,12 +623,18 @@ p {
 }
 
 .genre-list {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  /* About six or seven 32px rows; Show all expands to roughly three times. */
+  max-height: 14rem;
   margin-top: 10px;
   margin-right: -8px;
   padding-right: 8px;
   overflow-y: auto;
+}
+
+.genre-list.is-expanded {
+  max-height: 42rem;
 }
 
 .facet-row {
@@ -1722,14 +1723,6 @@ h4.disc-heading {
   .facets {
     position: static;
     max-height: none;
-  }
-
-  .genre-list {
-    max-height: 280px;
-  }
-
-  .genre-list.region-list {
-    max-height: 200px;
   }
 
   .site-header {

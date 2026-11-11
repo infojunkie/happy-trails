@@ -113,6 +113,21 @@ function regionTags(): string[] {
     : [];
 }
 
+/** Series/label names that are too generic to be useful, such as "Legacy". */
+const DEFAULT_SERIES_EXCEPTIONS = ['Legacy', "Collector's"];
+
+/** Wrongly detected series to ignore; SERIES_EXCEPTIONS adds more. */
+function seriesExceptions(): string[] {
+  const raw = process.env.SERIES_EXCEPTIONS?.trim();
+  const extra = raw
+    ? raw
+        .split('|')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+  return [...DEFAULT_SERIES_EXCEPTIONS, ...extra];
+}
+
 const dsmUrl = (process.env.DSM_URL ?? process.env.DSADDR ?? '').trim();
 
 export interface DsmFrontendTarget {
@@ -317,6 +332,8 @@ export const config = {
   artistExceptions: artistExceptions(),
   /** Additional genre tags to treat as countries/regions. */
   regionTags: regionTags(),
+  /** Series/label names to ignore even when detected. */
+  seriesExceptions: seriesExceptions(),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
   dsmFrontendUrl: frontendTarget.url,

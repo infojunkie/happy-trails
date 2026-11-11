@@ -37,6 +37,8 @@ export interface AlbumRow {
   composers: string[] | null;
   /** Distinct non-empty track comments, trimmed. */
   comments: string[] | null;
+  /** True when a track title prefixes the album title. */
+  title_track: boolean;
   /** Representative file path, used to resolve an AudioStation cover id. */
   cover_path: string;
 }
@@ -72,6 +74,10 @@ const ALBUM_QUERY = `
       FILTER (WHERE m.composer IS NOT NULL AND m.composer <> '') AS composers,
     ARRAY_AGG(DISTINCT btrim(m.comment))
       FILTER (WHERE btrim(m.comment) <> '') AS comments,
+    -- A title track makes a repeated album title look like a cover/single
+    -- rather than a series; the detector uses this as a negative signal.
+    BOOL_OR(left(lower(m.album), char_length(m.title)) = lower(m.title))
+      AS title_track,
     MIN(m.path) AS cover_path
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE

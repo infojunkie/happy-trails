@@ -218,7 +218,7 @@ test('session login is unavailable when DSM is not configured', async () => {
   }
 });
 
-test('GET /api/genres returns separate genre and region facets', async () => {
+test('GET /api/genres returns separate genre, region, and series facets', async () => {
   const [facets, status] = await Promise.all([
     json<GenresResponse>(main.server.baseUrl, '/api/genres'),
     json<StatusResponse>(main.server.baseUrl, '/api/status'),
@@ -237,6 +237,16 @@ test('GET /api/genres returns separate genre and region facets', async () => {
   assert.ok(facets.body.regions.some((region) => region.name === 'England'));
   assert.ok(facets.body.regions.some((region) => region.name === 'Corsica'));
   assert.ok(facets.body.regions.some((region) => region.name === 'Catalonia'));
+  assert.ok(
+    facets.body.series.some(
+      (serie) => serie.name === 'Blue Note' && serie.albumCount === 1,
+    ),
+  );
+  assert.ok(
+    facets.body.series.some(
+      (serie) => serie.name === 'Rock Candy' && serie.albumCount === 1,
+    ),
+  );
 });
 
 test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () => {
@@ -284,6 +294,15 @@ test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () 
   assert.equal(invalidSort.total, all.total);
 });
 
+test('obsolete genre and region parameters are ignored', async () => {
+  const all = await albums(main.server.baseUrl, '/api/albums?limit=1');
+  const ignored = await albums(
+    main.server.baseUrl,
+    '/api/albums?genre=Jazz&genreMode=all&region=Brazil&regionMode=all&limit=1',
+  );
+  assert.equal(ignored.total, all.total);
+});
+
 test('GET /api/albums aggregates and deduplicates track comments', async () => {
   const all = await albums(main.server.baseUrl, '/api/albums?limit=200');
   assert.ok(all.albums.every((album) => Array.isArray(album.comments)));
@@ -301,61 +320,6 @@ test('GET /api/albums aggregates and deduplicates track comments', async () => {
   assert.deepEqual(kindOfBlue.comments, ['UDSACD 2122']);
 });
 
-test('GET /api/albums applies genre and region modes', async () => {
-  const jazz = await albums(main.server.baseUrl, '/api/albums?genre=Jazz');
-  const folk = await albums(main.server.baseUrl, '/api/albums?genre=Folk');
-  const genreAny = await albums(
-    main.server.baseUrl,
-    '/api/albums?genre=Jazz&genre=Folk&genreMode=any',
-  );
-  const genreAll = await albums(
-    main.server.baseUrl,
-    '/api/albums?genre=Jazz&genre=Folk&genreMode=all',
-  );
-
-  assert.deepEqual(
-    albumKeys(genreAny.albums),
-    union(albumKeys(jazz.albums), albumKeys(folk.albums)),
-  );
-  assert.deepEqual(
-    albumKeys(genreAll.albums),
-    intersection(albumKeys(jazz.albums), albumKeys(folk.albums)),
-  );
-  for (const album of genreAll.albums) {
-    assert.ok(album.genres.includes('Jazz'));
-    assert.ok(album.genres.includes('Folk'));
-  }
-
-  const spain = await albums(main.server.baseUrl, '/api/albums?region=Spain');
-  const catalonia = await albums(
-    main.server.baseUrl,
-    '/api/albums?region=Catalonia',
-  );
-  const regionAny = await albums(
-    main.server.baseUrl,
-    '/api/albums?region=Spain&region=Catalonia&regionMode=any',
-  );
-  const regionAll = await albums(
-    main.server.baseUrl,
-    '/api/albums?region=Spain&region=Catalonia&regionMode=all',
-  );
-
-  assert.ok(spain.total > 0);
-  assert.ok(catalonia.total > 0);
-  assert.deepEqual(
-    albumKeys(regionAny.albums),
-    union(albumKeys(spain.albums), albumKeys(catalonia.albums)),
-  );
-  assert.deepEqual(
-    albumKeys(regionAll.albums),
-    intersection(albumKeys(spain.albums), albumKeys(catalonia.albums)),
-  );
-  for (const album of regionAll.albums) {
-    assert.ok(album.regions.includes('Spain'));
-    assert.ok(album.regions.includes('Catalonia'));
-  }
-});
-
 test('GET /api/albums applies the search expression and combines with tags', async () => {
   const composer = await albums(
     main.server.baseUrl,
@@ -365,6 +329,20 @@ test('GET /api/albums applies the search expression and combines with tags', asy
   assert.ok(
     composer.albums.some((album) => album.album === 'Getz/Gilberto'),
   );
+
+  const genre = await albums(
+    main.server.baseUrl,
+    `/api/albums?q=${encodeURIComponent('genre:jazz')}`,
+  );
+  assert.ok(genre.total > 0);
+  assert.ok(genre.albums.every((album) => album.genres.includes('Jazz')));
+
+  const region = await albums(
+    main.server.baseUrl,
+    `/api/albums?q=${encodeURIComponent('region:brazil')}`,
+  );
+  assert.ok(region.total > 0);
+  assert.ok(region.albums.every((album) => album.regions.includes('Brazil')));
 
   const serie = await albums(
     main.server.baseUrl,
@@ -416,11 +394,11 @@ test('GET /api/albums applies the search expression and combines with tags', asy
   );
   const genreOnly = await albums(
     main.server.baseUrl,
-    '/api/albums?genre=Rock',
+    `/api/albums?q=${encodeURIComponent('genre:"Rock"')}`,
   );
   const combined = await albums(
     main.server.baseUrl,
-    `/api/albums?q=${encodeURIComponent('album:abbey')}&genre=Rock`,
+    `/api/albums?q=${encodeURIComponent('album:abbey genre:"Rock"')}`,
   );
   assert.deepEqual(
     albumKeys(combined.albums),

@@ -38,6 +38,7 @@ export interface GenresResponse {
   totalAlbums: number;
   genres: GenreFacet[];
   regions: GenreFacet[];
+  series: GenreFacet[];
   libraryVersion: number;
 }
 

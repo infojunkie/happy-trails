@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
-import { albumSeries } from '../../src/server/search.js';
+import type { AlbumRow } from '../../src/server/db.js';
+import {
+  detectPlainSeries,
+  embeddedSeries,
+  normalizeSeriesVolumes,
+  type SeriesAlbum,
+} from '../../src/server/search.js';
 import { parseSearchQuery } from '../../src/server/searchQuery.js';
 import type { AlbumsQuery } from '../../src/server/sqlite.js';
 import type { AlbumSummary } from '../../src/shared/types.js';
@@ -18,10 +24,6 @@ after(() => {
 
 function query(overrides: Partial<AlbumsQuery> = {}) {
   return context.index.queryAlbums({
-    genres: [],
-    genreMode: 'any',
-    regions: [],
-    regionMode: 'any',
     q: '',
     sort: 'recent',
     offset: 0,
@@ -99,6 +101,18 @@ test('parser understands fielded terms, phrases, operators, and parentheses', ()
     kind: 'term',
     field: 'serie',
     value: 'blue',
+    quoted: false,
+  });
+  assert.deepEqual(parseSearchQuery('genre:jazz'), {
+    kind: 'term',
+    field: 'genre',
+    value: 'jazz',
+    quoted: false,
+  });
+  assert.deepEqual(parseSearchQuery('region:brazil'), {
+    kind: 'term',
+    field: 'region',
+    value: 'brazil',
     quoted: false,
   });
   assert.deepEqual(parseSearchQuery('foo:bar'), {
@@ -240,73 +254,85 @@ test('unknown fields are text and missing terms produce no matches', () => {
   assert.equal(query({ q: 'composer:does-not-exist' }).albums.length, 0);
 });
 
-test('genre facets support any and all modes as union and intersection', () => {
-  const jazz = query({ genres: ['Jazz'] });
-  const folk = query({ genres: ['Folk'] });
-  const any = query({ genres: ['Jazz', 'Folk'], genreMode: 'any' });
-  const all = query({ genres: ['Jazz', 'Folk'], genreMode: 'all' });
+test('genre and region search terms target tag fields', () => {
+  const rock = query({ q: 'genre:rock' });
+  assert.ok(rock.total > 0);
+  for (const album of rock.albums) {
+    assert.ok(
+      album.genres.some((genre) => genre.toLowerCase() === 'rock'),
+    );
+  }
+
+  const brazil = query({ q: 'region:brazil' });
+  assert.ok(brazil.total > 0);
+  for (const album of brazil.albums) {
+    assert.ok(
+      album.regions.some((region) => region.toLowerCase() === 'brazil'),
+    );
+  }
+
+  const jazzBrazil = query({ q: 'genre:jazz region:brazil' });
+  assert.ok(jazzBrazil.total > 0);
+  for (const album of jazzBrazil.albums) {
+    assert.ok(album.genres.includes('Jazz'));
+    assert.ok(album.regions.includes('Brazil'));
+  }
+
+  // Tag fields are exact, unlike the substring fields.
+  assert.equal(query({ q: 'genre:jaz' }).total, 0);
+  assert.ok(query({ q: 'genre:"Bossa Nova"' }).total > 0);
 
   assert.deepEqual(
-    keys(any.albums),
+    keys(query({ q: 'genre:jazz OR genre:folk' }).albums),
+    union(
+      keys(query({ q: 'genre:jazz' }).albums),
+      keys(query({ q: 'genre:folk' }).albums),
+    ),
+  );
+});
+
+test('genre and region search terms compose as union and intersection', () => {
+  const jazz = query({ q: 'genre:"Jazz"' });
+  const folk = query({ q: 'genre:"Folk"' });
+  assert.deepEqual(
+    keys(query({ q: 'genre:"Jazz" OR genre:"Folk"' }).albums),
     union(keys(jazz.albums), keys(folk.albums)),
   );
   assert.deepEqual(
-    keys(all.albums),
+    keys(query({ q: 'genre:"Jazz" AND genre:"Folk"' }).albums),
     intersection(keys(jazz.albums), keys(folk.albums)),
   );
-
-  for (const album of all.albums) {
+  for (const album of query({ q: 'genre:"Jazz" AND genre:"Folk"' }).albums) {
     assert.ok(album.genres.includes('Jazz'));
     assert.ok(album.genres.includes('Folk'));
   }
-  for (const album of any.albums) {
-    assert.ok(
-      album.genres.includes('Jazz') || album.genres.includes('Folk'),
-    );
-  }
-});
 
-test('region facets support any and all modes as union and intersection', () => {
-  const spain = query({ regions: ['Spain'] });
-  const catalonia = query({ regions: ['Catalonia'] });
-  const any = query({
-    regions: ['Spain', 'Catalonia'],
-    regionMode: 'any',
-  });
-  const all = query({
-    regions: ['Spain', 'Catalonia'],
-    regionMode: 'all',
-  });
-
+  const spain = query({ q: 'region:"Spain"' });
+  const catalonia = query({ q: 'region:"Catalonia"' });
   assert.ok(spain.total > 0);
   assert.ok(catalonia.total > 0);
   assert.deepEqual(
-    keys(any.albums),
+    keys(query({ q: 'region:"Spain" OR region:"Catalonia"' }).albums),
     union(keys(spain.albums), keys(catalonia.albums)),
   );
   assert.deepEqual(
-    keys(all.albums),
+    keys(query({ q: 'region:"Spain" AND region:"Catalonia"' }).albums),
     intersection(keys(spain.albums), keys(catalonia.albums)),
   );
-
-  for (const album of all.albums) {
-    assert.ok(album.regions.includes('Spain'));
-    assert.ok(album.regions.includes('Catalonia'));
-  }
 });
 
 test('search syntax combines with genre and region tags as set intersections', () => {
   const composer = query({ q: 'composer:toumani' });
-  const spain = query({ regions: ['Spain'] });
-  const combined = query({ q: 'composer:toumani', regions: ['Spain'] });
+  const spain = query({ q: 'region:"Spain"' });
+  const combined = query({ q: 'composer:toumani region:"Spain"' });
   assert.deepEqual(
     keys(combined.albums),
     intersection(keys(composer.albums), keys(spain.albums)),
   );
 
   const album = query({ q: 'album:abbey' });
-  const rock = query({ genres: ['Rock'] });
-  const both = query({ q: 'album:abbey', genres: ['Rock'] });
+  const rock = query({ q: 'genre:"Rock"' });
+  const both = query({ q: 'album:abbey genre:"Rock"' });
   assert.deepEqual(
     keys(both.albums),
     intersection(keys(album.albums), keys(rock.albums)),
@@ -324,30 +350,191 @@ test('genre and region facets exclude and separate location tags', () => {
   assert.ok(regions.every((region) => region.albumCount > 0));
 });
 
-test('album series parsing extracts braces and year-Edition brackets', () => {
-  assert.deepEqual(albumSeries('Dark Magus {Legacy}'), ['Legacy']);
-  assert.deepEqual(albumSeries('A Love Supreme [2016 Rock Candy Edition]'), [
+test('embedded series parsing extracts braces and year-Edition brackets', () => {
+  assert.deepEqual(embeddedSeries('Dark Magus {Legacy}'), ['Legacy']);
+  assert.deepEqual(embeddedSeries('A Love Supreme [2016 Rock Candy Edition]'), [
     'Rock Candy',
   ]);
-  assert.deepEqual(albumSeries('X [2016 rock candy EDITION]'), ['rock candy']);
-  assert.deepEqual(albumSeries('X [Japan Edition] [2015 Remastered]'), []);
-  assert.deepEqual(albumSeries('X [2016 Edition]'), []);
-  assert.deepEqual(albumSeries('X [2016 Rock Candy Editions]'), []);
-  assert.deepEqual(albumSeries('X { A   B }'), ['A B']);
-  assert.deepEqual(albumSeries('X {A} {A}'), ['A']);
+  assert.deepEqual(embeddedSeries('X [2016 rock candy EDITION]'), [
+    'rock candy',
+  ]);
+  assert.deepEqual(embeddedSeries('X [Japan Edition] [2015 Remastered]'), []);
+  assert.deepEqual(embeddedSeries('X [2016 Edition]'), []);
+  assert.deepEqual(embeddedSeries('X [2016 Rock Candy Editions]'), []);
+  assert.deepEqual(embeddedSeries('X { A   B }'), ['A B']);
+  assert.deepEqual(embeddedSeries('X {A} {A}'), ['A']);
   // A bracket group does not consume text from a different group.
   assert.deepEqual(
-    albumSeries('X [2016 Remaster] [2017 Deluxe Edition]'),
+    embeddedSeries('X [2016 Remaster] [2017 Deluxe Edition]'),
     ['Deluxe'],
   );
   // Values appear in title order, across both forms.
   assert.deepEqual(
-    albumSeries('X {A} [2017 30th Anniversary Deluxe Edition] {B}'),
+    embeddedSeries('X {A} [2017 30th Anniversary Deluxe Edition] {B}'),
     ['A', '30th Anniversary Deluxe', 'B'],
   );
 });
 
-test('serie and label search the parsed album series', () => {
+function seriesAlbum(
+  album: string,
+  artist: string,
+  overrides: Partial<SeriesAlbum> = {},
+): SeriesAlbum {
+  return {
+    key: `${album}\u0000${artist}`,
+    album,
+    artist,
+    trackCount: 12,
+    titleTrack: false,
+    ...overrides,
+  };
+}
+
+test('embedded series volume suffixes fold only for recurring stems', () => {
+  const normalized = normalizeSeriesVolumes([
+    'Network Medien / World Network 1',
+    'Network Medien / World Network 38',
+    'Club Top 13',
+    '2 em 1',
+    'Ocora',
+  ]);
+
+  assert.equal(
+    normalized.get('Network Medien / World Network 38'),
+    'Network Medien / World Network',
+  );
+  assert.equal(normalized.get('Club Top 13'), 'Club Top 13');
+  assert.equal(normalized.get('2 em 1'), '2 em 1');
+  assert.equal(normalized.get('Ocora'), 'Ocora');
+});
+
+test('plain-title series detection uses recurring titles and prefixes', () => {
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+  const volumes = ['01', '02', '03', '04', '05'];
+  const detected = detectPlainSeries([
+    ...artists.map((artist) => seriesAlbum('Sem Limite', artist)),
+    ...artists.map((artist) => seriesAlbum(`A Arte de ${artist}`, artist)),
+    ...volumes.map((volume) =>
+      seriesAlbum(`The Wire Tapper ${volume}`, 'Various Artists'),
+    ),
+    ...artists.map((artist) => seriesAlbum('Série Bis', artist)),
+    ...artists.map((artist) =>
+      seriesAlbum('Une Autre Série [2008 Edition]', artist),
+    ),
+  ]);
+
+  assert.equal(detected.get('Sem Limite\u0000A'), 'Sem Limite');
+  assert.equal(detected.get('A Arte de A\u0000A'), 'A Arte de');
+  assert.equal(
+    detected.get('The Wire Tapper 01\u0000Various Artists'),
+    'The Wire Tapper',
+  );
+  assert.equal(detected.get('Série Bis\u0000A'), 'Série Bis');
+  assert.equal(
+    detected.get('Une Autre Série [2008 Edition]\u0000A'),
+    'Une Autre Série',
+  );
+
+  // Four albums are below the recurrence threshold.
+  assert.equal(
+    detectPlainSeries(
+      artists
+        .slice(0, 4)
+        .map((artist) => seriesAlbum('Sem Limite', artist)),
+    ).size,
+    0,
+  );
+});
+
+test('embedded series honors the exception list', () => {
+  assert.deepEqual(embeddedSeries('X [2016 Legacy Edition]', ['Legacy']), []);
+  assert.deepEqual(
+    embeddedSeries('X [2016 Collectors Edition]', ["Collector's"]),
+    [],
+  );
+  assert.deepEqual(
+    embeddedSeries('X [2016 Legacy Edition] {ACT}', ['Legacy']),
+    ['ACT'],
+  );
+});
+
+test('plain-title detection normalizes dashes, colons, and parentheses', () => {
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+  const detected = detectPlainSeries([
+    ...artists.map((name) =>
+      seriesAlbum(`Putumayo - ${name}`, 'Various Artists'),
+    ),
+    ...['1', '2', '3', '4', '5'].map((volume, index) =>
+      seriesAlbum(`Jazz Is Dead ${volume}: ${artists[index]}`, 'Various Artists'),
+    ),
+    ...artists.map((name) =>
+      seriesAlbum(`Une Série (Live) - ${name}`, name),
+    ),
+  ]);
+
+  assert.equal(
+    detected.get('Putumayo - A\u0000Various Artists'),
+    'Putumayo',
+  );
+  assert.equal(
+    detected.get('Jazz Is Dead 1: A\u0000Various Artists'),
+    'Jazz Is Dead',
+  );
+  assert.equal(detected.get('Une Série (Live) - A\u0000A'), 'Une Série');
+
+  // A one-word title without a dash/colon suffix cannot become a series.
+  assert.equal(
+    detectPlainSeries(
+      artists.map((artist) => seriesAlbum('Putumayo', artist)),
+    ).size,
+    0,
+  );
+});
+
+test('plain-title detection ignores exact titles that are artist names', () => {
+  const albums = [
+    seriesAlbum('The Beatles', 'The Beatles'),
+    ...['A', 'B', 'C', 'D'].map((artist) =>
+      seriesAlbum('The Beatles', artist),
+    ),
+  ];
+  assert.equal(detectPlainSeries(albums).size, 0);
+});
+
+test('plain-title detection honors the exception list', () => {
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+
+  const legacy = artists.map((artist) =>
+    seriesAlbum(`Legacy - ${artist}`, 'Various Artists'),
+  );
+  assert.equal(detectPlainSeries(legacy, ['Legacy']).size, 0);
+
+  // Exceptions ignore apostrophes: "Collector's" covers "Collectors".
+  const collectors = artists.map((artist) =>
+    seriesAlbum(`Collectors - ${artist}`, 'Various Artists'),
+  );
+  assert.equal(detectPlainSeries(collectors, ["Collector's"]).size, 0);
+});
+
+test('plain-title detection skips covers, generic titles, and extracts', () => {
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+  const detected = detectPlainSeries([
+    // Cover/single titled after one of its tracks.
+    ...artists.map((artist) =>
+      seriesAlbum('Let It Be', artist, { titleTrack: true }),
+    ),
+    // Generic repeated titles.
+    ...artists.map((artist) => seriesAlbum('Greatest Hits', artist)),
+    // One-track extracts are not albums in the series sense.
+    ...artists.map((artist) =>
+      seriesAlbum('All The Shapes You Are', artist, { trackCount: 1 }),
+    ),
+  ]);
+
+  assert.equal(detected.size, 0);
+});
+
+test('serie and label search the embedded album series', () => {
   const blueNote = query({ q: 'serie:"blue note"' });
   assert.ok(names(blueNote.albums).includes('Blue Train {Blue Note}'));
 
@@ -358,9 +545,196 @@ test('serie and label search the parsed album series', () => {
     ),
   );
 
+  // Series are matched exactly, not as substrings.
+  assert.equal(query({ q: 'serie:blue' }).total, 0);
+
   // Only the label is indexed: the year and the word "Edition" are stripped.
   assert.equal(query({ q: 'serie:2016' }).total, 0);
   assert.equal(query({ q: 'serie:"rock candy edition"' }).total, 0);
+});
+
+test('detected plain-title series are searchable through the index', async () => {
+  const artists = ['Ana', 'Bia', 'Caio', 'Duda', 'Eva'];
+  const volumes = ['1', '2', '3', '4', '5'];
+  const row = (album: string, artist: string): AlbumRow => ({
+    album,
+    artist,
+    year: 2000,
+    track_count: 10,
+    duration: 2400,
+    latest: '2020-01-01T10:00:00',
+    genres: 'MPB',
+    track_artists: [artist],
+    composers: null,
+    comments: null,
+    title_track: false,
+    cover_path: '',
+  });
+  const extraRows: AlbumRow[] = [
+    ...artists.map((artist) => row('Sem Limite', artist)),
+    ...artists.map((artist) => row(`Putumayo - ${artist}`, artist)),
+    ...volumes.map((volume, index) =>
+      row(
+        `Jazz Is Dead ${volume}: ${artists[index] ?? ''}`,
+        'Various Artists',
+      ),
+    ),
+    row('Excepted [2016 Legacy Edition]', 'Legacy Test'),
+  ];
+  const local = await createFixtureContext({ extraRows });
+  try {
+    const search = (q: string) =>
+      local.index.queryAlbums({
+                q,
+        sort: 'album',
+        offset: 0,
+        limit: 50,
+      });
+
+    const result = search('serie:"sem limite"');
+    assert.equal(result.total, artists.length);
+    const first = result.albums[0];
+    assert.ok(first);
+    assert.equal(
+      local.index.serieKeysFor(first.album, first.artist),
+      '\u0000sem limite\u0000',
+    );
+
+    assert.equal(search('serie:putumayo').total, artists.length);
+    assert.equal(search('serie:"jazz is dead"').total, volumes.length);
+    // Default SERIES_EXCEPTIONS drops "Legacy" from "[2016 Legacy Edition]".
+    assert.equal(search('serie:legacy').total, 0);
+
+    const series = local.index.series();
+    assert.ok(
+      series.some(
+        (serie) =>
+          serie.name === 'Sem Limite' &&
+          serie.albumCount === artists.length,
+      ),
+    );
+    assert.ok(
+      series.some(
+        (serie) =>
+          serie.name === 'Putumayo' && serie.albumCount === artists.length,
+      ),
+    );
+    assert.ok(
+      series.some(
+        (serie) =>
+          serie.name === 'Jazz Is Dead' &&
+          serie.albumCount === volumes.length,
+      ),
+    );
+    assert.ok(!series.some((serie) => serie.name === 'Legacy'));
+  } finally {
+    local.close();
+  }
+});
+
+test('albums with an embedded series are not plain-title detected', async () => {
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+  const extraRows: AlbumRow[] = artists.map((artist, index) => ({
+    album: `Cuba : Track ${index} {Ocora}`,
+    artist,
+    year: 2000,
+    track_count: 10,
+    duration: 2400,
+    latest: '2020-01-01T10:00:00',
+    genres: 'World',
+    track_artists: [artist],
+    composers: null,
+    comments: null,
+    title_track: false,
+    cover_path: '',
+  }));
+  const local = await createFixtureContext({ extraRows });
+  try {
+    const search = (q: string) =>
+      local.index.queryAlbums({
+                q,
+        sort: 'album',
+        offset: 0,
+        limit: 50,
+      });
+
+    // "Cuba" would qualify from the titles, but {} already names the series.
+    assert.equal(search('serie:cuba').total, 0);
+    assert.equal(search('serie:ocora').total, artists.length);
+
+    const series = local.index.series();
+    assert.ok(!series.some((serie) => serie.name === 'Cuba'));
+    assert.ok(
+      series.some(
+        (serie) =>
+          serie.name === 'Ocora' && serie.albumCount === artists.length,
+      ),
+    );
+  } finally {
+    local.close();
+  }
+});
+
+test('embedded series volume numbers fold into the indexed stem', async () => {
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+  const row = (album: string, artist: string): AlbumRow => ({
+    album,
+    artist,
+    year: 2000,
+    track_count: 10,
+    duration: 2400,
+    latest: '2020-01-01T10:00:00',
+    genres: 'World',
+    track_artists: [artist],
+    composers: null,
+    comments: null,
+    title_track: false,
+    cover_path: '',
+  });
+  const extraRows: AlbumRow[] = [
+    ...artists.map((artist, index) =>
+      row(
+        `Album ${index} {Network Medien / World Network ${index + 1}}`,
+        artist,
+      ),
+    ),
+    row('Single {Club Top 13}', 'Club'),
+    row('Single {2 em 1}', 'Em'),
+  ];
+  const local = await createFixtureContext({ extraRows });
+  try {
+    const search = (q: string) =>
+      local.index.queryAlbums({
+        q,
+        sort: 'album',
+        offset: 0,
+        limit: 50,
+      });
+
+    assert.equal(
+      search('serie:"network medien / world network"').total,
+      artists.length,
+    );
+    assert.equal(
+      search('serie:"network medien / world network 1"').total,
+      0,
+    );
+    assert.equal(search('serie:"club top 13"').total, 1);
+    assert.equal(search('serie:"2 em 1"').total, 1);
+
+    const series = local.index.series();
+    assert.ok(
+      series.some(
+        (serie) =>
+          serie.name === 'Network Medien / World Network' &&
+          serie.albumCount === artists.length,
+      ),
+    );
+    assert.ok(series.some((serie) => serie.name === 'Club Top 13'));
+    assert.ok(series.some((serie) => serie.name === '2 em 1'));
+  } finally {
+    local.close();
+  }
 });
 
 test('album comments are aggregated, deduplicated, and sorted', () => {

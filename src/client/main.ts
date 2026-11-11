@@ -10,9 +10,14 @@ import {
   type Track,
   type TracksResponse,
 } from '../shared/types.js';
-import { artistSegments, regionKey } from '../shared/text.js';
+import { artistSegments, foldSearch, regionKey } from '../shared/text.js';
 import { api } from './api.js';
 import { $, el } from './dom.js';
+import {
+  buildFacetQuery,
+  facetTerm,
+  parseFacetQuery,
+} from './facets.js';
 import { linkifiedText } from './linkify.js';
 import {
   formatBitrate,
@@ -39,7 +44,11 @@ interface State {
   regionMode: FilterMode;
   regionFacets: GenreFacet[];
   regionByKey: Map<string, GenreFacet>;
+  selectedSeries: string[];
+  seriesFacets: GenreFacet[];
   totalAlbums: number;
+  serieQuery: string;
+  serieExpanded: boolean;
   genreQuery: string;
   genreExpanded: boolean;
   regionQuery: string;
@@ -69,7 +78,11 @@ const state: State = {
   regionMode: 'any',
   regionFacets: [],
   regionByKey: new Map(),
+  selectedSeries: [],
+  seriesFacets: [],
   totalAlbums: 0,
+  serieQuery: '',
+  serieExpanded: false,
   genreQuery: '',
   genreExpanded: false,
   regionQuery: '',
@@ -106,6 +119,10 @@ const regionList = $('#region-list');
 const regionSearch = $<HTMLInputElement>('#region-search');
 const clearRegionsButton = $<HTMLButtonElement>('#clear-regions');
 const toggleAllRegionsButton = $<HTMLButtonElement>('#toggle-all-regions');
+const serieList = $('#serie-list');
+const serieSearch = $<HTMLInputElement>('#serie-search');
+const clearSerieButton = $<HTMLButtonElement>('#clear-serie');
+const toggleAllSeriesButton = $<HTMLButtonElement>('#toggle-all-series');
 const genreModeInputs = document.querySelectorAll<HTMLInputElement>(
   'input[name="genre-mode"]',
 );
@@ -116,7 +133,8 @@ const genreToggle = $<HTMLButtonElement>('#genre-toggle');
 const genrePanel = $('#genre-panel');
 const regionToggle = $<HTMLButtonElement>('#region-toggle');
 const regionPanel = $('#region-panel');
-const narrowFiltersQuery = window.matchMedia('(max-width: 620px)');
+const serieToggle = $<HTMLButtonElement>('#serie-toggle');
+const seriePanel = $('#serie-panel');
 const errorBanner = $('#error-banner');
 const errorText = $('#error-text');
 const dialog = $<HTMLDialogElement>('#album-dialog');
@@ -149,6 +167,22 @@ let lastSyncedUrl = '';
 
 function genreKey(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function serieKey(name: string): string {
+  return foldSearch(name).replace(/\s+/g, ' ').trim();
+}
+
+function selectedGenreKeys(): Set<string> {
+  return new Set(state.selectedGenres.map(genreKey));
+}
+
+function selectedRegionKeys(): Set<string> {
+  return new Set(state.selectedRegions.map(regionKey));
+}
+
+function selectedSeriesKeys(): Set<string> {
+  return new Set(state.selectedSeries.map(serieKey));
 }
 
 function describe(error: unknown): string {
@@ -196,6 +230,7 @@ function facetDisclosure(
 const facetDisclosures = [
   facetDisclosure(genreToggle, genrePanel),
   facetDisclosure(regionToggle, regionPanel),
+  facetDisclosure(serieToggle, seriePanel),
 ];
 
 function setFacetCollapsed(
@@ -220,6 +255,48 @@ function renderModeControls(): void {
   for (const input of regionModeInputs) {
     input.checked = input.value === state.regionMode;
   }
+}
+
+/** The facet controls mirror a query made only of facet terms. */
+function syncSelectionsFromQuery(): void {
+  const parsed = parseFacetQuery(state.q);
+  if (parsed) {
+    state.selectedGenres = parsed.genres;
+    state.genreMode = parsed.genreMode;
+    state.selectedRegions = parsed.regions;
+    state.regionMode = parsed.regionMode;
+    state.selectedSeries = parsed.series;
+  } else {
+    state.selectedGenres = [];
+    state.genreMode = 'any';
+    state.selectedRegions = [];
+    state.regionMode = 'any';
+    state.selectedSeries = [];
+  }
+  renderModeControls();
+}
+
+/** Facet controls rebuild the top query from the selected terms. */
+function applyFacetSelection(): void {
+  const query = buildFacetQuery({
+    genres: state.selectedGenres,
+    genreMode: state.genreMode,
+    regions: state.selectedRegions,
+    regionMode: state.regionMode,
+    series: state.selectedSeries,
+  });
+  if (state.q === query) return;
+
+  window.clearTimeout(searchTimer);
+  state.q = query;
+  searchInput.value = query;
+  pushFilterState();
+  renderFacets();
+  renderRegions();
+  renderSeries();
+  renderModeControls();
+  renderActiveFilters();
+  void loadAlbums(true);
 }
 
 function showError(message: string): void {
@@ -305,10 +382,6 @@ async function reloadLibrary(): Promise<void> {
     const [facets, albums] = await Promise.all([
       api.genres(),
       api.albums({
-        genres: state.selectedGenres,
-        genreMode: state.genreMode,
-        regions: state.selectedRegions,
-        regionMode: state.regionMode,
         q: state.q,
         sort: state.sort,
         offset: 0,
@@ -324,6 +397,7 @@ async function reloadLibrary(): Promise<void> {
     state.regionByKey = new Map(
       facets.regions.map((region) => [region.key, region]),
     );
+    state.seriesFacets = facets.series;
     state.totalAlbums = facets.totalAlbums;
     state.total = albums.total;
     state.albums = albums.albums;
@@ -347,6 +421,7 @@ async function reloadLibrary(): Promise<void> {
     trackCache.clear();
     renderFacets();
     renderRegions();
+    renderSeries();
     renderAlbums();
     albumGrid.removeAttribute('aria-busy');
     hideError();
@@ -520,28 +595,9 @@ function applyFilterParams(params: URLSearchParams): void {
   state.q = (params.get('q') ?? '').slice(0, 200);
   const sort = params.get('sort');
   state.sort = isSortKey(sort) ? sort : 'recent';
-  const genres = params
-    .getAll('genre')
-    .flatMap((value) => value.split(','))
-    .map(genreKey)
-    .filter(Boolean);
-  state.selectedGenres = [...new Set(genres)];
-
-  const regions = params
-    .getAll('region')
-    .flatMap((value) => value.split(','))
-    .map(regionKey)
-    .filter(Boolean);
-  state.selectedRegions = [...new Set(regions)];
-
-  const genreMode = params.get('genreMode');
-  state.genreMode = isFilterMode(genreMode) ? genreMode : 'any';
-  const regionMode = params.get('regionMode');
-  state.regionMode = isFilterMode(regionMode) ? regionMode : 'any';
-
   searchInput.value = state.q;
   sortSelect.value = state.sort;
-  renderModeControls();
+  syncSelectionsFromQuery();
 }
 
 function readFilterState(): void {
@@ -588,14 +644,6 @@ function currentUrl(): string {
 function buildFilterUrl(): string {
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
-  for (const key of state.selectedGenres) {
-    params.append('genre', state.facetByKey.get(key)?.name ?? key);
-  }
-  for (const key of state.selectedRegions) {
-    params.append('region', state.regionByKey.get(key)?.name ?? key);
-  }
-  if (state.genreMode !== 'any') params.set('genreMode', state.genreMode);
-  if (state.regionMode !== 'any') params.set('regionMode', state.regionMode);
   if (state.sort !== 'recent') params.set('sort', state.sort);
   const query = params.toString();
   return query ? `${location.pathname}?${query}` : location.pathname;
@@ -638,6 +686,7 @@ function handlePopState(): void {
     readFilterState();
     renderFacets();
     renderRegions();
+    renderSeries();
     renderActiveFilters();
   }
 
@@ -691,9 +740,11 @@ async function loadLibrary(): Promise<void> {
     state.regionByKey = new Map(
       response.regions.map((region) => [region.key, region]),
     );
+    state.seriesFacets = response.series;
     state.totalAlbums = response.totalAlbums;
     renderFacets();
     renderRegions();
+    renderSeries();
     hideError();
     const albumsVersion = await loadAlbums(true);
     if (albumsVersion !== null) {
@@ -735,10 +786,6 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
 
   try {
     const response = await api.albums({
-      genres: state.selectedGenres,
-      genreMode: state.genreMode,
-      regions: state.selectedRegions,
-      regionMode: state.regionMode,
       q: state.q,
       sort: state.sort,
       offset: reset ? 0 : state.albums.length,
@@ -795,7 +842,8 @@ function updateSummary(): void {
   const filtered =
     state.q.length > 0 ||
     state.selectedGenres.length > 0 ||
-    state.selectedRegions.length > 0;
+    state.selectedRegions.length > 0 ||
+    state.selectedSeries.length > 0;
   setSummary(
     filtered
       ? `${formatCount(state.total)} of ${formatCount(state.totalAlbums)} albums`
@@ -910,36 +958,42 @@ function navigateToSearch(value: string): void {
 
   window.clearTimeout(searchTimer);
   state.q = query;
-  // A name search is a fresh navigation; drop filters that could hide it.
-  state.selectedGenres = [];
-  state.genreMode = 'any';
-  state.selectedRegions = [];
-  state.regionMode = 'any';
+  syncSelectionsFromQuery();
   searchInput.value = query;
   closeDialogWithoutHistory();
-  renderModeControls();
   pushFilterState();
   renderFacets();
   renderRegions();
+  renderSeries();
   renderActiveFilters();
   window.scrollTo({ top: 0 });
   void loadAlbums(true);
 }
 
+function clearSerie(): void {
+  if (state.selectedSeries.length === 0) return;
+  state.selectedSeries = [];
+  applyFacetSelection();
+}
+
 function activateGenre(name: string): void {
   const key = genreKey(name);
-  const changed = !state.selectedGenres.includes(key);
+  const changed = !state.selectedGenres.some(
+    (value) => genreKey(value) === key,
+  );
   closeDialogWithoutHistory();
-  setGenreSelected(key, true);
+  setGenreSelected(name, true);
   if (!changed) pushFilterState();
   window.scrollTo({ top: 0 });
 }
 
 function activateRegion(name: string): void {
   const key = regionKey(name);
-  const changed = !state.selectedRegions.includes(key);
+  const changed = !state.selectedRegions.some(
+    (value) => regionKey(value) === key,
+  );
   closeDialogWithoutHistory();
-  setRegionSelected(key, true);
+  setRegionSelected(name, true);
   if (!changed) pushFilterState();
   window.scrollTo({ top: 0 });
 }
@@ -1013,11 +1067,11 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
         class: 'chip chip-small',
         type: 'button',
         title: `Filter by ${name}`,
-        'aria-pressed': state.selectedGenres.includes(key) ? 'true' : 'false',
+        'aria-pressed': selectedGenreKeys().has(key) ? 'true' : 'false',
       },
       el('span', { text: name }),
     );
-    if (state.selectedGenres.includes(key)) chip.classList.add('is-active');
+    if (selectedGenreKeys().has(key)) chip.classList.add('is-active');
     chip.addEventListener('click', () => activateGenre(name));
     genreChips.push(chip);
   }
@@ -1031,11 +1085,11 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
         class: 'chip chip-small chip-region',
         type: 'button',
         title: `Filter by region: ${name}`,
-        'aria-pressed': state.selectedRegions.includes(key) ? 'true' : 'false',
+        'aria-pressed': selectedRegionKeys().has(key) ? 'true' : 'false',
       },
       el('span', { text: name }),
     );
-    if (state.selectedRegions.includes(key)) chip.classList.add('is-active');
+    if (selectedRegionKeys().has(key)) chip.classList.add('is-active');
     chip.addEventListener('click', () => activateRegion(name));
     genreChips.push(chip);
   }
@@ -1151,8 +1205,69 @@ function updateRegionChrome(): void {
   }
 }
 
+function updateSerieChrome(): void {
+  clearSerieButton.hidden = state.selectedSeries.length === 0;
+  const hasQuery = state.serieQuery.trim().length > 0;
+  const canToggle = state.seriesFacets.length > FACET_PREVIEW && !hasQuery;
+  toggleAllSeriesButton.hidden = !canToggle;
+  if (canToggle) {
+    toggleAllSeriesButton.textContent = state.serieExpanded
+      ? 'Show fewer series'
+      : `Show all ${formatCount(state.seriesFacets.length)} series`;
+  }
+}
+
+function renderSeries(): void {
+  const selected = selectedSeriesKeys();
+  const query = state.serieQuery.trim();
+  serieSearch.hidden = state.seriesFacets.length <= 12;
+
+  const items = visibleFacetItems(
+    state.seriesFacets,
+    selected,
+    query,
+    state.serieExpanded,
+    serieKey,
+  );
+  const rows: HTMLElement[] = items.map((facet) => {
+    const input = el('input', {
+      type: 'checkbox',
+      value: facet.key,
+      'data-serie-key': facet.key,
+    });
+    input.checked = selected.has(facet.key);
+    return el(
+      'label',
+      { class: 'facet-row' },
+      input,
+      el('span', {
+        class: 'facet-name',
+        title: facet.name,
+        text: facet.name,
+      }),
+      el('span', {
+        class: 'facet-count',
+        text: formatCount(facet.albumCount),
+      }),
+    );
+  });
+
+  if (rows.length === 0) {
+    rows.push(
+      el('p', {
+        class: 'facet-empty',
+        text: `No series match “${state.serieQuery.trim()}”.`,
+      }),
+    );
+  }
+
+  serieList.replaceChildren(...rows);
+  serieList.classList.toggle('is-expanded', state.serieExpanded);
+  updateSerieChrome();
+}
+
 function renderFacets(): void {
-  const selected = new Set(state.selectedGenres);
+  const selected = selectedGenreKeys();
   const query = state.genreQuery.trim();
   genreSearch.hidden = state.facets.length <= 12;
 
@@ -1177,11 +1292,12 @@ function renderFacets(): void {
   }
 
   genreList.replaceChildren(...rows);
+  genreList.classList.toggle('is-expanded', state.genreExpanded);
   updateFacetChrome();
 }
 
 function renderRegions(): void {
-  const selected = new Set(state.selectedRegions);
+  const selected = selectedRegionKeys();
   const query = state.regionQuery.trim();
   regionSearch.hidden = state.regionFacets.length <= 12;
 
@@ -1207,43 +1323,38 @@ function renderRegions(): void {
   }
 
   regionList.replaceChildren(...rows);
+  regionList.classList.toggle('is-expanded', state.regionExpanded);
   updateRegionChrome();
 }
 
-function setGenreSelected(
-  key: string,
-  selected: boolean,
-  options: { rerenderFacets?: boolean } = {},
-): void {
-  const current = new Set(state.selectedGenres);
-  if (selected === current.has(key)) return;
-  if (selected) current.add(key);
-  else current.delete(key);
-
-  state.selectedGenres = [...current];
-  pushFilterState();
-  if (options.rerenderFacets === false) updateFacetChrome();
-  else renderFacets();
-  renderActiveFilters();
-  void loadAlbums(true);
+function setGenreSelected(name: string, selected: boolean): void {
+  const key = genreKey(name);
+  const next = state.selectedGenres.filter(
+    (value) => genreKey(value) !== key,
+  );
+  if (selected) next.push(name);
+  state.selectedGenres = next;
+  applyFacetSelection();
 }
 
-function setRegionSelected(
-  key: string,
-  selected: boolean,
-  options: { rerenderFacets?: boolean } = {},
-): void {
-  const current = new Set(state.selectedRegions);
-  if (selected === current.has(key)) return;
-  if (selected) current.add(key);
-  else current.delete(key);
+function setRegionSelected(name: string, selected: boolean): void {
+  const key = regionKey(name);
+  const next = state.selectedRegions.filter(
+    (value) => regionKey(value) !== key,
+  );
+  if (selected) next.push(name);
+  state.selectedRegions = next;
+  applyFacetSelection();
+}
 
-  state.selectedRegions = [...current];
-  pushFilterState();
-  if (options.rerenderFacets === false) updateRegionChrome();
-  else renderRegions();
-  renderActiveFilters();
-  void loadAlbums(true);
+function setSerieSelected(name: string, selected: boolean): void {
+  const key = serieKey(name);
+  const next = state.selectedSeries.filter(
+    (value) => serieKey(value) !== key,
+  );
+  if (selected) next.push(name);
+  state.selectedSeries = next;
+  applyFacetSelection();
 }
 
 function clearFilters(): void {
@@ -1251,12 +1362,14 @@ function clearFilters(): void {
   state.genreMode = 'any';
   state.selectedRegions = [];
   state.regionMode = 'any';
+  state.selectedSeries = [];
   state.q = '';
   searchInput.value = '';
   renderModeControls();
   pushFilterState();
   renderFacets();
   renderRegions();
+  renderSeries();
   renderActiveFilters();
   void loadAlbums(true);
 }
@@ -1264,43 +1377,65 @@ function clearFilters(): void {
 function renderActiveFilters(): void {
   const chips: HTMLElement[] = [];
 
-  for (const key of state.selectedGenres) {
-    const name = state.facetByKey.get(key)?.name ?? key;
+  for (const name of state.selectedGenres) {
+    const term = facetTerm('genre', name);
     chips.push(
       el(
         'button',
         {
           class: 'chip is-active',
           type: 'button',
-          'data-remove-genre': key,
-          'aria-label': `Remove ${name} filter`,
-          title: `Remove ${name} filter`,
+          'data-remove-genre': name,
+          'aria-label': `Remove ${term}`,
+          title: `Remove ${term}`,
         },
-        el('span', { text: name }),
+        el('span', { text: term }),
         el('span', { class: 'chip-x', 'aria-hidden': 'true', text: '×' }),
       ),
     );
   }
 
-  for (const key of state.selectedRegions) {
-    const name = state.regionByKey.get(key)?.name ?? key;
+  for (const name of state.selectedRegions) {
+    const term = facetTerm('region', name);
     chips.push(
       el(
         'button',
         {
           class: 'chip is-active chip-region',
           type: 'button',
-          'data-remove-region': key,
-          'aria-label': `Remove ${name} region filter`,
-          title: `Remove ${name} region filter`,
+          'data-remove-region': name,
+          'aria-label': `Remove ${term}`,
+          title: `Remove ${term}`,
         },
-        el('span', { text: name }),
+        el('span', { text: term }),
         el('span', { class: 'chip-x', 'aria-hidden': 'true', text: '×' }),
       ),
     );
   }
 
-  if (state.q) {
+  for (const name of state.selectedSeries) {
+    const term = facetTerm('serie', name);
+    chips.push(
+      el(
+        'button',
+        {
+          class: 'chip is-active',
+          type: 'button',
+          'data-remove-serie': name,
+          'aria-label': `Remove ${term}`,
+          title: `Remove ${term}`,
+        },
+        el('span', { text: term }),
+        el('span', { class: 'chip-x', 'aria-hidden': 'true', text: '×' }),
+      ),
+    );
+  }
+
+  const hasFacets =
+    state.selectedGenres.length > 0 ||
+    state.selectedRegions.length > 0 ||
+    state.selectedSeries.length > 0;
+  if (state.q && !hasFacets) {
     chips.push(
       el(
         'button',
@@ -1465,11 +1600,11 @@ function renderDialog(
         class: 'chip chip-small',
         type: 'button',
         title: `Filter by ${name}`,
-        'aria-pressed': state.selectedGenres.includes(key) ? 'true' : 'false',
+        'aria-pressed': selectedGenreKeys().has(key) ? 'true' : 'false',
       },
       el('span', { text: name }),
     );
-    if (state.selectedGenres.includes(key)) chip.classList.add('is-active');
+    if (selectedGenreKeys().has(key)) chip.classList.add('is-active');
     chip.addEventListener('click', () => activateGenre(name));
     tagButtons.push(chip);
   }
@@ -1481,11 +1616,11 @@ function renderDialog(
         class: 'chip chip-small chip-region',
         type: 'button',
         title: `Filter by region: ${name}`,
-        'aria-pressed': state.selectedRegions.includes(key) ? 'true' : 'false',
+        'aria-pressed': selectedRegionKeys().has(key) ? 'true' : 'false',
       },
       el('span', { text: name }),
     );
-    if (state.selectedRegions.includes(key)) chip.classList.add('is-active');
+    if (selectedRegionKeys().has(key)) chip.classList.add('is-active');
     chip.addEventListener('click', () => activateRegion(name));
     tagButtons.push(chip);
   }
@@ -1878,17 +2013,18 @@ function applySearch(): void {
   const value = searchInput.value.trim();
   if (value === state.q) return;
   state.q = value;
+  syncSelectionsFromQuery();
   pushFilterState();
+  renderFacets();
+  renderRegions();
+  renderSeries();
   renderActiveFilters();
   void loadAlbums(true);
 }
 
 function bindEvents(): void {
   window.addEventListener('popstate', handlePopState);
-  setAllFacetsCollapsed(narrowFiltersQuery.matches);
-  narrowFiltersQuery.addEventListener('change', (event) => {
-    setAllFacetsCollapsed(event.matches);
-  });
+  setAllFacetsCollapsed(true);
   for (const disclosure of facetDisclosures) {
     disclosure.toggle.addEventListener('click', () => {
       const currentlyExpanded =
@@ -1925,12 +2061,24 @@ function bindEvents(): void {
     renderRegions();
   });
 
+  serieSearch.addEventListener('input', () => {
+    state.serieQuery = serieSearch.value;
+    renderSeries();
+  });
+
+  clearSerieButton.addEventListener('click', clearSerie);
+
+  const hasFacetSelection = (): boolean =>
+    state.selectedGenres.length > 0 ||
+    state.selectedRegions.length > 0 ||
+    state.selectedSeries.length > 0;
+
   for (const input of genreModeInputs) {
     input.addEventListener('change', () => {
       if (!input.checked || !isFilterMode(input.value)) return;
       state.genreMode = input.value;
-      pushFilterState();
-      void loadAlbums(true);
+      if (hasFacetSelection()) applyFacetSelection();
+      else renderModeControls();
     });
   }
 
@@ -1938,41 +2086,27 @@ function bindEvents(): void {
     input.addEventListener('change', () => {
       if (!input.checked || !isFilterMode(input.value)) return;
       state.regionMode = input.value;
-      pushFilterState();
-      void loadAlbums(true);
+      if (hasFacetSelection()) applyFacetSelection();
+      else renderModeControls();
     });
   }
 
   clearGenresButton.addEventListener('click', () => {
-    if (
-      state.selectedGenres.length === 0 &&
-      state.genreMode === 'any'
-    ) {
+    if (state.selectedGenres.length === 0 && state.genreMode === 'any') {
       return;
     }
     state.selectedGenres = [];
     state.genreMode = 'any';
-    renderModeControls();
-    pushFilterState();
-    renderFacets();
-    renderActiveFilters();
-    void loadAlbums(true);
+    applyFacetSelection();
   });
 
   clearRegionsButton.addEventListener('click', () => {
-    if (
-      state.selectedRegions.length === 0 &&
-      state.regionMode === 'any'
-    ) {
+    if (state.selectedRegions.length === 0 && state.regionMode === 'any') {
       return;
     }
     state.selectedRegions = [];
     state.regionMode = 'any';
-    renderModeControls();
-    pushFilterState();
-    renderRegions();
-    renderActiveFilters();
-    void loadAlbums(true);
+    applyFacetSelection();
   });
 
   toggleAllButton.addEventListener('click', () => {
@@ -1985,12 +2119,28 @@ function bindEvents(): void {
     renderRegions();
   });
 
+  toggleAllSeriesButton.addEventListener('click', () => {
+    state.serieExpanded = !state.serieExpanded;
+    renderSeries();
+  });
+
+  serieList.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.type !== 'checkbox') return;
+    const key = target.dataset.serieKey;
+    if (!key) return;
+    const facet = state.seriesFacets.find((serie) => serie.key === key);
+    if (facet) setSerieSelected(facet.name, target.checked);
+  });
+
   genreList.addEventListener('change', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     const key = target.dataset.genreKey;
     if (!key) return;
-    setGenreSelected(key, target.checked, { rerenderFacets: true });
+    const facet = state.facetByKey.get(key);
+    if (facet) setGenreSelected(facet.name, target.checked);
   });
 
   regionList.addEventListener('change', (event) => {
@@ -1998,7 +2148,8 @@ function bindEvents(): void {
     if (!(target instanceof HTMLInputElement)) return;
     const key = target.dataset.regionKey;
     if (!key) return;
-    setRegionSelected(key, target.checked, { rerenderFacets: true });
+    const facet = state.regionByKey.get(key);
+    if (facet) setRegionSelected(facet.name, target.checked);
   });
 
   activeFilters.addEventListener('click', (event) => {
@@ -2007,22 +2158,33 @@ function bindEvents(): void {
 
     const removeGenre = target.closest<HTMLElement>('[data-remove-genre]');
     if (removeGenre) {
-      const key = removeGenre.dataset.removeGenre;
-      if (key) setGenreSelected(key, false);
+      const name = removeGenre.dataset.removeGenre;
+      if (name) setGenreSelected(name, false);
       return;
     }
 
     const removeRegion = target.closest<HTMLElement>('[data-remove-region]');
     if (removeRegion) {
-      const key = removeRegion.dataset.removeRegion;
-      if (key) setRegionSelected(key, false);
+      const name = removeRegion.dataset.removeRegion;
+      if (name) setRegionSelected(name, false);
+      return;
+    }
+
+    const removeSerie = target.closest<HTMLElement>('[data-remove-serie]');
+    if (removeSerie) {
+      const name = removeSerie.dataset.removeSerie;
+      if (name) setSerieSelected(name, false);
       return;
     }
 
     if (target.closest('[data-remove-query]')) {
       state.q = '';
       searchInput.value = '';
+      syncSelectionsFromQuery();
       pushFilterState();
+      renderFacets();
+      renderRegions();
+      renderSeries();
       renderActiveFilters();
       void loadAlbums(true);
       return;

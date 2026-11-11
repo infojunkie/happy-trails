@@ -443,7 +443,7 @@ test('error handling: malformed JSON returns 500 instead of 400', async () => {
 /* 8. SQL injection is not possible (defensive proof)                 */
 /* ------------------------------------------------------------------ */
 
-test('SQL injection payloads in q, genre, region, and album key are inert', async () => {
+test('SQL injection payloads in search and album key are inert', async () => {
   const running = await startSecurityServer();
   try {
     const searchPayloads = [
@@ -472,17 +472,16 @@ test('SQL injection payloads in q, genre, region, and album key are inert', asyn
     // literally contain an apostrophe; an injection would return every album.
     assert.ok(classicTotal < allTotal, 'injection returned the whole library');
 
-    for (const param of ['genre', 'region']) {
+    for (const field of ['genre', 'region', 'serie']) {
+      const payload = `${field}:"' OR 1=1 --"`;
       const response = await fetch(
-        `${running.baseUrl}/api/albums?${param}=${encodeURIComponent(
-          "' OR 1=1 --",
-        )}`,
+        `${running.baseUrl}/api/albums?q=${encodeURIComponent(payload)}`,
       );
       assert.equal(response.status, 200);
       assert.equal(
         ((await response.json()) as { total: number }).total,
         0,
-        param,
+        payload,
       );
     }
 

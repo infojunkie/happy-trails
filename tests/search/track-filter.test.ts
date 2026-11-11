@@ -46,6 +46,19 @@ test('track artist, source, album, and bare terms use per-track fields', () => {
   ]);
 });
 
+test('genre and region terms use the track genre tags', () => {
+  assert.deepEqual(matches('genre:rock'), tracks.map((track) => track.title));
+  assert.deepEqual(matches('genre:jazz'), []);
+
+  const first = tracks[0];
+  assert.ok(first);
+  const brazilTrack = { ...first, genre: 'Jazz,Brazil' };
+  const matcher = createTrackMatcher('Anything', 'region:brazil');
+  assert.equal(matcher(brazilTrack), true);
+  const noRegion = createTrackMatcher('Anything', 'region:brazil');
+  assert.equal(noRegion({ ...first, genre: 'Jazz' }), false);
+});
+
 test('boolean expressions are evaluated per track', () => {
   assert.deepEqual(matches('composer:harrison OR trackartist:clapton'), [
     'Something',
@@ -65,21 +78,52 @@ test('boolean expressions are evaluated per track', () => {
   );
 });
 
-test('serie and label match the parsed album series', () => {
+test('serie and label match the album series exactly', () => {
   const track = tracks[0];
   assert.ok(track);
 
   const blueNote = createTrackMatcher(
     'Blue Train {Blue Note}',
     'serie:"blue note"',
+    '\u0000blue note\u0000',
   );
   assert.equal(blueNote(track), true);
 
   const rockCandy = createTrackMatcher(
     'A Love Supreme [2016 Rock Candy Edition]',
     'label:"rock candy"',
+    '\u0000rock candy\u0000',
   );
   assert.equal(rockCandy(track), true);
+
+  const semLimite = createTrackMatcher(
+    'Sem Limite [2008 Edition]',
+    'serie:"sem limite"',
+    '\u0000sem limite\u0000',
+  );
+  assert.equal(semLimite(track), true);
+
+  // Only the exact series value matches.
+  const partial = createTrackMatcher(
+    'Blue Train {Blue Note}',
+    'serie:blue',
+    '\u0000blue note\u0000',
+  );
+  assert.equal(partial(track), false);
+
+  // Variable artist text is not part of the detected series value.
+  const arte = createTrackMatcher(
+    'A Arte de Caetano Veloso',
+    'label:"a arte de"',
+    '\u0000a arte de\u0000',
+  );
+  assert.equal(arte(track), true);
+  const artistName = createTrackMatcher(
+    'A Arte de Caetano Veloso',
+    'serie:"caetano"',
+    '\u0000a arte de\u0000',
+  );
+  assert.equal(artistName(track), false);
 
   const unrelated = createTrackMatcher('Abbey Road', 'serie:"blue note"');
   assert.equal(unrelated(track), false);

@@ -38,7 +38,7 @@
             autocomplete="off"
             spellcheck="false"
             aria-describedby="search-syntax"
-            title='album:"exact phrase" artist:name serie:name composer:name source:label trackartist:name — supports AND, OR, and parentheses'
+            title='album:"exact phrase" artist:name genre:name region:name serie:name composer:name source:label trackartist:name — supports AND, OR, and parentheses'
           />
           <kbd class="search-hint" aria-hidden="true">/</kbd>
         </label>
@@ -55,9 +55,9 @@
         </button>
         <span id="search-syntax" class="visually-hidden">
           Search syntax: use field colon value, quote multi-word values, and
-          combine terms with AND or OR. Fields are album, artist, serie,
-          composer, source, and trackartist. A plain sequence of keywords
-          searches all fields as one phrase.
+          combine terms with AND or OR. Fields are album, artist, genre,
+          region, serie, composer, source, and trackartist. A plain sequence
+          of keywords searches all fields as one phrase.
         </span>
 
         <label class="sort-field">
@@ -119,7 +119,7 @@
                 id="genre-toggle"
                 class="facet-toggle"
                 type="button"
-                aria-expanded="true"
+                aria-expanded="false"
                 aria-controls="genre-panel"
               >
                 <span id="genre-heading">Genres</span>
@@ -130,7 +130,7 @@
               Clear
             </button>
           </div>
-          <div id="genre-panel" class="facet-panel">
+          <div id="genre-panel" class="facet-panel" hidden>
             <div class="facet-mode" role="radiogroup" aria-label="Genre matching">
               <label class="facet-mode-option">
                 <input type="radio" name="genre-mode" value="any" checked />
@@ -151,6 +151,12 @@
               spellcheck="false"
               hidden
             />
+            <button
+              id="toggle-all-genres"
+              class="link-button toggle-all"
+              type="button"
+              hidden
+            ></button>
             <div
               id="genre-list"
               class="genre-list"
@@ -159,12 +165,6 @@
             >
               <p class="facet-empty">Loading genres…</p>
             </div>
-            <button
-              id="toggle-all-genres"
-              class="link-button toggle-all"
-              type="button"
-              hidden
-            ></button>
           </div>
         </section>
 
@@ -178,7 +178,7 @@
                 id="region-toggle"
                 class="facet-toggle"
                 type="button"
-                aria-expanded="true"
+                aria-expanded="false"
                 aria-controls="region-panel"
               >
                 <span id="region-heading">Regions</span>
@@ -189,7 +189,7 @@
               Clear
             </button>
           </div>
-          <div id="region-panel" class="facet-panel">
+          <div id="region-panel" class="facet-panel" hidden>
             <div class="facet-mode" role="radiogroup" aria-label="Region matching">
               <label class="facet-mode-option">
                 <input type="radio" name="region-mode" value="any" checked />
@@ -210,6 +210,12 @@
               spellcheck="false"
               hidden
             />
+            <button
+              id="toggle-all-regions"
+              class="link-button toggle-all"
+              type="button"
+              hidden
+            ></button>
             <div
               id="region-list"
               class="genre-list region-list"
@@ -218,12 +224,55 @@
             >
               <p class="facet-empty">Loading regions…</p>
             </div>
+          </div>
+        </section>
+
+        <section
+          class="facet-section facet-section-series"
+          aria-labelledby="serie-heading"
+        >
+          <div class="facets-header">
+            <h2>
+              <button
+                id="serie-toggle"
+                class="facet-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="serie-panel"
+              >
+                <span id="serie-heading">Series</span>
+                <span class="facet-chevron" aria-hidden="true">▾</span>
+              </button>
+            </h2>
+            <button id="clear-serie" class="link-button" type="button" hidden>
+              Clear
+            </button>
+          </div>
+          <div id="serie-panel" class="facet-panel" hidden>
+            <input
+              id="serie-search"
+              class="genre-search"
+              type="search"
+              placeholder="Filter series…"
+              aria-label="Filter series"
+              autocomplete="off"
+              spellcheck="false"
+              hidden
+            />
             <button
-              id="toggle-all-regions"
+              id="toggle-all-series"
               class="link-button toggle-all"
               type="button"
               hidden
             ></button>
+            <div
+              id="serie-list"
+              class="genre-list serie-list"
+              role="group"
+              aria-labelledby="serie-heading"
+            >
+              <p class="facet-empty">Loading series…</p>
+            </div>
           </div>
         </section>
       </aside>
@@ -342,10 +391,19 @@
           <dd>Album title and raw source titles.</dd>
           <dt><code>artist:</code></dt>
           <dd>Album artist, parsed artists, and track artists.</dd>
+          <dt><code>genre:</code></dt>
+          <dd>Genre tags. Alias: <code>genres:</code>.</dd>
+          <dt><code>region:</code></dt>
+          <dd>
+            Country/region tags from the genre column. Alias:
+            <code>regions:</code>.
+          </dd>
           <dt><code>serie:</code></dt>
           <dd>
-            Series/label names from <code>{…}</code> and year-Edition brackets
-            such as <code>[2016 Rock Candy Edition]</code>. Alias:
+            Series/label names from <code>{…}</code>, year-Edition brackets
+            such as <code>[2016 Rock Candy Edition]</code>, and recurring
+            album titles such as <code>Sem Limite</code>,
+            <code>A Arte de …</code>, and <code>The Wire Tapper</code>. Alias:
             <code>label:</code>.
           </dd>
           <dt><code>composer:</code></dt>
@@ -431,6 +489,14 @@
           >
             <code>serie:"Rock Candy"</code>
             <span>an edition series</span>
+          </button>
+          <button
+            type="button"
+            class="syntax-example"
+            data-search-example='genre:"Jazz" region:"Brazil"'
+          >
+            <code>genre:"Jazz" region:"Brazil"</code>
+            <span>genre and region tags</span>
           </button>
         </div>
 

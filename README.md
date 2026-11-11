@@ -1,10 +1,11 @@
 # Happy Trails
 
-A small, read-only web app for browsing the music tables of the Synology `mediaserver`
-PostgreSQL database. Albums are grouped by album title and album artist, with
-multi-CD variants merged at their ` // <disc label>` suffix, sorted by their
-most recent upload date, and filterable with separate genre and country/region
-facets built from the comma-separated `genre` column.
+A small, read-only web app for browsing and searching the music library of the Synology
+`mediaserver` PostgreSQL database. A SQLite search index is built from the source
+database to create search facets that are surfaced through a full-text query interface and
+facet filters. The album display retrieves album cover, booklet, comments and other metadata
+from the Synology API. The app also signs in Synology users and allows to playback
+albums and tracks by redirecting to the synology Audio Station web app.
 
 - **Backend:** Node.js + Express + `pg` + the built-in `node:sqlite` module, written in TypeScript.
 - **Frontend:** vanilla TypeScript (no framework), compiled to ES modules.
@@ -18,29 +19,36 @@ facets built from the comma-separated `genre` column.
 - Multi-CD albums whose titles differ only by a whitespace-separated
   ` // <disc label>` suffix are merged into one album; the original titles
   (including the labels) remain searchable.
-- Genre facet with album counts, facet search, and multi-select.
+- Genre facet with album counts, facet search, and multi-select. Each selection
+  adds a `genre:"<name>"` term to the search bar.
 - Country and region tags in the genre column (Brazil, France, Corsica,
   Catalonia, …) are detected and exposed as a separate **Regions** facet, with
-  their own filter. The genre facet contains only non-location tags.
-- Each facet has **Match any** / **Match all** modes. Any is the default and
-  matches albums carrying at least one selected tag; All requires every
-  selected tag. The two facets are combined with AND.
-- Genre and region sections are collapsible. Both start collapsed on mobile
-  and expanded on desktop; toggling one does not affect the other.
+  their own filter. Selections add `region:"<name>"` terms. The genre facet
+  contains only non-location tags.
+- A **Series** facet lists the detected and bracketed/braced series with album
+  counts, ordered by occurrence. It is a checkbox list: each selection adds
+  `serie:"<name>"` to the search bar joined with `OR` (a match-any selection),
+  and Clear removes them.
+- Genre and region facets each have **Match any** / **Match all** modes. Any
+  joins the selected terms with `OR` in the search bar; All joins them with
+  `AND`. The two facet groups are combined with `AND`.
+- Genre, region, and series sections are collapsible and start collapsed;
+  toggling one does not affect the others. Each list shows about seven rows by
+  default, and **Show all** expands it to roughly three times that height.
 - Free-text album/artist search with case-, accent-, and ligature-insensitive
   matching (`Soren` finds `Søren`, `caetera` finds `cætera`, `Bjork` finds
   `Björk`). Track-level artists are searchable too.
 - Fielded search syntax: `album:"abbey road" artist:beatles`,
-  `composer:jobim`, `serie:"Rock Candy"`, `source:"Bonus Tracks"`,
-  `trackartist:"guest"`, combined
+  `genre:"Jazz" region:"Brazil"`, `composer:jobim`, `serie:"Rock Candy"`,
+  `source:"Bonus Tracks"`, `trackartist:"guest"`, combined
   with `AND`, `OR`, implicit AND, and parentheses. Quoted values are matched as
   contiguous phrases. A query made only of plain keywords is treated as one
   phrase; use `AND` to combine independent words. The `?` button
   beside the search bar opens a syntax help popup with clickable examples.
 - Album and artist names are search shortcuts in cards and in the album dialog;
-  genre tags activate the genre facet and region tags activate the region
-  facet everywhere. Name links clear both filters, while tag chips keep the
-  current search query.
+  genre tags add a `genre:"<name>"` term and region tags add a
+  `region:"<name>"` term everywhere. Name links clear facet selections, while
+  tag chips add to them.
 - Multi-artist values are parsed into individual artists, including
   comma-separated lists; a configurable exception list keeps names such as
   `Earth, Wind & Fire` together. Each detected name is its own search link in
@@ -61,8 +69,8 @@ facets built from the comma-separated `genre` column.
 - Track comments are aggregated across an album's tracks, deduplicated, and
   shown in the album dialog header beneath the tag pills. Absolute `http(s)`
   URLs inside comments are clickable and open in a new tab.
-- Album artwork from Synology AudioStation, proxied and cached by the server.
-  Albums without artwork keep the generated gradient/initials cover.
+- Album covers from Synology AudioStation, proxied and cached by the server.
+  Albums without covers keep the generated gradient/initials cover.
 - An **Artwork** button in the album dialog when the album folder contains
   `Artwork.pdf`. The server finds it through Synology FileStation and streams
   the PDF to the browser, which opens it with its normal PDF viewer.
@@ -71,7 +79,8 @@ facets built from the comma-separated `genre` column.
   the album's tracks and opens Audio Station. Each track row also has a small
   blue play control that queues just that track. No audio player lives in this
   app. Play controls are hidden until the app session is authenticated.
-- Shareable URL state (`?genre=Jazz&genreMode=all&region=France&q=...&sort=artist`).
+- Shareable URL state (`?q=genre%3A%22Jazz%22+region%3A%22France%22&sort=artist`).
+  Facet selections are encoded as `genre:` / `region:` / `serie:` terms in `q`.
 - Browser Back/Forward replays searches, filters, sorts, and album dialogs.
   Opening an album records a history entry; closing it consumes that entry, and
   Forward reopens it.
@@ -81,9 +90,8 @@ facets built from the comma-separated `genre` column.
 ## Requirements
 
 - Node.js 24 or newer (the server uses the built-in `node:sqlite` module).
-- Read access to a PostgreSQL database containing the `music` table described
-  by [`music.sql`](docs/music.sql).
-- Optional: read access to the `track` table and a Synology DSM URL for Audio
+- Read access to a PostgreSQL database containing the [`music`](docs/mediaserver.sql) table.
+- Optional: Read access to the [`track`](docs/mediaserver.sql) table and a Synology DSM URL for Audio
   Station playback. A DSM service account is optional and used for album covers
   and artwork lookups; users sign in with their own account to play.
 
@@ -197,6 +205,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
+| `SERIES_EXCEPTIONS` | `Legacy`, `Collector's` | Additional series/label names to ignore, separated by a vertical-bar character. Appended to the defaults; matching ignores case, accents, and apostrophes. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
 ### Behind DSM's reverse proxy
@@ -244,32 +253,13 @@ Never use `TRUST_PROXY=true`: with an appending proxy, Express would trust a
 client-supplied `X-Forwarded-For` entry. Leave `TRUST_PROXY` unset when the app
 is accessed directly.
 
-## How it works
+## Theory of operation
 
-The table holds >400k tracks across >30k raw album titles (before merging
+The `mediaserver` database holds >400k tracks across >30k raw album titles (before merging
 multi-CD variants). Parsing the comma-separated `genre` column and grouping by
 album in SQL on every request is slow (multi-second queries on the production
 dataset), so the server aggregates the library at startup and rebuilds it
 silently when its periodic change check detects new data (see below):
-
-```sql
-SELECT
-  m.album AS album,
-  COALESCE(NULLIF(m.album_artist, ''), NULLIF(m.artist, ''), 'Unknown Artist') AS artist,
-  MIN(m.year) FILTER (WHERE m.year BETWEEN 1 AND 9999)::int AS year,
-  COUNT(*)::int AS track_count,
-  COALESCE(SUM(m.duration), 0)::int AS duration,
-  to_char(MAX(m.date), 'YYYY-MM-DD"T"HH24:MI:SS') AS latest,
-  STRING_AGG(DISTINCT m.genre, ',') AS genres,
-  ARRAY_AGG(DISTINCT m.artist)
-    FILTER (WHERE m.artist IS NOT NULL AND m.artist <> '') AS track_artists,
-  ARRAY_AGG(DISTINCT btrim(m.comment))
-    FILTER (WHERE btrim(m.comment) <> '') AS comments,
-  MIN(m.path) AS cover_path
-FROM "public"."music" m
-WHERE m.fs_online IS NOT FALSE
-GROUP BY 1, 2
-```
 
 The aggregated rows are parsed and written to an in-memory SQLite database.
 The genre string is split on commas, trimmed, deduplicated, and stored in
@@ -314,11 +304,31 @@ dedicated folded columns; each FTS term is evaluated once in a materialized CTE
 so `OR` expressions do not rescan the FTS index per album. Composer values come
 from the track-level `composer` column populated from FLAC/ID3 tags.
 
-Series/label values are parsed from the album title: the contents of `{...}`,
-and the label between a leading year and the word "Edition" inside `[...]`
-(`[2016 Rock Candy Edition]` → `Rock Candy`). They are folded into
-`search_serie` and searched with `serie:` (alias `label:`) and are also part of
-the all-field text.
+Series/label values are parsed from the album title. Bracketed/braced labels
+are extracted directly. Titles that are themselves series are detected at
+index build time from recurring normalized titles. Normalization removes
+bracketed/braced and parenthesized text, the multi-CD ` // …` suffix, and any
+text after a standalone ` - ` or a `:`:
+
+- a title repeated by at least five albums (e.g. `Sem Limite`, `Série Bis`),
+  excluding albums named after one of their tracks and one-track extracts;
+- a recurring prefix completed by the album artist (`A Arte de <artist>`);
+- a recurring prefix completed by a volume number (`The Wire Tapper 42`);
+- a one-word label prefix followed by ` - ` or `:`
+  (`Putumayo - Acoustic Africa`, `Jazz Is Dead 5: Doug Carn`).
+
+An album whose title already carries an explicit `{...}` or `[...]` series is
+not run through the plain-title detector, so `Cuba : Les danses des dieux
+{Ocora}` yields only `Ocora`. Numeric volume suffixes on embedded labels are
+folded into their stem when the stem recurs with different numbers, so
+`{Network Medien / World Network 38}` yields `Network Medien / World Network`;
+a label with only one numeric suffix, such as `{Club Top 13}` or `{2 em 1}`,
+is kept intact. Generic titles such as `Greatest Hits` are ignored, and
+variable artist or volume text is not part of the series value.
+`SERIES_EXCEPTIONS` drops misleading labels such as `Legacy` or `Collector's`;
+it defaults to those two and appends any configured additions. Values are
+stored in `album_series`, matched exactly with `serie:` (alias `label:`), and
+are also part of the all-field text.
 
 Artist parsing applies to the effective album artist and to each track artist.
 A punctuation run is a separator only when whitespace surrounds it, so
@@ -343,6 +353,16 @@ case-sensitively, so `E Street Band` is not
 split. Parsed names are exposed as
 `artists` in the API and rendered as separate search links (joined by ` · `);
 the original string remains in `artist`/`albumArtist`.
+
+Genres and regions are matched case-insensitively; region keys also fold
+accents and apostrophe variants. Facet counts are the number of merged albums
+carrying each tag. The UI writes selections as `genre:` / `region:` query
+terms: **any** joins the terms with `OR`, **all** with `AND`, and the genre and
+region groups are combined with `AND`. Sorting uses precomputed dense ranks
+that reproduce the old `Intl.Collator` ordering, including its
+case/accent-insensitive ties. Filtering, searching, and pagination are single
+SQLite queries; the current dataset answers typical searches in a few
+milliseconds.
 
 ### Change detection and refresh
 
@@ -369,15 +389,6 @@ fields would not be seen; a DB trigger or `pg_stat_user_tables` counters can be
 added if that matters. The check is a cheap scan (sub-second); the rebuild
 remains the ~6–8s operation.
 
-Genres and regions are matched case-insensitively; region keys also fold
-accents and apostrophe variants. Facet counts are the number of merged albums
-carrying each tag. Each facet can match **any** or **all** selected tags; a
-genre selection and a region selection are combined with AND. Sorting uses
-precomputed dense ranks that reproduce the old `Intl.Collator` ordering,
-including its case/accent-insensitive ties. Filtering, searching, and
-pagination are single SQLite queries; the current dataset answers typical
-searches in a few milliseconds.
-
 Track lists are **not** cached: opening an album issues a parameterized,
 index-backed query against `music` for every raw title merged into it, and
 returns the current rows. The response carries each track's original title,
@@ -387,6 +398,8 @@ numbers that often repeat across the sources. Composer tags are surfaced under
 the track artist only when they add information (they are suppressed when
 equal to the track or album artist), and each parsed composer name links to a
 top-level search. The client caches responses for the lifetime of the page.
+
+### Album metadata
 
 Covers are fetched through the server; the optional cover service account is
 never exposed to the browser. Each merged album keeps a representative file path (preferring the
@@ -545,16 +558,18 @@ configured, i.e. when users can sign in and use the Play links.
 
 ### `GET /api/genres`
 
-All genres/regions and their album counts, sorted by count then name. `key` is
-the normalised value accepted by the matching filter. `libraryVersion`
-identifies the snapshot the counts came from.
+All genres, regions, and series and their album counts, sorted by count then
+name. `key` is the normalised value accepted by the matching filter or used by
+the series radio list. `libraryVersion` identifies the snapshot the counts
+came from.
 
 ```json
 {
   "totalAlbums": 33317,
   "libraryVersion": 1,
   "genres": [{ "key": "jazz", "name": "Jazz", "albumCount": 8726 }],
-  "regions": [{ "key": "ethiopia", "name": "Ethiopia", "albumCount": 42 }]
+  "regions": [{ "key": "ethiopia", "name": "Ethiopia", "albumCount": 42 }],
+  "series": [{ "key": "rock candy", "name": "Rock Candy", "albumCount": 228 }]
 }
 ```
 
@@ -562,11 +577,7 @@ identifies the snapshot the counts came from.
 
 | Parameter | Description |
 | --- | --- |
-| `genre` | Repeatable (`?genre=Jazz&genre=Rock`) or comma-separated. Matches albums containing any selected genre. |
-| `genreMode` | `any` (default) or `all`; controls whether an album must contain any or all selected genres. |
-| `region` | Repeatable or comma-separated. Matches albums containing any selected country/region tag. Combined with `genre` using AND. |
-| `regionMode` | `any` (default) or `all`; controls whether an album must contain any or all selected regions. |
-| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `serie:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). |
+| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `genre:`, `region:`, `serie:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
 | `limit` | Default `48`, maximum `200`. |
@@ -614,7 +625,9 @@ quoted value is matched as a contiguous phrase rather than as separate words.
 | --- | --- |
 | `album` | Merged album title and all raw source titles. |
 | `artist` | Effective album artist, parsed artists, and track-level artists. |
-| `serie` | Series/label names parsed from the album title: the contents of `{...}`, and the label between a leading year and "Edition" in `[...]` (`[2016 Rock Candy Edition]` matches `Rock Candy`). `label` is an alias. |
+| `genre` | Genre tags, excluding country/region tags, matched exactly (`genres` is an alias). |
+| `region` | Country/region tags from the genre column, matched exactly (`regions` is an alias). |
+| `serie` | Series/label names parsed from the album title: the contents of `{...}`, the label between a leading year and "Edition" in `[...]` (`[2016 Rock Candy Edition]` matches `Rock Candy`), and series detected from recurring normalized titles such as `Sem Limite`, `Série Bis`, `A Arte de <artist>`, `The Wire Tapper <volume>`, `Putumayo - <album>`, and `Jazz Is Dead <volume>: <album>`. Matched exactly. `label` is an alias. |
 | `composer` | Composer tag values from the FLAC/ID3 metadata (`composers` is an alias). |
 | `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). |
 | `trackartist` | Track-level artists only (`guest`, `track_artist`, and `track-artist` are aliases). |
@@ -630,6 +643,7 @@ case-, accent-, and ligature-insensitive, including quoted phrases.
 ```text
 album:"abbey road"
 artist:beatles OR artist:stones
+genre:"Jazz" region:"Brazil"
 composer:"Antonio Carlos Jobim"
 serie:"Rock Candy"
 (album:road OR album:street) artist:beatles

@@ -20,6 +20,7 @@ const context = await createFixtureContext({
       composers: ['Ralf Hütter, Florian Schneider'],
       comments: null,
       cover_path: '',
+      title_track: false,
     },
     {
       album: 'Madredeus',
@@ -33,6 +34,7 @@ const context = await createFixtureContext({
       composers: ['Pedro Ayres Magalhães'],
       comments: null,
       cover_path: '',
+      title_track: false,
     },
     {
       album: 'Paolo Conte',
@@ -46,6 +48,7 @@ const context = await createFixtureContext({
       composers: ['Paolo Conte'],
       comments: null,
       cover_path: '',
+      title_track: false,
     },
   ],
 });

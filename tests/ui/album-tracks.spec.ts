@@ -77,15 +77,21 @@ test('album chips activate the corresponding filters', async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card.locator('.chip-region')).toHaveText(['Brazil']);
   await card.locator('.chip-region', { hasText: 'Brazil' }).click();
-  await expect(page).toHaveURL(/region=Brazil/);
-  await expectSummaryFor(page, { q: 'artist:getz', region: 'Brazil' });
+  await expect(page.locator('#search')).toHaveValue('region:"Brazil"');
+  await expect(page).toHaveURL(/q=region/);
+  await expectSummaryFor(page, { q: 'region:"Brazil"' });
+  await expect(
+    page.locator('[data-remove-region="Brazil"]'),
+  ).toBeVisible();
 
   await page.goto(`/?q=${encodeURIComponent('artist:getz')}`);
   const genreCard = page.locator('.album-card', { hasText: 'Getz/Gilberto' }).first();
   await expect(genreCard).toBeVisible();
   await genreCard.locator('.chip-small', { hasText: 'Jazz' }).click();
-  await expect(page).toHaveURL(/genre=Jazz/);
-  await expectSummaryFor(page, { q: 'artist:getz', genre: 'Jazz' });
+  await expect(page.locator('#search')).toHaveValue('genre:"Jazz"');
+  await expect(page).toHaveURL(/q=genre/);
+  await expectSummaryFor(page, { q: 'genre:"Jazz"' });
+  await expect(page.locator('[data-remove-genre="Jazz"]')).toBeVisible();
 });
 
 test('album dialog shows merged tracks, composer lines, and artist punctuation', async ({
@@ -150,11 +156,9 @@ test('album dialog genre and region chips activate filters', async ({ page }) =>
   await openAlbum(page, 'Abbey Road');
   await page.locator('.dialog-genres .chip', { hasText: 'Rock' }).click();
   await expect(page.locator('#album-dialog')).toBeHidden();
-  await expect(page).toHaveURL(/genre=Rock/);
-  await expectSummaryFor(page, {
-    q: 'album:"abbey road"',
-    genre: 'Rock',
-  });
+  await expect(page.locator('#search')).toHaveValue('genre:"Rock"');
+  await expect(page).toHaveURL(/q=genre/);
+  await expectSummaryFor(page, { q: 'genre:"Rock"' });
 
   await page.goto(`/?q=${encodeURIComponent('artist:getz')}`);
   await expect(page.locator('.album-card').first()).toBeVisible();
@@ -169,8 +173,9 @@ test('album dialog genre and region chips activate filters', async ({ page }) =>
   ]);
   await page.locator('.dialog-genres .chip-region', { hasText: 'Brazil' }).click();
   await expect(page.locator('#album-dialog')).toBeHidden();
-  await expect(page).toHaveURL(/region=Brazil/);
-  await expectSummaryFor(page, { q: 'artist:getz', region: 'Brazil' });
+  await expect(page.locator('#search')).toHaveValue('region:"Brazil"');
+  await expect(page).toHaveURL(/q=region/);
+  await expectSummaryFor(page, { q: 'region:"Brazil"' });
 });
 
 test('album dialog shows Artwork only when the folder has Artwork.pdf', async ({

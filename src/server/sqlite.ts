@@ -1,21 +1,20 @@
 import { DatabaseSync } from 'node:sqlite';
-import type {
-  AlbumSummary,
-  FilterMode,
-  GenreFacet,
-  SortKey,
-} from '../shared/types.js';
+import type { AlbumSummary, GenreFacet, SortKey } from '../shared/types.js';
 import { regionKey } from '../shared/text.js';
 import { parseArtists } from './artists.js';
+import { config } from './config.js';
 import type { AlbumRow } from './db.js';
 import { isRegionTag } from './regions.js';
 import {
   albumKey,
-  albumSeries,
+  detectPlainSeries,
+  embeddedSeries,
   foldSearch,
   genreKey,
   normalizeAlbumName,
+  normalizeSeriesVolumes,
   searchTokens,
+  type SeriesAlbum,
 } from './search.js';
 import {
   parseSearchQuery,
@@ -25,10 +24,6 @@ import {
 } from './searchQuery.js';
 
 export interface AlbumsQuery {
-  genres: string[];
-  genreMode: FilterMode;
-  regions: string[];
-  regionMode: FilterMode;
   q: string;
   sort: SortKey;
   offset: number;
@@ -66,7 +61,6 @@ const SCHEMA_SQL = `
     search_source TEXT NOT NULL,
     search_track_artist TEXT NOT NULL,
     search_composer TEXT NOT NULL,
-    search_serie TEXT NOT NULL,
     album_rank  INTEGER NOT NULL,
     artist_rank INTEGER NOT NULL,
     key_rank    INTEGER NOT NULL
@@ -91,6 +85,19 @@ const SCHEMA_SQL = `
     album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
     position INTEGER NOT NULL,
     comment  TEXT NOT NULL,
+    PRIMARY KEY (album_id, position)
+  ) STRICT;
+
+  CREATE TABLE series (
+    key       TEXT PRIMARY KEY,
+    name      TEXT NOT NULL,
+    name_rank INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE TABLE album_series (
+    album_id  INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    position  INTEGER NOT NULL,
+    serie_key TEXT NOT NULL REFERENCES series(key),
     PRIMARY KEY (album_id, position)
   ) STRICT;
 
@@ -137,6 +144,8 @@ const SCHEMA_SQL = `
     ON album_genres(genre_key, album_id);
   CREATE INDEX album_regions_by_region
     ON album_regions(region_key, album_id);
+  CREATE INDEX album_series_by_serie
+    ON album_series(serie_key, album_id);
 
   -- The trigram tokenizer gives FTS5 substring semantics, which is what the
   -- original index did with String.includes(). unicode61 would only match
@@ -148,7 +157,6 @@ const SCHEMA_SQL = `
     search_source,
     search_track_artist,
     search_composer,
-    search_serie,
     content = 'albums',
     content_rowid = 'id',
     tokenize = 'trigram'
@@ -163,44 +171,40 @@ const TRIGGER_SQL = `
   CREATE TRIGGER albums_ai AFTER INSERT ON albums BEGIN
     INSERT INTO album_search(
       rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer, search_serie
+      search_source, search_track_artist, search_composer
     ) VALUES (
       new.id, new.search_text, new.search_album, new.search_artist,
-      new.search_source, new.search_track_artist, new.search_composer,
-      new.search_serie
+      new.search_source, new.search_track_artist, new.search_composer
     );
   END;
 
   CREATE TRIGGER albums_ad AFTER DELETE ON albums BEGIN
     INSERT INTO album_search(
       album_search, rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer, search_serie
+      search_source, search_track_artist, search_composer
     ) VALUES (
       'delete', old.id, old.search_text, old.search_album, old.search_artist,
-      old.search_source, old.search_track_artist, old.search_composer,
-      old.search_serie
+      old.search_source, old.search_track_artist, old.search_composer
     );
   END;
 
   CREATE TRIGGER albums_au AFTER UPDATE OF
     search_text, search_album, search_artist,
-    search_source, search_track_artist, search_composer, search_serie
+    search_source, search_track_artist, search_composer
   ON albums BEGIN
     INSERT INTO album_search(
       album_search, rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer, search_serie
+      search_source, search_track_artist, search_composer
     ) VALUES (
       'delete', old.id, old.search_text, old.search_album, old.search_artist,
-      old.search_source, old.search_track_artist, old.search_composer,
-      old.search_serie
+      old.search_source, old.search_track_artist, old.search_composer
     );
     INSERT INTO album_search(
       rowid, search_text, search_album, search_artist,
-      search_source, search_track_artist, search_composer, search_serie
+      search_source, search_track_artist, search_composer
     ) VALUES (
       new.id, new.search_text, new.search_album, new.search_artist,
-      new.search_source, new.search_track_artist, new.search_composer,
-      new.search_serie
+      new.search_source, new.search_track_artist, new.search_composer
     );
   END;
 `;
@@ -230,6 +234,8 @@ interface AlbumAccumulator {
   trackCount: number;
   duration: number;
   latest: string | null;
+  /** At least one track title prefixes the album title. */
+  titleTrack: boolean;
 }
 
 interface DbAlbumRow {
@@ -373,10 +379,12 @@ async function accumulateAlbums(
         trackCount: 0,
         duration: 0,
         latest: null,
+        titleTrack: false,
       };
       accumulators.set(key, acc);
     }
 
+    if (row.title_track) acc.titleTrack = true;
     if (rawAlbum !== null) acc.sourceAlbums.add(rawAlbum);
     acc.sourcePaths.set(rawAlbum ?? album, row.cover_path);
     for (const trackArtist of row.track_artists ?? []) {
@@ -489,13 +497,16 @@ export class SqliteIndex {
       const insertRegion = db.prepare(
         'INSERT INTO regions(key, name, name_rank) VALUES (?, ?, ?)',
       );
+      const insertSerie = db.prepare(
+        'INSERT INTO series(key, name, name_rank) VALUES (?, ?, ?)',
+      );
       const insertAlbum = db.prepare(`
         INSERT INTO albums(
           key, album, artist, year, track_count, duration, latest, cover_path,
           search_text, search_album, search_artist, search_source,
-          search_track_artist, search_composer, search_serie, album_rank,
-          artist_rank, key_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          search_track_artist, search_composer, album_rank, artist_rank,
+          key_rank
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertAlbumArtist = db.prepare(
         'INSERT INTO album_artists(album_id, position, artist) VALUES (?, ?, ?)',
@@ -505,6 +516,9 @@ export class SqliteIndex {
       );
       const insertAlbumComment = db.prepare(
         'INSERT INTO album_comments(album_id, position, comment) VALUES (?, ?, ?)',
+      );
+      const insertAlbumSerie = db.prepare(
+        'INSERT INTO album_series(album_id, position, serie_key) VALUES (?, ?, ?)',
       );
       const insertAlbumGenre = db.prepare(
         'INSERT INTO album_genres(album_id, position, genre_key) VALUES (?, ?, ?)',
@@ -518,6 +532,64 @@ export class SqliteIndex {
       }
       for (const [key, name] of regionDisplayNames) {
         insertRegion.run(key, name, regionRanks.get(name) ?? 0);
+      }
+
+      const embeddedByKey = new Map<string, string[]>();
+      const seriesAlbums: SeriesAlbum[] = [];
+      for (const [key, acc] of accumulators) {
+        const embedded = embeddedSeries(acc.album, config.seriesExceptions);
+        embeddedByKey.set(key, embedded);
+        // An explicit {...}/[...] series is authoritative; do not feed the
+        // title to the less reliable plain-title detector.
+        if (embedded.length > 0) continue;
+        seriesAlbums.push({
+          key,
+          album: acc.album,
+          artist: acc.artist,
+          trackCount: acc.trackCount,
+          titleTrack: acc.titleTrack,
+        });
+      }
+      const embeddedValues = new Set<string>();
+      for (const values of embeddedByKey.values()) {
+        for (const value of values) embeddedValues.add(value);
+      }
+      const normalizedEmbedded = normalizeSeriesVolumes(embeddedValues);
+      for (const [key, values] of embeddedByKey) {
+        embeddedByKey.set(
+          key,
+          [
+            ...new Set(
+              values.map((value) => normalizedEmbedded.get(value) ?? value),
+            ),
+          ],
+        );
+      }
+
+      const plainSeries = detectPlainSeries(
+        seriesAlbums,
+        config.seriesExceptions,
+      );
+
+      const seriesByKey = new Map<string, string[]>();
+      const seriesDisplayNames = new Map<string, string>();
+      for (const key of accumulators.keys()) {
+        const values = embeddedByKey.get(key) ?? [];
+        const detectedSerie =
+          values.length === 0 ? plainSeries.get(key) : undefined;
+        if (detectedSerie) values.push(detectedSerie);
+        if (values.length === 0) continue;
+        seriesByKey.set(key, values);
+        for (const value of values) {
+          const serieKey = foldSearch(value);
+          if (!seriesDisplayNames.has(serieKey)) {
+            seriesDisplayNames.set(serieKey, value);
+          }
+        }
+      }
+      const seriesRanks = rankValues(seriesDisplayNames.values());
+      for (const [key, name] of seriesDisplayNames) {
+        insertSerie.run(key, name, seriesRanks.get(name) ?? 0);
       }
 
       let inserted = 0;
@@ -536,8 +608,16 @@ export class SqliteIndex {
         const trackArtists = [...acc.trackArtists];
         const composers = [...acc.composers];
         const comments = [...acc.comments].sort(compareComments);
-        const series = albumSeries(acc.album);
-        // Include source titles, track artists, composer tags, and series.
+        const series = seriesByKey.get(key) ?? [];
+        const genreKeys = [...acc.genreKeys];
+        const regionKeys = [...acc.regionKeys];
+        const genreNames = genreKeys.map(
+          (genre) => genreDisplayNames.get(genre) ?? genre,
+        );
+        const regionNames = regionKeys.map(
+          (region) => regionDisplayNames.get(region) ?? region,
+        );
+        // Include tags, source titles, track artists, composers, and series.
         const searchText = foldSearch(
           [
             acc.album,
@@ -547,6 +627,8 @@ export class SqliteIndex {
             ...trackArtists,
             ...composers,
             ...series,
+            ...genreNames,
+            ...regionNames,
           ].join(' '),
         );
         const searchAlbum = foldSearch(
@@ -558,9 +640,6 @@ export class SqliteIndex {
         const searchSource = foldSearch(sourceAlbums.join(' '));
         const searchTrackArtist = foldSearch(trackArtists.join(' '));
         const searchComposer = foldSearch(composers.join(' '));
-        const searchSerie = foldSearch(series.join(' '));
-        const genreKeys = [...acc.genreKeys];
-        const regionKeys = [...acc.regionKeys];
 
         const result = insertAlbum.run(
           acc.key,
@@ -577,7 +656,6 @@ export class SqliteIndex {
           searchSource,
           searchTrackArtist,
           searchComposer,
-          searchSerie,
           albumRanks.get(acc.album) ?? 0,
           artistRanks.get(acc.artist) ?? 0,
           keyRanks.get(key) ?? 0,
@@ -603,6 +681,13 @@ export class SqliteIndex {
         for (let position = 0; position < comments.length; position += 1) {
           insertAlbumComment.run(albumId, position, comments[position] ?? '');
         }
+        for (let position = 0; position < series.length; position += 1) {
+          insertAlbumSerie.run(
+            albumId,
+            position,
+            foldSearch(series[position] ?? ''),
+          );
+        }
         for (let position = 0; position < genreKeys.length; position += 1) {
           insertAlbumGenre.run(albumId, position, genreKeys[position] ?? '');
         }
@@ -622,12 +707,12 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(totalTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '6');
+      insertMeta.run('schema_version', '8');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 6');
+      db.exec('PRAGMA user_version = 8');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -697,55 +782,28 @@ export class SqliteIndex {
     }));
   }
 
+  series(): GenreFacet[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.key AS key, s.name AS name,
+                COUNT(DISTINCT ase.album_id) AS album_count
+           FROM series s
+           JOIN album_series ase ON ase.serie_key = s.key
+          GROUP BY s.key, s.name, s.name_rank
+          ORDER BY album_count DESC, s.name_rank ASC`,
+      )
+      .all();
+
+    return rows.map((row) => ({
+      key: String(row.key),
+      name: String(row.name),
+      albumCount: Number(row.album_count),
+    }));
+  }
+
   queryAlbums(query: AlbumsQuery): AlbumsResult {
     const where: string[] = [];
     const params: Array<string | number> = [];
-
-    const selected = [...new Set(query.genres.map(genreKey).filter(Boolean))];
-    if (selected.length > 0) {
-      const placeholders = selected.map(() => '?').join(', ');
-      if (query.genreMode === 'all') {
-        where.push(
-          `(SELECT COUNT(DISTINCT ag.genre_key)
-              FROM album_genres ag
-             WHERE ag.album_id = a.id
-               AND ag.genre_key IN (${placeholders})) = ?`,
-        );
-        params.push(...selected, selected.length);
-      } else {
-        where.push(
-          `EXISTS (
-             SELECT 1 FROM album_genres ag
-              WHERE ag.album_id = a.id AND ag.genre_key IN (${placeholders})
-           )`,
-        );
-        params.push(...selected);
-      }
-    }
-
-    const selectedRegions = [
-      ...new Set(query.regions.map(regionKey).filter(Boolean)),
-    ];
-    if (selectedRegions.length > 0) {
-      const placeholders = selectedRegions.map(() => '?').join(', ');
-      if (query.regionMode === 'all') {
-        where.push(
-          `(SELECT COUNT(DISTINCT ar.region_key)
-              FROM album_regions ar
-             WHERE ar.album_id = a.id
-               AND ar.region_key IN (${placeholders})) = ?`,
-        );
-        params.push(...selectedRegions, selectedRegions.length);
-      } else {
-        where.push(
-          `EXISTS (
-             SELECT 1 FROM album_regions ar
-              WHERE ar.album_id = a.id AND ar.region_key IN (${placeholders})
-           )`,
-        );
-        params.push(...selectedRegions);
-      }
-    }
 
     const trimmedQuery = query.q.trim();
     let searchAst = trimmedQuery ? parseSearchQuery(query.q) : null;
@@ -758,10 +816,41 @@ export class SqliteIndex {
     const cteParams: string[] = [];
 
     const termSql = (term: SearchTermNode): string => {
+      // Genre/region are categorical: match the tag table exactly rather than
+      // using the substring FTS columns, so facet counts and query totals agree.
+      if (term.field === 'genre' || term.field === 'region') {
+        const key =
+          term.field === 'genre'
+            ? genreKey(term.value)
+            : regionKey(term.value);
+        if (!key || CONTROL_CHARS.test(key)) return '0';
+
+        const table =
+          term.field === 'genre' ? 'album_genres' : 'album_regions';
+        const column =
+          term.field === 'genre' ? 'genre_key' : 'region_key';
+        params.push(key);
+        return `EXISTS (
+          SELECT 1 FROM ${table} tag
+           WHERE tag.album_id = a.id AND tag.${column} = ?
+        )`;
+      }
+
+      if (term.field === 'serie') {
+        const key = foldSearch(term.value).replace(/\s+/g, ' ').trim();
+        if (!key || CONTROL_CHARS.test(key)) return '0';
+        params.push(key);
+        return `EXISTS (
+          SELECT 1 FROM album_series ase
+           WHERE ase.album_id = a.id AND ase.serie_key = ?
+        )`;
+      }
+
       const phrase = foldSearch(term.value).trim();
       if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
 
       const column = SEARCH_FIELD_COLUMNS[term.field];
+      if (!column) return '0';
       if ([...phrase].length >= 3) {
         const name = `search_term_${ctes.length}`;
         ctes.push(
@@ -875,6 +964,27 @@ export class SqliteIndex {
       )
       .all(albumId);
     return sources.map((source) => String(source.source_album));
+  }
+
+  /** Delimited series keys for an album, used by the track matcher. */
+  serieKeysFor(album: string, artist: string): string {
+    const albumRow = this.db
+      .prepare('SELECT id FROM albums WHERE key = ?')
+      .get(albumKey(album, artist));
+    if (!albumRow) return '';
+
+    const rows = this.db
+      .prepare(
+        `SELECT serie_key
+           FROM album_series
+          WHERE album_id = ?
+          ORDER BY position`,
+      )
+      .all(Number(albumRow.id));
+    const keys = rows
+      .map((row) => String(row.serie_key))
+      .filter(Boolean);
+    return keys.length > 0 ? `\u0000${keys.join('\u0000')}\u0000` : '';
   }
 
   coverPathFor(album: string, artist: string): string | null {

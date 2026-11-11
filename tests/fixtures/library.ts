@@ -22,6 +22,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['John Lennon, Paul McCartney', 'George Harrison'],
     comments: ['https://example.com/abbey-road', 'Original mix notes'],
     cover_path: 'covers/abbey.jpg',
+    title_track: false,
   },
   {
     album: 'Abbey Road // Bonus Tracks',
@@ -35,6 +36,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['George Harrison'],
     comments: ['https://example.com/abbey-road', 'Bonus disc notes'],
     cover_path: 'covers/abbey-bonus.jpg',
+    title_track: false,
   },
   {
     album: 'Kind of Blue',
@@ -48,6 +50,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Miles Davis'],
     comments: ['UDSACD 2122'],
     cover_path: 'covers/kind.jpg',
+    title_track: false,
   },
   {
     album: 'Getz/Gilberto',
@@ -61,6 +64,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Antonio Carlos Jobim, Vinicius de Moraes'],
     comments: [],
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Songhai',
@@ -74,6 +78,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Toumani Diabaté'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Björk',
@@ -87,6 +92,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Björk'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Ask Me Now',
@@ -100,6 +106,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Thelonious Monk'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Grace',
@@ -113,6 +120,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Søren Lee'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Live at Abbey Road',
@@ -126,6 +134,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Laurie Holloway'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Live At Abbey Road',
@@ -139,6 +148,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['RJ Thompson'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Corsica',
@@ -152,6 +162,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Traditional'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Catalonia',
@@ -165,6 +176,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Gerard Quintana'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'London Calling',
@@ -178,6 +190,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Joe Strummer, Mick Jones'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: "That's the Way of the World",
@@ -191,6 +204,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['Maurice White'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'Blue Train {Blue Note}',
@@ -204,6 +218,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['John Coltrane'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
   {
     album: 'A Love Supreme [2016 Rock Candy Edition]',
@@ -217,6 +232,7 @@ export const fixtureRows: AlbumRow[] = [
     composers: ['John Coltrane'],
     comments: null,
     cover_path: '',
+    title_track: false,
   },
 ];
 
@@ -459,10 +475,12 @@ export async function createFixtureContext(
       status: () => status,
       genres: () => index.genres(),
       regions: () => index.regions(),
+      series: () => index.series(),
       queryAlbums: (query) => index.queryAlbums(query),
       sourceAlbumsFor: (album, artist) =>
         index.sourceAlbumsFor(album, artist),
       coverPathFor: (album, artist) => index.coverPathFor(album, artist),
+      serieKeysFor: (album, artist) => index.serieKeysFor(album, artist),
     },
     loadTracks: async (sourceAlbums, album, artist) => {
       void sourceAlbums;

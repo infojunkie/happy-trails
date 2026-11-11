@@ -21,6 +21,19 @@ export async function apiAlbums(
   return (await response.json()) as AlbumsResponse;
 }
 
+/** Facet panels start collapsed; expand one before using its controls. */
+export async function expandFacet(
+  page: Page,
+  toggleSelector: string,
+  panelSelector: string,
+): Promise<void> {
+  const panel = page.locator(panelSelector);
+  if (!(await panel.isVisible())) {
+    await page.locator(toggleSelector).click();
+  }
+  await expect(panel).toBeVisible();
+}
+
 export async function summaryTotal(page: Page): Promise<number> {
   const text = await page.locator('#result-summary').innerText();
   const match = /^([\d,]+)/.exec(text);

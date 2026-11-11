@@ -1,6 +1,8 @@
+import { regionKey } from '../shared/text.js';
 import { parseArtists } from './artists.js';
 import type { TrackRow } from './db.js';
-import { albumSeries, foldSearch, searchTokens } from './search.js';
+import { isRegionTag } from './regions.js';
+import { foldSearch, genreKey, searchTokens } from './search.js';
 import {
   parseSearchQuery,
   type SearchField,
@@ -28,7 +30,27 @@ function legacySearchNode(input: string): SearchNode | null {
   return node;
 }
 
-function trackFields(track: TrackRow, album: string): TrackFields {
+function splitTrackTags(genre: string | null): {
+  genres: string[];
+  regions: string[];
+} {
+  const genres: string[] = [];
+  const regions: string[] = [];
+
+  for (const part of (genre ?? '').split(',')) {
+    const name = part.trim().replace(/\s+/g, ' ');
+    if (!name) continue;
+    if (isRegionTag(name)) regions.push(name);
+    else genres.push(name);
+  }
+  return { genres, regions };
+}
+
+function trackFields(
+  track: TrackRow,
+  album: string,
+  serieKeys: string,
+): TrackFields {
   const source = track.source_album ?? '(Unknown Album)';
   const albumArtists = parseArtists(track.album_artist);
   const trackArtists = parseArtists(track.artist);
@@ -40,13 +62,21 @@ function trackFields(track: TrackRow, album: string): TrackFields {
   ].join(' ');
   const albumText = [album, source].join(' ');
   const composer = track.composer ?? '';
-  const series = albumSeries(album);
+  const { genres, regions } = splitTrackTags(track.genre);
+  const genreTags = genres.map(genreKey);
+  const regionTags = regions.map(regionKey);
 
   return {
-    all: foldSearch([albumText, allArtists, composer, ...series].join(' ')),
+    all: foldSearch(
+      [albumText, allArtists, composer, ...genres, ...regions].join(' '),
+    ),
     album: foldSearch(albumText),
     artist: foldSearch(allArtists),
-    serie: foldSearch(series.join(' ')),
+    genre:
+      genreTags.length > 0 ? `\u0000${genreTags.join('\u0000')}\u0000` : '',
+    region:
+      regionTags.length > 0 ? `\u0000${regionTags.join('\u0000')}\u0000` : '',
+    serie: serieKeys,
     source: foldSearch(source),
     trackartist: foldSearch(
       [track.artist ?? '', ...trackArtists].join(' '),
@@ -58,6 +88,21 @@ function trackFields(track: TrackRow, album: string): TrackFields {
 function matchesNode(node: SearchNode, fields: TrackFields): boolean {
   switch (node.kind) {
     case 'term': {
+      if (
+        node.field === 'genre' ||
+        node.field === 'region' ||
+        node.field === 'serie'
+      ) {
+        const key =
+          node.field === 'genre'
+            ? genreKey(node.value)
+            : node.field === 'region'
+              ? regionKey(node.value)
+              : foldSearch(node.value).replace(/\s+/g, ' ').trim();
+        if (!key || CONTROL_CHARS.test(key)) return false;
+        return fields[node.field].includes(`\u0000${key}\u0000`);
+      }
+
       const value = foldSearch(node.value).trim();
       if (!value || CONTROL_CHARS.test(value)) return false;
       return fields[node.field].includes(value);
@@ -77,6 +122,7 @@ function matchesNode(node: SearchNode, fields: TrackFields): boolean {
 export function createTrackMatcher(
   album: string,
   query: string,
+  serieKeys = '',
 ): (track: TrackRow) => boolean {
   const trimmed = query.trim();
   if (!trimmed) return () => true;
@@ -84,5 +130,5 @@ export function createTrackMatcher(
   const node = parseSearchQuery(query) ?? legacySearchNode(trimmed);
   if (!node) return () => true;
 
-  return (track) => matchesNode(node, trackFields(track, album));
+  return (track) => matchesNode(node, trackFields(track, album, serieKeys));
 }

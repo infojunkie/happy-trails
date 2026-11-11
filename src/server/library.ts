@@ -67,6 +67,11 @@ export class Library {
     return this.index?.regions() ?? [];
   }
 
+  /** Detected and embedded series, ordered by album count. */
+  series(): GenreFacet[] {
+    return this.index?.series() ?? [];
+  }
+
   /** Raw album titles that were merged into this album, for track lookup. */
   sourceAlbumsFor(album: string, artist: string): string[] {
     return this.index?.sourceAlbumsFor(album, artist) ?? [album];
@@ -75,6 +80,11 @@ export class Library {
   /** Representative file path for the album cover, or null if unknown. */
   coverPathFor(album: string, artist: string): string | null {
     return this.index?.coverPathFor(album, artist) ?? null;
+  }
+
+  /** Delimited series keys for an album, or "" when unknown. */
+  serieKeysFor(album: string, artist: string): string {
+    return this.index?.serieKeysFor(album, artist) ?? '';
   }
 
   queryAlbums(query: AlbumsQuery): AlbumsResult {
