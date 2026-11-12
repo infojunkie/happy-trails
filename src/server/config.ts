@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,6 +58,17 @@ function identifierFromEnv(name: string, fallback: string): string {
     throw new Error(`${name} must be a plain SQL identifier, got "${value}"`);
   }
   return value;
+}
+
+/**
+ * Resolve INDEX_DB_DIR. A directory path (the default is
+ * `$TMPDIR/happy-trails-index`) builds the SQLite index on disk; the special
+ * value `:memory:` keeps it in the process heap. Returns null for `:memory:`.
+ */
+export function parseIndexDbDir(rawValue: string | undefined): string | null {
+  const raw = (rawValue ?? '').trim();
+  if (raw === ':memory:') return null;
+  return path.resolve(raw || path.join(os.tmpdir(), 'happy-trails-index'));
 }
 
 const DEFAULT_ARTIST_SEPARATOR_WORDS = [
@@ -300,6 +312,8 @@ export const config = {
   host: process.env.HOST?.trim() || '127.0.0.1',
   port: integerFromEnv('PORT', 3000, 1),
   databaseUrl: process.env.DATABASE_URL?.trim() || undefined,
+  /** Directory for the on-disk SQLite index; null uses `:memory:`. */
+  indexDbDir: parseIndexDbDir(process.env.INDEX_DB_DIR),
   schema: identifierFromEnv('MUSIC_SCHEMA', 'public'),
   table: identifierFromEnv('MUSIC_TABLE', 'music'),
   trackTable: identifierFromEnv('TRACK_TABLE', 'track'),

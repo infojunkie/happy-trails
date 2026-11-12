@@ -8,3 +8,4 @@ public/shared/
 test-results/
 playwright-report/
 blob-report/
+data/

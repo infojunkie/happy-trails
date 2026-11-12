@@ -72,15 +72,13 @@ function trackFields(
     ),
     album: foldSearch(albumText),
     artist: foldSearch(allArtists),
+    track: foldSearch(track.title),
     genre:
       genreTags.length > 0 ? `\u0000${genreTags.join('\u0000')}\u0000` : '',
     region:
       regionTags.length > 0 ? `\u0000${regionTags.join('\u0000')}\u0000` : '',
     serie: serieKeys,
     source: foldSearch(source),
-    trackartist: foldSearch(
-      [track.artist ?? '', ...trackArtists].join(' '),
-    ),
     composer: foldSearch(composer),
   };
 }

@@ -20,11 +20,11 @@ export const SEARCH_FIELDS = [
   'all',
   'album',
   'artist',
+  'track',
   'genre',
   'region',
   'serie',
   'source',
-  'trackartist',
   'composer',
 ] as const;
 
@@ -52,9 +52,9 @@ export interface SearchOrNode {
 export type SearchNode = SearchTermNode | SearchAndNode | SearchOrNode;
 
 /**
- * SQLite columns holding the folded text for each substring-searchable field.
- * Genre, region, and series are matched exactly against their mapping tables
- * instead.
+ * Album-index columns holding the folded text for each substring-searchable
+ * field. `track:` is resolved against the separate track index, and genre,
+ * region, and series are matched exactly against their mapping tables.
  */
 export const SEARCH_FIELD_COLUMNS: Readonly<
   Partial<Record<SearchField, string>>
@@ -63,7 +63,6 @@ export const SEARCH_FIELD_COLUMNS: Readonly<
   album: 'search_album',
   artist: 'search_artist',
   source: 'search_source',
-  trackartist: 'search_track_artist',
   composer: 'search_composer',
 };
 
@@ -72,6 +71,7 @@ const FIELD_ALIASES = new Map<string, SearchField>([
   ['any', 'all'],
   ['album', 'album'],
   ['artist', 'artist'],
+  ['track', 'track'],
   ['genre', 'genre'],
   ['genres', 'genre'],
   ['region', 'region'],
@@ -80,10 +80,6 @@ const FIELD_ALIASES = new Map<string, SearchField>([
   ['label', 'serie'],
   ['source', 'source'],
   ['disc', 'source'],
-  ['trackartist', 'trackartist'],
-  ['track_artist', 'trackartist'],
-  ['track-artist', 'trackartist'],
-  ['guest', 'trackartist'],
   ['composer', 'composer'],
   ['composers', 'composer'],
 ]);

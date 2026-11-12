@@ -19,6 +19,14 @@ albums and tracks by redirecting to the synology Audio Station web app.
 - Multi-CD albums whose titles differ only by a whitespace-separated
   ` // <disc label>` suffix are merged into one album; the original titles
   (including the labels) remain searchable.
+- An **Albums / Tracks** switch in the header changes the result list. Track
+  results are compact rows with album artwork, title and artist, album name,
+  the track's own genre/region pills, duration, and (when signed in) a
+  per-track Play control. The mode is stored in the URL (`view=tracks`) and in
+  browser history.
+- Long genre/region lists end in a clickable **+N more** pill in album cards,
+  the album dialog, and track rows. It expands the list to every tag and
+  switches to **Show less** to collapse it again.
 - Genre facet with album counts, facet search, and multi-select. Each selection
   adds a `genre:"<name>"` term to the search bar.
 - Country and region tags in the genre column (Brazil, France, Corsica,
@@ -35,16 +43,17 @@ albums and tracks by redirecting to the synology Audio Station web app.
 - Genre, region, and series sections are collapsible and start collapsed;
   toggling one does not affect the others. Each list shows about seven rows by
   default, and **Show all** expands it to roughly three times that height.
-- Free-text album/artist search with case-, accent-, and ligature-insensitive
-  matching (`Soren` finds `Søren`, `caetera` finds `cætera`, `Bjork` finds
-  `Björk`). Track-level artists are searchable too.
+- Free-text album/artist/track search with case-, accent-, and
+  ligature-insensitive matching (`Soren` finds `Søren`, `caetera` finds
+  `cætera`, `Bjork` finds `Björk`). Track-level artists are searchable through
+  `artist:` in both modes.
 - Fielded search syntax: `album:"abbey road" artist:beatles`,
-  `genre:"Jazz" region:"Brazil"`, `composer:jobim`, `serie:"Rock Candy"`,
-  `source:"Bonus Tracks"`, `trackartist:"guest"`, combined
-  with `AND`, `OR`, implicit AND, and parentheses. Quoted values are matched as
-  contiguous phrases. A query made only of plain keywords is treated as one
-  phrase; use `AND` to combine independent words. The `?` button
-  beside the search bar opens a syntax help popup with clickable examples.
+  `track:"come together"`, `genre:"Jazz" region:"Brazil"`, `composer:jobim`,
+  `serie:"Rock Candy"`, `source:"Bonus Tracks"`, combined with `AND`, `OR`,
+  implicit AND, and parentheses. Quoted values are matched as contiguous
+  phrases. A query made only of plain keywords is treated as one phrase; use
+  `AND` to combine independent words. The `?` button beside the search bar
+  opens a syntax help popup with clickable examples.
 - Album and artist names are search shortcuts in cards and in the album dialog;
   genre tags add a `genre:"<name>"` term and region tags add a
   `region:"<name>"` term everywhere. Name links clear facet selections, while
@@ -79,8 +88,10 @@ albums and tracks by redirecting to the synology Audio Station web app.
   the album's tracks and opens Audio Station. Each track row also has a small
   blue play control that queues just that track. No audio player lives in this
   app. Play controls are hidden until the app session is authenticated.
-- Shareable URL state (`?q=genre%3A%22Jazz%22+region%3A%22France%22&sort=artist`).
-  Facet selections are encoded as `genre:` / `region:` / `serie:` terms in `q`.
+- Shareable URL state
+  (`?q=genre%3A%22Jazz%22+region%3A%22France%22&sort=artist&view=tracks`).
+  Facet selections are encoded as `genre:` / `region:` / `serie:` terms in `q`,
+  and `view=tracks` selects the track list.
 - Browser Back/Forward replays searches, filters, sorts, and album dialogs.
   Opening an album records a history entry; closing it consumes that entry, and
   Forward reopens it.
@@ -91,6 +102,9 @@ albums and tracks by redirecting to the synology Audio Station web app.
 
 - Node.js 24 or newer (the server uses the built-in `node:sqlite` module).
 - Read access to a PostgreSQL database containing the [`music`](docs/mediaserver.sql) table.
+- A writable local directory for the SQLite search index (default
+  `$TMPDIR/happy-trails-index`), or `INDEX_DB_DIR=:memory:` to avoid disk
+  writes. See [Index storage](#index-storage).
 - Optional: Read access to the [`track`](docs/mediaserver.sql) table and a Synology DSM URL for Audio
   Station playback. A DSM service account is optional and used for album covers
   and artwork lookups; users sign in with their own account to play.
@@ -121,6 +135,10 @@ Synology settings live as `DSADDR` / `DSUSER` / `DSPASSWD` (or set `DSM_URL` /
   Users sign in with their own DSM account in the app to play.
 
 Without a DSM URL, the app still runs with generated covers and no Play links.
+
+The search index is written to `$TMPDIR/happy-trails-index` by default. Set
+`INDEX_DB_DIR` to a stable local directory in `.env`, or use
+`INDEX_DB_DIR=:memory:`; see [Index storage](#index-storage).
 
 For development, run the TypeScript client watcher and the server with
 auto-restart:
@@ -155,12 +173,18 @@ Run it with the environment file mounted read-only:
 
 ```bash
 docker run --rm -p 3000:3000 \
+  -v happy-trails-index:/data \
   -v "$PWD/.env:/app/.env:ro" \
   -v "$HOME/.pgpass:/home/node/.pgpass:ro" \
   happy-trails
 ```
 
 Open <http://localhost:3000>.
+
+The `/data` volume holds the disposable SQLite search index; the image sets
+`INDEX_DB_DIR=/data/index` and runs as the unprivileged `node` user. See
+[Index storage](#index-storage) for named volumes, host bind mounts, and the
+`:memory:` alternative.
 
 Notes:
 
@@ -173,7 +197,119 @@ Notes:
   1000); mode `644` is sufficient. The same applies to a mounted `.pgpass` if
   the host user does not have UID 1000.
 - The image runs as the unprivileged `node` user and health-checks
-  `/api/status`.
+  `/api/status`. Its start period is 60s to allow for the initial index build.
+- The index volume must be writable by UID 1000. A named volume mounted at
+  `/data` inherits the image's ownership; a host bind mount needs its directory
+  owned by UID 1000.
+
+## Index storage
+
+The search index is a disposable SQLite database rebuilt from PostgreSQL at
+startup (and whenever the change fingerprint moves). It is written to
+`INDEX_DB_DIR`, which defaults to `$TMPDIR/happy-trails-index` (usually
+`/tmp/happy-trails-index`). Each build gets a unique file; after a successful
+build the new file is published and the old file is deleted. A startup sweep
+removes files left behind by a crash.
+
+`INDEX_DB_DIR=:memory:` keeps the index in the Node process instead. That uses
+more memory and needs no writable directory; it is useful for development,
+small libraries, or a container without a writable volume.
+
+Use a **local filesystem** directory. Do not place it on an SMB/NFS share:
+SQLite relies on POSIX locking and local file semantics. Mount or provide the
+**containing directory**, never a single `.sqlite` file — the app replaces the
+file on every rebuild.
+
+Disk usage is about 350–400 MB for a 410k-track library, and roughly double
+that during a rebuild while the old and new files coexist. Leave 1–2 GB free.
+
+### Non-Docker
+
+The default writes to `$TMPDIR/happy-trails-index`. To choose a stable
+location:
+
+```bash
+mkdir -p /var/lib/happy-trails/index
+chmod 700 /var/lib/happy-trails/index
+INDEX_DB_DIR=/var/lib/happy-trails/index npm start
+```
+
+For the in-memory behavior:
+
+```bash
+INDEX_DB_DIR=:memory: npm start
+```
+
+The directory must be writable by the user running the server. The startup
+sweep deletes `happy-trails-index-*` files in that directory, so use a
+**dedicated directory per running instance**; do not point two live servers at
+the same directory.
+
+### Docker
+
+The image creates `/data/index`, gives it to the `node` user, and sets
+`INDEX_DB_DIR=/data/index`. Mount a volume at `/data` so the index does not
+land on the container's writable layer:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -v happy-trails-index:/data \
+  -v "$PWD/.env:/app/.env:ro" \
+  -v "$HOME/.pgpass:/home/node/.pgpass:ro" \
+  happy-trails
+```
+
+A named volume is the least surprising option; Docker manages its ownership,
+and it can be removed with `docker volume rm` (Compose prefixes the volume name
+with the project). The index does not need to survive restarts.
+
+To keep the file on a specific host directory (for example an SSD volume), use
+a bind mount. The host directory must be writable by UID 1000:
+
+```bash
+sudo mkdir -p /volume1/docker/happy-trails/index
+sudo chown -R 1000:1000 /volume1/docker/happy-trails
+docker run --rm -p 3000:3000 \
+  -v /volume1/docker/happy-trails:/data \
+  -v "$PWD/.env:/app/.env:ro" \
+  happy-trails
+```
+
+Compose:
+
+```yaml
+services:
+  happy-trails:
+    image: happy-trails
+    ports: ["3000:3000"]
+    env_file: .env
+    volumes:
+      - happy-trails-index:/data
+
+volumes:
+  happy-trails-index:
+```
+
+Notes:
+
+- Mount the directory (`/data` or `/data/index`), never a single
+  `index.sqlite` file.
+- Do **not** use a `tmpfs` mount if you want the memory savings; a tmpfs index
+  is an in-memory database with extra steps. Use `INDEX_DB_DIR=:memory:` if
+  you want RAM instead of disk.
+- Keep the volume on a local disk. Avoid network-backed volume plugins and
+  SMB/NFS bind mounts.
+- The index is ephemeral. Mounting a volume does not currently avoid the
+  startup rebuild; the server always rebuilds from PostgreSQL.
+- Use one running instance per index directory. The startup sweep removes
+  stale `happy-trails-index-*` files and would delete another live instance's
+  index.
+
+On a 410k-track library the on-disk index measures ~363 MB, with a ~28 s total
+build (~9 s PostgreSQL load + ~20 s build), ~520 MB peak build RSS, and ~75 MB
+steady process RSS; the OS page cache holds the file and is reclaimable.
+`:memory:` mode peaks around 920 MB RSS. Query latency is effectively the same
+once the file is in page cache.
 
 ## Configuration
 
@@ -191,6 +327,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `MUSIC_SCHEMA` | `public` | Schema containing the tables. Must be a plain identifier. |
 | `MUSIC_TABLE` | `music` | Table to read. Must be a plain identifier. |
 | `TRACK_TABLE` | `track` | Table used to map a music path to an AudioStation cover id. |
+| `INDEX_DB_DIR` | `$TMPDIR/happy-trails-index` | Directory for the on-disk SQLite search index. Must be writable and on a local filesystem; use a dedicated directory per running instance. Set to `:memory:` to keep the index in RAM. See [Index storage](#index-storage). |
 | `DSM_URL` | — | Synology DSM base URL; required for user sign-in and album covers. Falls back to `DSADDR`. |
 | `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise use `:port` to keep the host the browser used and change only the port (for example `:5001`); path rewriting is not supported. With `:port`, the host must match `DSM_FRONTEND_ALLOWED_ORIGINS`. |
 | `DSM_FRONTEND_ALLOWED_ORIGINS` | — | Comma-separated exact origins the app is served from (`scheme://host[:port]`, no path), for example `https://mediatheque.example:8443,https://nas-local:8443`. Required when `DSM_FRONTEND_URL` is `:port`. A request whose `Host` (or `X-Forwarded-Host`, for proxies that rewrite it) matches an entry uses that origin; any other host disables the redirect. The entry's scheme is also used for the redirect, so list the scheme DSM is served under (normally the same as the app). `Origin` and `Referer` are never trusted for this. |
@@ -261,7 +398,8 @@ album in SQL on every request is slow (multi-second queries on the production
 dataset), so the server aggregates the library at startup and rebuilds it
 silently when its periodic change check detects new data (see below):
 
-The aggregated rows are parsed and written to an in-memory SQLite database.
+The aggregated rows are parsed and written to a SQLite database (on disk by
+default; see [Index storage](#index-storage)).
 The genre string is split on commas, trimmed, deduplicated, and stored in
 `genres`/`album_genres` or `regions`/`album_regions`, depending on whether the
 tag is a country/region name. Album titles are normalised by stripping a
@@ -275,6 +413,14 @@ in sorted order in its header and linkifies absolute `http(s)` URLs. The
 original raw titles, all track-level artists, and composer tags are folded into
 the FTS search text, so labels such as "The Vanilla Tapes", guest artists, and
 composers still match.
+
+Every `music` row is also written to a `tracks` table with its title, track
+artist, album artist, raw source title, composer, and its own genre/region
+display names, plus a separate `track_search` FTS index. Track search
+deliberately reuses the album index for album-title, genre, region, and series
+terms, so those filters and their sidebar counts remain album-level; `track:`
+searches track titles and, in Albums mode, finds albums that contain a matching
+track.
 See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
@@ -298,11 +444,12 @@ tokenizer, which preserves substring semantics; phrases shorter than three
 characters fall back to an exact `instr()` scan.
 
 The search expression parser supports plain keyword phrases, `album:`,
-`artist:`, `serie:`, `composer:`, `source:`, and `trackartist:` fields, quoted
-phrases, implicit/explicit `AND`, `OR`, and parentheses. Field terms target
-dedicated folded columns; each FTS term is evaluated once in a materialized CTE
-so `OR` expressions do not rescan the FTS index per album. Composer values come
-from the track-level `composer` column populated from FLAC/ID3 tags.
+`artist:`, `track:`, `serie:`, `composer:`, `source:`, `genre:`, and `region:`
+fields, quoted phrases, implicit/explicit `AND`, `OR`, and parentheses. Field
+terms target dedicated folded columns; each FTS term is evaluated once in a
+materialized CTE so `OR` expressions do not rescan the FTS index per album.
+Composer values come from the track-level `composer` column populated from
+FLAC/ID3 tags.
 
 Series/label values are parsed from the album title. Bracketed/braced labels
 are extracted directly. Titles that are themselves series are detected at
@@ -524,9 +671,9 @@ npm run test:ui:headed         # Playwright with a visible browser
 ```
 
 - API tests start the real Express app via `createApp()` with an injected fixture index.
-- Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, and combinations.
+- Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup.
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, Back/Forward search and dialog restoration, help popups, and the sticky error banner are checked against stable data.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts`; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running.
 - `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.
@@ -547,8 +694,8 @@ configured, i.e. when users can sign in and use the Play links.
 ```json
 {
   "ready": true,
-  "albumCount": 33317,
-  "trackCount": 409740,
+  "albumCount": 33356,
+  "trackCount": 410089,
   "libraryVersion": 1,
   "lastRefreshed": "2026-11-02T12:00:00.000Z",
   "lastCheckedAt": "2026-11-02T12:00:30.000Z",
@@ -568,7 +715,7 @@ came from.
 
 ```json
 {
-  "totalAlbums": 33317,
+  "totalAlbums": 33356,
   "libraryVersion": 1,
   "genres": [{ "key": "jazz", "name": "Jazz", "albumCount": 8726 }],
   "regions": [{ "key": "ethiopia", "name": "Ethiopia", "albumCount": 42 }],
@@ -580,7 +727,7 @@ came from.
 
 | Parameter | Description |
 | --- | --- |
-| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `genre:`, `region:`, `serie:`, `composer:`, `source:`, `trackartist:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
+| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `track:`, `genre:`, `region:`, `serie:`, `composer:`, and `source:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
 | `limit` | Default `48`, maximum `200`. |
@@ -617,6 +764,15 @@ listing; compare it with `/api/status` before deciding to reload.
 track comments, deduplicated and sorted; the client renders `http(s)` URLs in
 them as external links.
 
+`track:` is also accepted here: it matches track titles and returns the albums
+that contain a matching track, using the track index.
+
+### `GET /api/albums/:key`
+
+Returns one album summary by the opaque `key` from the album listing, in the
+same shape as an `albums[]` entry. The track list uses it to open the album
+dialog without loading the album listing. Returns `404` for an unknown key.
+
 #### Search syntax
 
 The `q` parameter accepts `field:value` terms. A plain list of keywords searches
@@ -627,14 +783,18 @@ quoted value is matched as a contiguous phrase rather than as separate words.
 | Field | Matches |
 | --- | --- |
 | `album` | Merged album title and all raw source titles. |
-| `artist` | Effective album artist, parsed artists, and track-level artists. |
+| `artist` | Effective album artist, parsed artists, and track-level artists in Albums mode; the track artist or album artist in Tracks mode. |
+| `track` | Track titles. In Albums mode, returns albums that contain a matching track. |
 | `genre` | Genre tags, excluding country/region tags, matched exactly (`genres` is an alias). |
 | `region` | Country/region tags from the genre column, matched exactly (`regions` is an alias). |
 | `serie` | Series/label names parsed from the album title: the contents of `{...}`, the label between a leading year and "Edition" in `[...]` (`[2016 Rock Candy Edition]` matches `Rock Candy`), and series detected from recurring normalized titles such as `Sem Limite`, `Série Bis`, `A Arte de <artist>`, `The Wire Tapper <volume>`, `Putumayo - <album>`, and `Jazz Is Dead <volume>: <album>`. Matched exactly. `label` is an alias. |
 | `composer` | Composer tag values from the FLAC/ID3 metadata (`composers` is an alias). |
-| `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). |
-| `trackartist` | Track-level artists only (`guest`, `track_artist`, and `track-artist` are aliases). |
+| `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). In Tracks mode, this track's raw source title. |
 | `all` / `any` | All indexed fields, equivalent to a bare term. |
+
+In Tracks mode, terms are evaluated per track. `genre:`, `region:`, and
+`serie:` still match the album's tags, so the sidebar counts remain album
+counts (the UI labels them “Count of matching albums”).
 
 A query made only of unquoted keywords is treated as one contiguous phrase:
 `abbey road` behaves like `"abbey road"`. Use `abbey AND road` to search the
@@ -651,12 +811,57 @@ composer:"Antonio Carlos Jobim"
 serie:"Rock Candy"
 (album:road OR album:street) artist:beatles
 source:"Vanilla Tapes"
-trackartist:"Ferenc Snétberger"
+track:"Freddie Freeloader"
 ```
 
 Unknown field names are treated as ordinary text, so titles containing colons
 still work. An incomplete or malformed expression falls back to the previous
 all-field token search. `NOT`/negation is not supported.
+
+### `GET /api/tracks`
+
+Track-level counterpart to `/api/albums`, used by the Tracks result list.
+
+| Parameter | Description |
+| --- | --- |
+| `q` | The same search syntax. Bare terms match the track title, artists, source title, composer, album title, and album genre/region/series names. `artist:` matches the track or album artist; `genre:`, `region:`, and `serie:` are exact album-level filters. |
+| `sort` | `recent` (default; per-track upload date), `artist`, `album`, or `year`. |
+| `offset` | Default `0`. |
+| `limit` | Default `48`, maximum `200`. |
+
+Each row includes the `music.id` (the id `/play/track/:id` accepts), the visible
+`artist` and parsed `artists`, the album artist, the opaque `albumKey` and
+merged `album` title, the raw `sourceAlbum`, disc/track/duration, and this
+track's own `genres`/`regions` for the pills. `genre:`, `region:`, and
+`serie:` filters and the sidebar counts remain album-level even though the
+pills show the track's own tags. An empty `q` lists every track.
+
+```json
+{
+  "total": 410089,
+  "offset": 0,
+  "limit": 48,
+  "libraryVersion": 1,
+  "tracks": [
+    {
+      "id": 3644554,
+      "title": "Nahel",
+      "artist": "Arat Kilo",
+      "artists": ["Arat Kilo"],
+      "albumArtist": "Arat Kilo",
+      "albumKey": "WyJEYW5hbWEiLCJBcmF0IEtpbG8iXQ",
+      "album": "Danama",
+      "sourceAlbum": "Danama",
+      "year": 2025,
+      "track": 1,
+      "disc": 0,
+      "duration": 235,
+      "genres": ["Jazz", "Funk"],
+      "regions": ["Ethiopia", "France"]
+    }
+  ]
+}
+```
 
 ### `GET /api/albums/:key/tracks`
 
@@ -668,7 +873,8 @@ individual names parsed from it, and `matches` says whether the track matches
 the optional `q` search expression. `key` is the value from the album listing.
 
 `q` uses the same syntax as `/api/albums`; filtering is evaluated per track, so
-`composer:beatles` flags only tracks with a matching composer.
+`composer:beatles` flags only tracks with a matching composer and
+`track:"come together"` flags only matching track titles.
 
 ```json
 {
@@ -814,12 +1020,19 @@ happy-trails/
 
 ## Operational notes
 
-- The app only issues `SELECT` queries.
-- The in-memory SQLite index for the current dataset takes roughly 6–8 seconds
-  to build and settles around 370 MB of RSS (about 84 MB is the SQLite
-  database; the rest includes the build's transient parsing structures and the
-  cover cache). The change check runs every `LIBRARY_CHECK_MS` (default 60s)
-  but only performs the full rebuild when the fingerprint changes.
+- The app only issues `SELECT` queries against PostgreSQL; it writes only its
+  disposable SQLite index.
+- The index contains every album and every track. The sum of the per-album
+  track counts is checked against the inserted track rows at build time.
+  Measured on a 410k-track library: about **363 MB on disk**, **~28 s total**
+  (~9 s loading PostgreSQL rows, ~20 s building), **~520 MB peak build RSS**,
+  and **~75 MB steady process RSS**; the OS page cache holds the file and is
+  reclaimable. With `INDEX_DB_DIR=:memory:` the index uses ~363 MB of process
+  memory and peaks around **920 MB RSS**. A rebuild keeps the old snapshot
+  alive while building the new one; on disk that means two files (~720 MB) and
+  in memory two databases. Re-measure after schema or build-path changes. The
+  change check runs every `LIBRARY_CHECK_MS` (default 60s) but only performs
+  the full rebuild when the fingerprint changes.
 - Open pages poll `/api/status` every 30s and reuse the old snapshot until the
   user clicks the enabled Refresh control. A rebuild failure leaves the old
   snapshot in place and is reported through `error`.

@@ -10,6 +10,7 @@ import {
   type AlbumsResponse,
   type GenresResponse,
   type SessionResponse,
+  type TrackSearchResponse,
   type TracksResponse,
 } from '../shared/types.js';
 import { artwork } from './artwork.js';
@@ -43,6 +44,8 @@ export interface AppDependencies {
     | 'regions'
     | 'series'
     | 'queryAlbums'
+    | 'queryTracks'
+    | 'albumForKey'
     | 'sourceAlbumsFor'
     | 'coverPathFor'
     | 'serieKeysFor'
@@ -393,6 +396,52 @@ export function createApp(
       libraryVersion: result.libraryVersion,
     };
     res.json(body);
+  });
+
+  app.get('/api/tracks', (req, res) => {
+    if (!dependencies.library.status().ready) {
+      unavailable(res, dependencies);
+      return;
+    }
+
+    const q = (stringParam(req.query.q) ?? '').slice(0, MAX_SEARCH_LENGTH).trim();
+    const sortParam = stringParam(req.query.sort);
+    const sort = isSortKey(sortParam) ? sortParam : 'recent';
+    const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
+    const limit = integerParam(
+      req.query.limit,
+      dependencies.config.defaultPageSize,
+      1,
+      dependencies.config.maxPageSize,
+    );
+    const result = dependencies.library.queryTracks({
+      q,
+      sort,
+      offset,
+      limit,
+    });
+    const body: TrackSearchResponse = {
+      total: result.total,
+      offset,
+      limit,
+      tracks: result.tracks,
+      libraryVersion: result.libraryVersion,
+    };
+    res.json(body);
+  });
+
+  app.get('/api/albums/:key', (req, res) => {
+    if (!dependencies.library.status().ready) {
+      unavailable(res, dependencies);
+      return;
+    }
+
+    const album = dependencies.library.albumForKey(req.params.key);
+    if (!album) {
+      res.status(404).json({ error: 'Album not found' });
+      return;
+    }
+    res.json(album);
   });
 
   app.get('/api/albums/:key/cover', async (req, res) => {

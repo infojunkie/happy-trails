@@ -28,6 +28,25 @@
       </div>
 
       <div class="header-controls">
+        <div class="search-mode" role="group" aria-label="Search mode">
+          <button
+            id="mode-albums"
+            class="search-mode-option"
+            type="button"
+            aria-pressed="true"
+          >
+            Albums
+          </button>
+          <button
+            id="mode-tracks"
+            class="search-mode-option"
+            type="button"
+            aria-pressed="false"
+          >
+            Tracks
+          </button>
+        </div>
+
         <label class="search-field">
           <span class="visually-hidden">Search the mediatheque</span>
           <span class="search-icon" aria-hidden="true">⌕</span>
@@ -38,7 +57,7 @@
             autocomplete="off"
             spellcheck="false"
             aria-describedby="search-syntax"
-            title='album:"exact phrase" artist:name genre:name region:name serie:name composer:name source:label trackartist:name — supports AND, OR, and parentheses'
+            title='album:"exact phrase" artist:name track:title genre:name region:name serie:name composer:name source:label — supports AND, OR, and parentheses'
           />
           <kbd class="search-hint" aria-hidden="true">/</kbd>
         </label>
@@ -55,9 +74,10 @@
         </button>
         <span id="search-syntax" class="visually-hidden">
           Search syntax: use field colon value, quote multi-word values, and
-          combine terms with AND or OR. Fields are album, artist, genre,
-          region, serie, composer, source, and trackartist. A plain sequence
-          of keywords searches all fields as one phrase.
+          combine terms with AND or OR. Fields are album, artist, track,
+          genre, region, serie, composer, and source. A plain sequence of
+          keywords searches all fields as one phrase. Use the Albums and
+          Tracks buttons to switch between album and track results.
         </span>
 
         <label class="sort-field">
@@ -291,10 +311,11 @@
         </div>
 
         <div id="album-grid" class="album-grid"></div>
+        <ul id="track-list" class="track-results" aria-label="Tracks" hidden></ul>
 
         <div id="empty-state" class="empty-state" hidden>
-          <p class="empty-title">No albums found</p>
-          <p class="empty-text">
+          <p id="empty-title" class="empty-title">No albums found</p>
+          <p id="empty-text" class="empty-text">
             Try a different search or clear the filters.
           </p>
           <button id="empty-clear" class="button-secondary" type="button">
@@ -372,7 +393,9 @@
               A plain list of keywords searches every field as one contiguous
               phrase. Add a field prefix to narrow the search, quote field
               values that contain spaces or parentheses, and use AND or OR to
-              combine terms independently.
+              combine terms independently. Use the Albums / Tracks switch to
+              search whole albums or individual tracks. In Tracks mode, genre,
+              region, and series terms still match the album's tags.
             </p>
           </div>
           <button
@@ -391,6 +414,11 @@
           <dd>Album title and raw source titles.</dd>
           <dt><code>artist:</code></dt>
           <dd>Album artist, parsed artists, and track artists.</dd>
+          <dt><code>track:</code></dt>
+          <dd>
+            Track titles. In Albums mode this finds albums containing a
+            matching track.
+          </dd>
           <dt><code>genre:</code></dt>
           <dd>Genre tags. Alias: <code>genres:</code>.</dd>
           <dt><code>region:</code></dt>
@@ -410,11 +438,6 @@
           <dd>Composer tags from the tracks. Alias: <code>composers:</code>.</dd>
           <dt><code>source:</code></dt>
           <dd>Raw source/disc titles only. Alias: <code>disc:</code>.</dd>
-          <dt><code>trackartist:</code></dt>
-          <dd>
-            Track-level artists only. Aliases: <code>guest:</code>,
-            <code>track_artist:</code>.
-          </dd>
           <dt><code>all:</code></dt>
           <dd>Every indexed field. Aliases: <code>any:</code>.</dd>
         </dl>
@@ -469,10 +492,10 @@
           <button
             type="button"
             class="syntax-example"
-            data-search-example='trackartist:"Ferenc Snétberger"'
+            data-search-example='track:"Freddie Freeloader"'
           >
-            <code>trackartist:"Ferenc Snétberger"</code>
-            <span>a guest artist</span>
+            <code>track:"Freddie Freeloader"</code>
+            <span>a track title</span>
           </button>
           <button
             type="button"

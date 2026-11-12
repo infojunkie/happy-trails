@@ -46,9 +46,10 @@ const REGION_ALIASES = [
   'Tuva', 'Badakhshan', 'Baluchistan', 'Karakalpakstan',
   'England', 'Scotland', 'Wales', 'Northern Ireland', 'Ireland Republic',
   'Hong Kong', 'Macau', 'Macao', 'Palestine', 'Taiwan', 'Veracruz',
+  'Rapa Nui',
 
   // Historical countries and spelling variants present in the catalogue
-  'Allemagne', 'Brésil', 'Burma', 'Byelorussia', 'Ceylon', 'Columbia',
+  'Burma', 'Byelorussia', 'Ceylon', 'Columbia',
   'Congo', 'Czech Republic', 'Czechoslovakia', 'Dem. Rep. of Congo',
   'East Germany', 'Ex-Yugoslavia', 'F.Y.R. Macedonia', 'Grece',
   'Great Britain', 'Ivory Coast', 'Macedonia', 'Moldavia', 'Netherland',

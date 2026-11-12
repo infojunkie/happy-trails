@@ -7,6 +7,7 @@ import type {
   AlbumsResponse,
   GenresResponse,
   StatusResponse,
+  TrackSearchResponse,
   TracksResponse,
 } from '../../src/shared/types.js';
 import {
@@ -63,6 +64,15 @@ async function albums(
   path: string,
 ): Promise<AlbumsResponse> {
   const { response, body } = await json<AlbumsResponse>(baseUrl, path);
+  assert.equal(response.status, 200);
+  return body;
+}
+
+async function trackSearch(
+  baseUrl: string,
+  path: string,
+): Promise<TrackSearchResponse> {
+  const { response, body } = await json<TrackSearchResponse>(baseUrl, path);
   assert.equal(response.status, 200);
   return body;
 }
@@ -292,6 +302,99 @@ test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () 
     '/api/albums?sort=bogus&limit=1',
   );
   assert.equal(invalidSort.total, all.total);
+});
+
+test('GET /api/tracks lists, searches, sorts, and paginates', async () => {
+  const all = await trackSearch(main.server.baseUrl, '/api/tracks');
+  assert.ok(all.total > 0);
+  assert.equal(all.offset, 0);
+  assert.equal(all.limit, 48);
+  assert.ok(all.total > all.limit);
+  assert.equal(all.tracks.length, all.limit);
+
+  const page = await trackSearch(
+    main.server.baseUrl,
+    '/api/tracks?sort=album&offset=5&limit=3',
+  );
+  assert.equal(page.total, all.total);
+  assert.equal(page.offset, 5);
+  assert.equal(page.limit, 3);
+  assert.equal(page.tracks.length, 3);
+
+  const max = await trackSearch(main.server.baseUrl, '/api/tracks?limit=999');
+  assert.equal(max.limit, 200);
+  const min = await trackSearch(main.server.baseUrl, '/api/tracks?limit=0');
+  assert.equal(min.limit, 1);
+
+  const unknownSort = await trackSearch(
+    main.server.baseUrl,
+    '/api/tracks?sort=bogus&limit=1',
+  );
+  assert.equal(unknownSort.total, all.total);
+
+  const soWhat = await trackSearch(
+    main.server.baseUrl,
+    `/api/tracks?q=${encodeURIComponent('track:"so what"')}`,
+  );
+  assert.equal(soWhat.total, 1);
+  const track = soWhat.tracks[0];
+  assert.ok(track);
+  assert.equal(track.title, 'So What');
+  assert.equal(track.artist, 'Miles Davis');
+  assert.deepEqual(track.artists, ['Miles Davis']);
+  assert.equal(track.album, 'Kind of Blue');
+  assert.equal(track.sourceAlbum, 'Kind of Blue');
+  assert.equal(track.albumArtist, 'Miles Davis');
+  assert.equal(track.duration, 200);
+  assert.deepEqual(track.genres, ['Jazz']);
+  assert.deepEqual(track.regions, []);
+  assert.ok(track.albumKey.length > 0);
+});
+
+test('GET /api/tracks uses album-level genre filters', async () => {
+  const jazzTracks = await trackSearch(
+    main.server.baseUrl,
+    `/api/tracks?q=${encodeURIComponent('genre:jazz')}&limit=200`,
+  );
+  const jazzAlbums = await albums(
+    main.server.baseUrl,
+    `/api/albums?q=${encodeURIComponent('genre:jazz')}&limit=200`,
+  );
+  assert.equal(
+    jazzTracks.total,
+    jazzAlbums.albums.reduce((sum, album) => sum + album.trackCount, 0),
+  );
+  assert.ok(jazzTracks.tracks.every((track) => track.genres.includes('Jazz')));
+
+  const partial = await trackSearch(
+    main.server.baseUrl,
+    `/api/tracks?q=${encodeURIComponent('genre:jaz')}`,
+  );
+  assert.equal(partial.total, 0);
+});
+
+test('GET /api/albums/:key returns one album or 404', async () => {
+  const album = await findAlbum(main.server.baseUrl, 'Kind of Blue');
+  const { response, body } = await json<AlbumSummary>(
+    main.server.baseUrl,
+    `/api/albums/${encodeURIComponent(album.key)}`,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(body, album);
+
+  const missing = await fetch(
+    `${main.server.baseUrl}/api/albums/not-a-real-key`,
+  );
+  assert.equal(missing.status, 404);
+});
+
+test('track: in album search finds albums containing a matching track', async () => {
+  const result = await albums(
+    main.server.baseUrl,
+    `/api/albums?q=${encodeURIComponent('track:"freddie freeloader"')}`,
+  );
+  assert.equal(result.total, 1);
+  assert.equal(result.albums[0]?.album, 'Kind of Blue');
 });
 
 test('obsolete genre and region parameters are ignored', async () => {
@@ -690,7 +793,12 @@ test('unavailable libraries return 503 for album and facet endpoints', async () 
       '/api/status',
     );
     assert.equal(status.body.ready, false);
-    for (const path of ['/api/genres', '/api/albums']) {
+    for (const path of [
+      '/api/genres',
+      '/api/albums',
+      '/api/tracks',
+      '/api/albums/any-key',
+    ]) {
       const response = await fetch(`${fixture.server.baseUrl}${path}`);
       assert.equal(response.status, 503);
       assert.match(

@@ -1,6 +1,6 @@
 {
   "name": "happy-trails",
-  "version": "2.13.0",
+  "version": "3.0.0",
   "private": true,
   "description": "Browse the Synology mediaserver music library.",
   "type": "module",
@@ -17,6 +17,7 @@
     "watch:client": "tsc -p tsconfig.client.json --watch --preserveWatchOutput",
     "watch:server": "tsx watch src/server/index.ts",
     "start": "node dist/server/index.js",
+    "start:docker": "TAG=$(npm pkg get version --workspaces=false); docker run --rm -p 3000:3000 -v happy-trails-index:/data -v \"$PWD/.env:/app/.env:ro\" happy-trails:v$TAG",
     "test": "npm run test:backend && npm run test:ui",
     "test:backend": "npm run test:api && npm run test:config && npm run test:search && npm run test:artwork",
     "test:api": "node --import tsx --test tests/api/*.test.ts",

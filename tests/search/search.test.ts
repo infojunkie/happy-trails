@@ -180,9 +180,9 @@ test('fielded terms target only their fields', () => {
   assert.ok(composer.total > 0);
   assert.ok(names(composer.albums).includes('Getz/Gilberto'));
 
-  const trackArtist = query({ q: 'trackartist:coltrane' });
-  assert.ok(trackArtist.total > 0);
-  assert.ok(names(trackArtist.albums).includes('Kind of Blue'));
+  const trackedArtist = query({ q: 'artist:coltrane' });
+  assert.ok(trackedArtist.total > 0);
+  assert.ok(names(trackedArtist.albums).includes('Kind of Blue'));
 });
 
 test('plain keyword lists are phrases; explicit AND stays independent', () => {

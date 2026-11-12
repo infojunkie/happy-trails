@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   formatOriginTarget,
   parseAllowedFrontendOrigins,
   parseDsmFrontendUrl,
+  parseIndexDbDir,
   parseTrustProxy,
   resolveDsmFrontendBase,
 } from '../../src/server/config.js';
@@ -183,4 +186,22 @@ test('resolveDsmFrontendBase selects fixed or origin-based targets', () => {
     ),
     null,
   );
+});
+
+test('INDEX_DB_DIR resolves a directory, a default, and :memory:', () => {
+  assert.equal(parseIndexDbDir(':memory:'), null);
+  assert.equal(parseIndexDbDir('  :memory:  '), null);
+  assert.equal(
+    parseIndexDbDir(undefined),
+    path.resolve(path.join(os.tmpdir(), 'happy-trails-index')),
+  );
+  assert.equal(
+    parseIndexDbDir('   '),
+    path.resolve(path.join(os.tmpdir(), 'happy-trails-index')),
+  );
+  assert.equal(
+    parseIndexDbDir('/var/lib/happy-trails/index'),
+    path.resolve('/var/lib/happy-trails/index'),
+  );
+  assert.equal(parseIndexDbDir('./index'), path.resolve('./index'));
 });
