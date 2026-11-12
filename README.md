@@ -425,11 +425,14 @@ account needs read access to the music share.
 
 ### Navigation history
 
-Every applied search, facet change, match-mode change, sort change, and clear
+Every committed search, facet change, match-mode change, sort change, and clear
 action pushes a browser history entry whose URL carries the filter state.
-Typing in the search box is debounced, so each applied query is a separate
-state. Loading more albums and scroll position are not part of the recorded
-state.
+Typing in the search box is debounced (400 ms): the first live query in an
+editing session pushes one entry and later edits replace it, so the URL always
+matches the visible results. Enter or leaving the search field commits the
+session, and Back returns to the state before editing rather than stepping
+through every keystroke. Loading more albums and scroll position are not part
+of the recorded state.
 
 Opening an album pushes another entry. The full album summary is stored in
 `history.state` (the URL is unchanged), so Back closes the dialog and returns to

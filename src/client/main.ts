@@ -32,7 +32,7 @@ import {
 const PAGE_SIZE = 48;
 const FACET_PREVIEW = 25;
 const SKELETON_COUNT = 8;
-const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_DEBOUNCE_MS = 400;
 const STATUS_POLL_MS = 30_000;
 
 interface State {
@@ -156,6 +156,8 @@ const trackCache = new Map<string, TracksResponse>();
 let requestSequence = 0;
 let dialogSequence = 0;
 let searchTimer: number | undefined;
+let searchSessionActive = false;
+let albumAbort: AbortController | null = null;
 let retryTimer: number | undefined;
 let statusPollTimer: number | undefined;
 let suppressDialogCloseHistory = false;
@@ -374,19 +376,26 @@ async function reloadLibrary(): Promise<void> {
   if (state.reloadingLibrary) return;
 
   state.reloadingLibrary = true;
+  albumAbort?.abort();
+  const controller = new AbortController();
+  albumAbort = controller;
   requestSequence += 1;
+  searchSessionActive = false;
   loadMoreButton.disabled = true;
   updateRefreshControl();
 
   try {
     const [facets, albums] = await Promise.all([
       api.genres(),
-      api.albums({
-        q: state.q,
-        sort: state.sort,
-        offset: 0,
-        limit: PAGE_SIZE,
-      }),
+      api.albums(
+        {
+          q: state.q,
+          sort: state.sort,
+          offset: 0,
+          limit: PAGE_SIZE,
+        },
+        controller.signal,
+      ),
     ]);
 
     state.facets = facets.genres;
@@ -428,8 +437,10 @@ async function reloadLibrary(): Promise<void> {
     window.scrollTo({ top: 0 });
     void pollStatus();
   } catch (error) {
+    if (controller.signal.aborted) return;
     showError(describe(error));
   } finally {
+    if (albumAbort === controller) albumAbort = null;
     state.reloadingLibrary = false;
     loadMoreButton.disabled = false;
     albumGrid.removeAttribute('aria-busy');
@@ -662,21 +673,28 @@ function syncUrl(options: SyncUrlOptions = {}): void {
     nextState = options.album === null ? null : { album: options.album };
   }
 
-  if (options.push) history.pushState(nextState, '', url);
-  else history.replaceState(nextState, '', url);
+  if (options.push) {
+    searchSessionActive = false;
+    history.pushState(nextState, '', url);
+  } else {
+    history.replaceState(nextState, '', url);
+  }
   lastSyncedUrl = currentUrl();
 }
 
 /** Record a search/filter/sort state without changing the open album modal. */
-function pushFilterState(): void {
+function pushFilterState(): boolean {
   const url = buildFilterUrl();
-  if (url === currentUrl() && albumFromHistoryState() === null) return;
+  if (url === currentUrl() && albumFromHistoryState() === null) return false;
+  searchSessionActive = false;
   history.pushState(null, '', url);
   lastSyncedUrl = currentUrl();
+  return true;
 }
 
 function handlePopState(): void {
   window.clearTimeout(searchTimer);
+  searchSessionActive = false;
 
   const url = currentUrl();
   const filtersChanged = url !== lastSyncedUrl;
@@ -773,6 +791,9 @@ function renderStats(status: StatusResponse): void {
 /* ------------------------------------------------------------------ */
 
 async function loadAlbums(reset: boolean): Promise<number | null> {
+  albumAbort?.abort();
+  const controller = new AbortController();
+  albumAbort = controller;
   const sequence = ++requestSequence;
 
   if (reset) {
@@ -785,12 +806,15 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
   loadMoreButton.disabled = true;
 
   try {
-    const response = await api.albums({
-      q: state.q,
-      sort: state.sort,
-      offset: reset ? 0 : state.albums.length,
-      limit: PAGE_SIZE,
-    });
+    const response = await api.albums(
+      {
+        q: state.q,
+        sort: state.sort,
+        offset: reset ? 0 : state.albums.length,
+        limit: PAGE_SIZE,
+      },
+      controller.signal,
+    );
     if (sequence !== requestSequence) return null;
 
     state.total = response.total;
@@ -809,7 +833,9 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
     updateRefreshControl();
     return response.libraryVersion;
   } catch (error) {
-    if (sequence !== requestSequence) return null;
+    if (sequence !== requestSequence || controller.signal.aborted) {
+      return null;
+    }
     showError(describe(error));
     if (reset) {
       state.albums = [];
@@ -821,6 +847,7 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
     updateRefreshControl();
     return null;
   } finally {
+    if (albumAbort === controller) albumAbort = null;
     if (sequence === requestSequence) {
       albumGrid.removeAttribute('aria-busy');
       loadMoreButton.disabled = false;
@@ -2008,18 +2035,43 @@ function renderSkeletons(count = SKELETON_COUNT): void {
 /* Events                                                              */
 /* ------------------------------------------------------------------ */
 
-function applySearch(): void {
-  window.clearTimeout(searchTimer);
-  const value = searchInput.value.trim();
-  if (value === state.q) return;
-  state.q = value;
+function applySearchValue(value: string, mode: 'live' | 'commit'): void {
+  const trimmed = value.trim();
+  if (trimmed === state.q) {
+    if (mode === 'commit') searchSessionActive = false;
+    return;
+  }
+
+  state.q = trimmed;
   syncSelectionsFromQuery();
-  pushFilterState();
+
+  if (mode === 'commit') {
+    // Replace the transient live entry; otherwise start a new entry.
+    if (searchSessionActive) syncUrl();
+    else pushFilterState();
+    searchSessionActive = false;
+  } else if (searchSessionActive) {
+    syncUrl();
+  } else {
+    searchSessionActive = pushFilterState();
+  }
+
   renderFacets();
   renderRegions();
   renderSeries();
   renderActiveFilters();
   void loadAlbums(true);
+}
+
+function applySearch(): void {
+  window.clearTimeout(searchTimer);
+  applySearchValue(searchInput.value, 'live');
+}
+
+/** Enter/blur: apply pending text immediately and close the live session. */
+function commitSearch(): void {
+  window.clearTimeout(searchTimer);
+  applySearchValue(searchInput.value, 'commit');
 }
 
 function bindEvents(): void {
@@ -2040,9 +2092,10 @@ function bindEvents(): void {
   searchInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      applySearch();
+      commitSearch();
     }
   });
+  searchInput.addEventListener('blur', commitSearch);
 
   sortSelect.addEventListener('change', () => {
     if (!isSortKey(sortSelect.value) || sortSelect.value === state.sort) return;

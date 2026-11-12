@@ -43,8 +43,8 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
-function getJson<T>(url: string): Promise<T> {
-  return requestJson<T>(url);
+function getJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  return requestJson<T>(url, init);
 }
 
 function postJson<T>(url: string, body: unknown): Promise<T> {
@@ -74,13 +74,19 @@ export const api = {
 
   genres: (): Promise<GenresResponse> => getJson<GenresResponse>('/api/genres'),
 
-  albums: (request: AlbumRequest): Promise<AlbumsResponse> => {
+  albums: (
+    request: AlbumRequest,
+    signal?: AbortSignal,
+  ): Promise<AlbumsResponse> => {
     const params = new URLSearchParams();
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
     params.set('offset', String(request.offset));
     params.set('limit', String(request.limit));
-    return getJson<AlbumsResponse>(`/api/albums?${params.toString()}`);
+    return getJson<AlbumsResponse>(
+      `/api/albums?${params.toString()}`,
+      signal ? { signal } : {},
+    );
   },
 
   tracks: (key: string, query = ''): Promise<TracksResponse> => {
