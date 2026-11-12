@@ -1,9 +1,11 @@
 import type {
+  AlbumSummary,
   AlbumsResponse,
   GenresResponse,
   SessionResponse,
   SortKey,
   StatusResponse,
+  TrackSearchResponse,
   TracksResponse,
 } from '../shared/types.js';
 
@@ -88,6 +90,24 @@ export const api = {
       signal ? { signal } : {},
     );
   },
+
+  searchTracks: (
+    request: AlbumRequest,
+    signal?: AbortSignal,
+  ): Promise<TrackSearchResponse> => {
+    const params = new URLSearchParams();
+    if (request.q) params.set('q', request.q);
+    params.set('sort', request.sort);
+    params.set('offset', String(request.offset));
+    params.set('limit', String(request.limit));
+    return getJson<TrackSearchResponse>(
+      `/api/tracks?${params.toString()}`,
+      signal ? { signal } : {},
+    );
+  },
+
+  album: (key: string): Promise<AlbumSummary> =>
+    getJson<AlbumSummary>(`/api/albums/${encodeURIComponent(key)}`),
 
   tracks: (key: string, query = ''): Promise<TracksResponse> => {
     const params = new URLSearchParams();

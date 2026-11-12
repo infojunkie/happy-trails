@@ -50,6 +50,40 @@ export interface AlbumsResponse {
   libraryVersion: number;
 }
 
+/** One row in the global track search results. */
+export interface TrackSummary {
+  /** `music.id`; the id `/play/track/:id` accepts. */
+  id: number;
+  title: string;
+  /** Visible artist: track artist, falling back to the album artist. */
+  artist: string;
+  /** Individual artists parsed from `artist`. */
+  artists: string[];
+  albumArtist: string;
+  /** Opaque album key for the cover and the album dialog. */
+  albumKey: string;
+  /** Merged album title. */
+  album: string;
+  /** Raw album title, including a " // <disc label>" suffix. */
+  sourceAlbum: string;
+  year: number | null;
+  track: number | null;
+  disc: number | null;
+  duration: number | null;
+  /** Display names of the album's genres, deduplicated. */
+  genres: string[];
+  /** Country/region tags from the album, deduplicated. */
+  regions: string[];
+}
+
+export interface TrackSearchResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  tracks: TrackSummary[];
+  libraryVersion: number;
+}
+
 export interface Track {
   id: number;
   title: string;

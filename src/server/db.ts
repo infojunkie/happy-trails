@@ -59,6 +59,23 @@ export interface TrackRow {
   frequency: number | null;
 }
 
+/** One `music` row as consumed by the in-memory track index. */
+export interface TrackIndexRow {
+  id: number;
+  title: string;
+  artist: string | null;
+  album_artist: string;
+  /** Raw album title; may include a " // <disc label>" suffix. */
+  source_album: string | null;
+  composer: string | null;
+  year: number | null;
+  track: number | null;
+  disc: number | null;
+  duration: number | null;
+  /** Per-track upload date, ISO-like text. */
+  date: string | null;
+}
+
 const ALBUM_QUERY = `
   SELECT
     m.album AS album,
@@ -82,6 +99,24 @@ const ALBUM_QUERY = `
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
   GROUP BY 1, 2
+`;
+
+const TRACK_INDEX_QUERY = `
+  SELECT
+    m.id,
+    m.title,
+    m.artist,
+    ${ALBUM_ARTIST} AS album_artist,
+    m.album AS source_album,
+    m.composer,
+    m.year,
+    m.track,
+    m.disc,
+    m.duration,
+    to_char(m.date, 'YYYY-MM-DD"T"HH24:MI:SS') AS date
+  FROM ${musicTable} m
+  WHERE m.fs_online IS NOT FALSE
+  ORDER BY m.id
 `;
 
 const TRACK_QUERY = `
@@ -168,10 +203,35 @@ interface FingerprintRow {
   max_id: number;
 }
 
-/** One row per raw album title; this is the source of the in-memory index. */
-export async function loadAlbumRows(): Promise<AlbumRow[]> {
-  const result = await pool.query<AlbumRow>(ALBUM_QUERY);
-  return result.rows;
+/**
+ * Load the album aggregates and every track row from one repeatable-read
+ * snapshot. Two independent queries could otherwise straddle a library change
+ * and produce an album index whose track counts disagree with its tracks.
+ *
+ * The track result is one row per `music` row (~400k in production), so it
+ * dominates the build's peak memory.
+ */
+export async function loadLibraryRows(): Promise<{
+  albums: AlbumRow[];
+  tracks: TrackIndexRow[];
+}> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    const albums = await client.query<AlbumRow>(ALBUM_QUERY);
+    const tracks = await client.query<TrackIndexRow>(TRACK_INDEX_QUERY);
+    await client.query('COMMIT');
+    return { albums: albums.rows, tracks: tracks.rows };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // The transaction may not have started.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**

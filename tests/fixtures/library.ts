@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { Request } from 'express';
 import type { AppDependencies } from '../../src/server/app.js';
-import type { AlbumRow, TrackRow } from '../../src/server/db.js';
+import type { AlbumRow, TrackIndexRow, TrackRow } from '../../src/server/db.js';
+import { normalizeAlbumName } from '../../src/server/search.js';
 import type { DsmClient, CoverImage } from '../../src/server/dsm.js';
 import { DsmError } from '../../src/server/dsm.js';
 import { LoginRateLimiter } from '../../src/server/loginRateLimit.js';
@@ -342,6 +343,59 @@ export const fixtureTracks = new Map<string, TrackRow[]>([
   ],
 ]);
 
+/**
+ * Build one indexed track per `track_count` for every fixture album. Albums
+ * with hand-written dialog tracks reuse those titles, and the rest get
+ * deterministic filler, so `sum(tracks per album) === track_count`.
+ */
+function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
+  const tracks: TrackIndexRow[] = [];
+  let generatedId = 1_000_000;
+
+  for (const row of rows) {
+    const merged = normalizeAlbumName(row.album ?? '');
+    const key = `${merged}\u0000${row.artist}`;
+    const explicit = (fixtureTracks.get(key) ?? []).filter(
+      (track) => (track.source_album ?? '') === (row.album ?? ''),
+    );
+
+    for (let index = 0; index < row.track_count; index += 1) {
+      const source = explicit[index];
+      tracks.push(
+        source
+          ? {
+              id: source.id,
+              title: source.title,
+              artist: source.artist,
+              album_artist: source.album_artist,
+              source_album: source.source_album,
+              composer: source.composer,
+              year: source.year,
+              track: source.track,
+              disc: source.disc,
+              duration: source.duration,
+              date: row.latest,
+            }
+          : {
+              id: generatedId++,
+              title: `${row.album ?? '(Unknown Album)'} Track ${index + 1}`,
+              artist: row.track_artists?.[0] ?? row.artist,
+              album_artist: row.artist,
+              source_album: row.album,
+              composer: row.composers?.[0] ?? null,
+              year: row.year,
+              track: index + 1,
+              disc: 1,
+              duration: 180,
+              date: row.latest,
+            },
+      );
+    }
+  }
+
+  return tracks;
+}
+
 export interface FixtureOptions {
   authEnabled?: boolean;
   loginError?: Error | null;
@@ -358,6 +412,8 @@ export interface FixtureOptions {
   loginRateLimiter?: AppDependencies['loginRateLimiter'];
   /** Express "trust proxy" value; false by default in fixtures. */
   trustProxy?: boolean | number | string;
+  /** Build the fixture index at this path instead of `:memory:`. */
+  indexDbPath?: string;
 }
 
 export interface FixtureContext {
@@ -398,7 +454,12 @@ export async function createFixtureContext(
     composers: row.composers ? [...row.composers] : row.composers,
     comments: row.comments ? [...row.comments] : row.comments,
   }));
-  const index = await SqliteIndex.build(rows, 1);
+  const index = await SqliteIndex.build(
+    rows,
+    buildFixtureTrackRows(rows),
+    1,
+    options.indexDbPath,
+  );
   const status: StatusResponse = {
     ready: options.ready ?? true,
     albumCount: index.albumCount,
@@ -477,6 +538,8 @@ export async function createFixtureContext(
       regions: () => index.regions(),
       series: () => index.series(),
       queryAlbums: (query) => index.queryAlbums(query),
+      queryTracks: (query) => index.queryTracks(query),
+      albumForKey: (key) => index.albumForKey(key),
       sourceAlbumsFor: (album, artist) =>
         index.sourceAlbumsFor(album, artist),
       coverPathFor: (album, artist) => index.coverPathFor(album, artist),

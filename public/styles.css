@@ -329,6 +329,39 @@ p {
   color: var(--accent);
 }
 
+.search-mode {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.search-mode-option {
+  padding: 6px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.search-mode-option:hover,
+.search-mode-option:focus-visible {
+  color: var(--text);
+}
+
+.search-mode-option[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+}
+
 .sort-field {
   display: flex;
   flex: none;
@@ -980,6 +1013,119 @@ button.chip:hover {
 }
 
 /* ------------------------------------------------------------------ */
+/* Track results                                                       */
+/* ------------------------------------------------------------------ */
+
+.track-results {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  list-style: none;
+}
+
+.track-result {
+  display: grid;
+  grid-template-columns:
+    44px minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr)
+    auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.track-result:last-child {
+  border-bottom: 0;
+}
+
+.track-result:hover {
+  background: var(--surface-2);
+}
+
+.track-result-cover {
+  display: block;
+  width: 44px;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+}
+
+.track-result-cover .cover {
+  border-radius: 8px;
+}
+
+.track-result-cover .cover-initials {
+  font-size: 0.9rem;
+}
+
+.track-result-main {
+  min-width: 0;
+}
+
+.track-result-title {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-result-title:hover,
+.track-result-title:focus-visible {
+  color: var(--accent);
+}
+
+.track-result-artist {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-result-album {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-result-album:hover,
+.track-result-album:focus-visible {
+  color: var(--accent);
+}
+
+.track-result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.track-result-duration {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
 /* Skeletons                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -1017,6 +1163,19 @@ button.chip:hover {
 
 .skeleton-line-sm {
   width: 45%;
+}
+
+.skeleton-track {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.skeleton-thumb {
+  width: 44px;
+  border-radius: 8px;
+}
+
+.skeleton-track .skeleton-lines {
+  padding: 0;
 }
 
 .skeleton-cover::after,
@@ -1734,6 +1893,38 @@ h4.disc-heading {
     flex-basis: 100%;
     max-width: none;
   }
+
+  .track-result:not(.skeleton-track) {
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "cover main duration play"
+      "cover album tags tags";
+    row-gap: 3px;
+  }
+
+  .track-result-cover {
+    grid-area: cover;
+  }
+
+  .track-result-main {
+    grid-area: main;
+  }
+
+  .track-result-album {
+    grid-area: album;
+  }
+
+  .track-result-tags {
+    grid-area: tags;
+  }
+
+  .track-result-duration {
+    grid-area: duration;
+  }
+
+  .track-result .track-play {
+    grid-area: play;
+  }
 }
 
 @media (max-width: 620px) {
@@ -1808,6 +1999,20 @@ h4.disc-heading {
 
   .search-help-fields dd {
     margin-bottom: 2px;
+  }
+
+  .track-result:not(.skeleton-track) {
+    grid-template-columns: 38px minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "cover main duration play"
+      "cover album album album"
+      "cover tags tags tags";
+    gap: 4px 8px;
+    padding: 8px 10px;
+  }
+
+  .track-result-cover {
+    width: 38px;
   }
 }
 

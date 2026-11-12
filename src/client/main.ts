@@ -8,6 +8,7 @@ import {
   type SortKey,
   type StatusResponse,
   type Track,
+  type TrackSummary,
   type TracksResponse,
 } from '../shared/types.js';
 import { artistSegments, foldSearch, regionKey } from '../shared/text.js';
@@ -35,6 +36,8 @@ const SKELETON_COUNT = 8;
 const SEARCH_DEBOUNCE_MS = 400;
 const STATUS_POLL_MS = 30_000;
 
+type SearchMode = 'albums' | 'tracks';
+
 interface State {
   selectedGenres: string[];
   genreMode: FilterMode;
@@ -47,6 +50,7 @@ interface State {
   selectedSeries: string[];
   seriesFacets: GenreFacet[];
   totalAlbums: number;
+  totalTracks: number;
   serieQuery: string;
   serieExpanded: boolean;
   genreQuery: string;
@@ -55,8 +59,11 @@ interface State {
   regionExpanded: boolean;
   q: string;
   sort: SortKey;
+  searchMode: SearchMode;
   albums: AlbumSummary[];
   total: number;
+  tracks: TrackSummary[];
+  trackTotal: number;
   playbackEnabled: boolean;
   session: SessionResponse;
   pendingPlayUrl: string | null;
@@ -81,6 +88,7 @@ const state: State = {
   selectedSeries: [],
   seriesFacets: [],
   totalAlbums: 0,
+  totalTracks: 0,
   serieQuery: '',
   serieExpanded: false,
   genreQuery: '',
@@ -89,8 +97,11 @@ const state: State = {
   regionExpanded: false,
   q: '',
   sort: 'recent',
+  searchMode: 'albums',
   albums: [],
   total: 0,
+  tracks: [],
+  trackTotal: 0,
   playbackEnabled: false,
   session: { authenticated: false, account: null },
   pendingPlayUrl: null,
@@ -105,10 +116,14 @@ const state: State = {
 
 const searchInput = $<HTMLInputElement>('#search');
 const sortSelect = $<HTMLSelectElement>('#sort');
+const modeAlbumsButton = $<HTMLButtonElement>('#mode-albums');
+const modeTracksButton = $<HTMLButtonElement>('#mode-tracks');
 const statsEl = $('#library-stats');
 const resultSummary = $('#result-summary');
 const albumGrid = $('#album-grid');
+const trackList = $<HTMLUListElement>('#track-list');
 const emptyState = $('#empty-state');
+const emptyTitle = $('#empty-title');
 const loadMoreButton = $<HTMLButtonElement>('#load-more');
 const activeFilters = $('#active-filters');
 const genreList = $('#genre-list');
@@ -158,6 +173,7 @@ let dialogSequence = 0;
 let searchTimer: number | undefined;
 let searchSessionActive = false;
 let albumAbort: AbortController | null = null;
+let trackAbort: AbortController | null = null;
 let retryTimer: number | undefined;
 let statusPollTimer: number | undefined;
 let suppressDialogCloseHistory = false;
@@ -259,6 +275,53 @@ function renderModeControls(): void {
   }
 }
 
+/** Reflect the Albums/Tracks switch and the mode-specific result chrome. */
+function renderSearchMode(): void {
+  const tracks = state.searchMode === 'tracks';
+  modeAlbumsButton.setAttribute('aria-pressed', String(!tracks));
+  modeTracksButton.setAttribute('aria-pressed', String(tracks));
+  albumGrid.hidden = tracks;
+  trackList.hidden = !tracks;
+  emptyTitle.textContent = tracks ? 'No tracks found' : 'No albums found';
+  loadMoreButton.textContent = tracks ? 'Load more tracks' : 'Load more albums';
+  searchInput.placeholder = tracks
+    ? 'Search tracks…'
+    : 'Search the mediatheque…';
+}
+
+function setSearchMode(mode: SearchMode): void {
+  if (state.searchMode === mode) return;
+
+  state.searchMode = mode;
+  searchSessionActive = false;
+  albumAbort?.abort();
+  trackAbort?.abort();
+  renderSearchMode();
+  renderFacets();
+  renderRegions();
+  renderSeries();
+  pushFilterState();
+  window.scrollTo({ top: 0 });
+  void loadResults(true);
+}
+
+/** Load one page for the active mode. */
+function loadResults(reset: boolean): Promise<number | null> {
+  return state.searchMode === 'tracks'
+    ? loadTrackResults(reset)
+    : loadAlbums(reset);
+}
+
+function renderResults(): void {
+  if (state.searchMode === 'tracks') renderTrackResults();
+  else renderAlbums();
+}
+
+function renderCurrentSkeletons(count = SKELETON_COUNT): void {
+  if (state.searchMode === 'tracks') renderTrackSkeletons(count);
+  else renderSkeletons(count);
+}
+
 /** The facet controls mirror a query made only of facet terms. */
 function syncSelectionsFromQuery(): void {
   const parsed = parseFacetQuery(state.q);
@@ -298,7 +361,7 @@ function applyFacetSelection(): void {
   renderSeries();
   renderModeControls();
   renderActiveFilters();
-  void loadAlbums(true);
+  void loadResults(true);
 }
 
 function showError(message: string): void {
@@ -375,19 +438,24 @@ function startStatusPolling(): void {
 async function reloadLibrary(): Promise<void> {
   if (state.reloadingLibrary) return;
 
+  const tracksMode = state.searchMode === 'tracks';
   state.reloadingLibrary = true;
   albumAbort?.abort();
+  trackAbort?.abort();
   const controller = new AbortController();
-  albumAbort = controller;
+  if (tracksMode) trackAbort = controller;
+  else albumAbort = controller;
   requestSequence += 1;
   searchSessionActive = false;
   loadMoreButton.disabled = true;
   updateRefreshControl();
 
   try {
-    const [facets, albums] = await Promise.all([
-      api.genres(),
-      api.albums(
+    const facets = await api.genres();
+    let libraryVersion: number;
+
+    if (tracksMode) {
+      const response = await api.searchTracks(
         {
           q: state.q,
           sort: state.sort,
@@ -395,8 +463,24 @@ async function reloadLibrary(): Promise<void> {
           limit: PAGE_SIZE,
         },
         controller.signal,
-      ),
-    ]);
+      );
+      state.trackTotal = response.total;
+      state.tracks = response.tracks;
+      libraryVersion = response.libraryVersion;
+    } else {
+      const response = await api.albums(
+        {
+          q: state.q,
+          sort: state.sort,
+          offset: 0,
+          limit: PAGE_SIZE,
+        },
+        controller.signal,
+      );
+      state.total = response.total;
+      state.albums = response.albums;
+      libraryVersion = response.libraryVersion;
+    }
 
     state.facets = facets.genres;
     state.facetByKey = new Map(
@@ -408,17 +492,9 @@ async function reloadLibrary(): Promise<void> {
     );
     state.seriesFacets = facets.series;
     state.totalAlbums = facets.totalAlbums;
-    state.total = albums.total;
-    state.albums = albums.albums;
-    state.loadedVersion = Math.min(
-      facets.libraryVersion,
-      albums.libraryVersion,
-    );
+    state.loadedVersion = Math.min(facets.libraryVersion, libraryVersion);
     state.libraryReady = true;
-    const newestVersion = Math.max(
-      facets.libraryVersion,
-      albums.libraryVersion,
-    );
+    const newestVersion = Math.max(facets.libraryVersion, libraryVersion);
     if (
       state.serverVersion === null ||
       newestVersion > state.serverVersion
@@ -431,8 +507,10 @@ async function reloadLibrary(): Promise<void> {
     renderFacets();
     renderRegions();
     renderSeries();
-    renderAlbums();
+    renderResults();
+    renderSearchMode();
     albumGrid.removeAttribute('aria-busy');
+    trackList.removeAttribute('aria-busy');
     hideError();
     window.scrollTo({ top: 0 });
     void pollStatus();
@@ -441,9 +519,11 @@ async function reloadLibrary(): Promise<void> {
     showError(describe(error));
   } finally {
     if (albumAbort === controller) albumAbort = null;
+    if (trackAbort === controller) trackAbort = null;
     state.reloadingLibrary = false;
     loadMoreButton.disabled = false;
     albumGrid.removeAttribute('aria-busy');
+    trackList.removeAttribute('aria-busy');
     updateRefreshControl();
   }
 }
@@ -487,7 +567,11 @@ async function loadSession(): Promise<void> {
 }
 
 function refreshAlbumCards(): void {
-  if (state.albums.length > 0) renderAlbums();
+  if (state.searchMode === 'tracks') {
+    if (state.tracks.length > 0) renderTrackResults();
+  } else if (state.albums.length > 0) {
+    renderAlbums();
+  }
 }
 
 function setLoginError(message: string | null): void {
@@ -606,9 +690,11 @@ function applyFilterParams(params: URLSearchParams): void {
   state.q = (params.get('q') ?? '').slice(0, 200);
   const sort = params.get('sort');
   state.sort = isSortKey(sort) ? sort : 'recent';
+  state.searchMode = params.get('view') === 'tracks' ? 'tracks' : 'albums';
   searchInput.value = state.q;
   sortSelect.value = state.sort;
   syncSelectionsFromQuery();
+  renderSearchMode();
 }
 
 function readFilterState(): void {
@@ -656,6 +742,7 @@ function buildFilterUrl(): string {
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
   if (state.sort !== 'recent') params.set('sort', state.sort);
+  if (state.searchMode === 'tracks') params.set('view', 'tracks');
   const query = params.toString();
   return query ? `${location.pathname}?${query}` : location.pathname;
 }
@@ -717,13 +804,13 @@ function handlePopState(): void {
 
   if (filtersChanged) {
     window.scrollTo({ top: 0 });
-    void loadAlbums(true);
+    void loadResults(true);
   }
 }
 
 async function loadLibrary(): Promise<void> {
   window.clearTimeout(retryTimer);
-  renderSkeletons();
+  renderCurrentSkeletons();
   setSummary('Loading library…');
 
   try {
@@ -737,7 +824,7 @@ async function loadLibrary(): Promise<void> {
     updateRefreshControl();
 
     if (!status.ready) {
-      renderSkeletons(0);
+      renderCurrentSkeletons(0);
       setSummary('Waiting for the library…');
       showError(
         status.error
@@ -764,14 +851,14 @@ async function loadLibrary(): Promise<void> {
     renderRegions();
     renderSeries();
     hideError();
-    const albumsVersion = await loadAlbums(true);
-    if (albumsVersion !== null) {
-      state.loadedVersion = Math.min(facetsVersion, albumsVersion);
+    const resultsVersion = await loadResults(true);
+    if (resultsVersion !== null) {
+      state.loadedVersion = Math.min(facetsVersion, resultsVersion);
     }
     updateRefreshControl();
   } catch (error) {
     state.libraryReady = false;
-    renderSkeletons(0);
+    renderCurrentSkeletons(0);
     setSummary('Unable to load the library');
     showError(describe(error));
     updateRefreshControl();
@@ -780,6 +867,8 @@ async function loadLibrary(): Promise<void> {
 }
 
 function renderStats(status: StatusResponse): void {
+  state.totalAlbums = status.albumCount;
+  state.totalTracks = status.trackCount;
   statsEl.textContent = `${formatCount(status.albumCount)} albums · ${formatCount(status.trackCount)} tracks`;
   statsEl.title = status.lastRefreshed
     ? `Library indexed ${formatDateTime(status.lastRefreshed)}`
@@ -865,12 +954,99 @@ function renderAlbums(): void {
   renderActiveFilters();
 }
 
+async function loadTrackResults(reset: boolean): Promise<number | null> {
+  trackAbort?.abort();
+  const controller = new AbortController();
+  trackAbort = controller;
+  const sequence = ++requestSequence;
+
+  if (reset) {
+    state.tracks = [];
+    loadMoreButton.hidden = true;
+    emptyState.hidden = true;
+    renderTrackSkeletons();
+  }
+  setSummary(
+    reset ? 'Loading…' : `Loading more of ${formatCount(state.trackTotal)}…`,
+  );
+  loadMoreButton.disabled = true;
+
+  try {
+    const response = await api.searchTracks(
+      {
+        q: state.q,
+        sort: state.sort,
+        offset: reset ? 0 : state.tracks.length,
+        limit: PAGE_SIZE,
+      },
+      controller.signal,
+    );
+    if (sequence !== requestSequence) return null;
+
+    state.trackTotal = response.total;
+    state.tracks = reset
+      ? response.tracks
+      : [...state.tracks, ...response.tracks];
+    state.libraryReady = true;
+    if (
+      state.serverVersion === null ||
+      response.libraryVersion > state.serverVersion
+    ) {
+      state.serverVersion = response.libraryVersion;
+    }
+    renderTrackResults();
+    hideError();
+    updateRefreshControl();
+    return response.libraryVersion;
+  } catch (error) {
+    if (sequence !== requestSequence || controller.signal.aborted) {
+      return null;
+    }
+    showError(describe(error));
+    if (reset) {
+      state.tracks = [];
+      state.trackTotal = 0;
+      renderTrackResults();
+      // An API failure is not the same thing as an empty result set.
+      emptyState.hidden = true;
+    }
+    updateRefreshControl();
+    return null;
+  } finally {
+    if (trackAbort === controller) trackAbort = null;
+    if (sequence === requestSequence) {
+      trackList.removeAttribute('aria-busy');
+      loadMoreButton.disabled = false;
+      updateRefreshControl();
+    }
+  }
+}
+
+function renderTrackResults(): void {
+  trackList.replaceChildren(...state.tracks.map(renderTrackResult));
+  emptyState.hidden = state.tracks.length > 0;
+  loadMoreButton.hidden =
+    state.tracks.length === 0 || state.tracks.length >= state.trackTotal;
+  updateSummary();
+  renderActiveFilters();
+}
+
 function updateSummary(): void {
   const filtered =
     state.q.length > 0 ||
     state.selectedGenres.length > 0 ||
     state.selectedRegions.length > 0 ||
     state.selectedSeries.length > 0;
+
+  if (state.searchMode === 'tracks') {
+    setSummary(
+      filtered
+        ? `${formatCount(state.trackTotal)} of ${formatCount(state.totalTracks)} tracks`
+        : `${formatCount(state.trackTotal)} tracks`,
+    );
+    return;
+  }
+
   setSummary(
     filtered
       ? `${formatCount(state.total)} of ${formatCount(state.totalAlbums)} albums`
@@ -888,7 +1064,10 @@ function albumMeta(album: AlbumSummary): string {
   return parts.join(' · ');
 }
 
-function createCover(album: AlbumSummary, extraClass = ''): HTMLElement {
+function createCover(
+  album: Pick<AlbumSummary, 'key' | 'album'>,
+  extraClass = '',
+): HTMLElement {
   const cover = el('span', {
     class: `cover ${extraClass}`.trim(),
     'aria-hidden': 'true',
@@ -994,7 +1173,7 @@ function navigateToSearch(value: string): void {
   renderSeries();
   renderActiveFilters();
   window.scrollTo({ top: 0 });
-  void loadAlbums(true);
+  void loadResults(true);
 }
 
 function clearSerie(): void {
@@ -1145,6 +1324,152 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
 }
 
 /* ------------------------------------------------------------------ */
+/* Tracks                                                              */
+/* ------------------------------------------------------------------ */
+
+function createGenreChip(name: string): HTMLElement {
+  const key = genreKey(name);
+  const selected = selectedGenreKeys().has(key);
+  const chip = el(
+    'button',
+    {
+      class: `chip chip-small${selected ? ' is-active' : ''}`,
+      type: 'button',
+      title: `Filter by ${name}`,
+      'aria-pressed': selected ? 'true' : 'false',
+    },
+    el('span', { text: name }),
+  );
+  chip.addEventListener('click', () => activateGenre(name));
+  return chip;
+}
+
+function createRegionChip(name: string): HTMLElement {
+  const key = regionKey(name);
+  const selected = selectedRegionKeys().has(key);
+  const chip = el(
+    'button',
+    {
+      class: `chip chip-small chip-region${selected ? ' is-active' : ''}`,
+      type: 'button',
+      title: `Filter by region: ${name}`,
+      'aria-pressed': selected ? 'true' : 'false',
+    },
+    el('span', { text: name }),
+  );
+  chip.addEventListener('click', () => activateRegion(name));
+  return chip;
+}
+
+/** Open the album dialog for a track result with no track-list filter. */
+async function openAlbumFromTrack(track: TrackSummary): Promise<void> {
+  try {
+    const album = await api.album(track.albumKey);
+    await openAlbum(album, { query: '' });
+  } catch (error) {
+    showError(describe(error));
+  }
+}
+
+function renderTrackResult(track: TrackSummary): HTMLElement {
+  const openLabel = `Open ${track.album} by ${track.albumArtist}`;
+
+  const coverButton = el(
+    'button',
+    {
+      class: 'track-result-cover',
+      type: 'button',
+      'aria-haspopup': 'dialog',
+      'aria-label': openLabel,
+    },
+    createCover({ key: track.albumKey, album: track.album }),
+  );
+  coverButton.addEventListener('click', () => void openAlbumFromTrack(track));
+
+  const titleButton = el('button', {
+    class: 'track-result-title',
+    type: 'button',
+    text: track.title,
+    'aria-haspopup': 'dialog',
+    'aria-label': openLabel,
+  });
+  titleButton.addEventListener('click', () => void openAlbumFromTrack(track));
+
+  const albumButton = el('button', {
+    class: 'track-result-album link-like',
+    type: 'button',
+    text: track.album,
+    title:
+      track.sourceAlbum && track.sourceAlbum !== track.album
+        ? track.sourceAlbum
+        : track.album,
+    'aria-haspopup': 'dialog',
+    'aria-label': openLabel,
+  });
+  albumButton.addEventListener('click', () => void openAlbumFromTrack(track));
+
+  const tags: HTMLElement[] = [];
+  for (const name of track.genres.slice(0, 2)) {
+    tags.push(createGenreChip(name));
+  }
+  for (const name of track.regions.slice(0, 2)) {
+    tags.push(createRegionChip(name));
+  }
+  const hiddenTags = [
+    ...track.genres.slice(2),
+    ...track.regions.slice(2),
+  ];
+  if (hiddenTags.length > 0) {
+    tags.push(
+      el('span', {
+        class: 'chip chip-more',
+        title: hiddenTags.join(', '),
+        text: `+${hiddenTags.length} more`,
+      }),
+    );
+  }
+
+  const play =
+    state.playbackEnabled && state.session.authenticated
+      ? el(
+          'a',
+          {
+            class: 'track-play',
+            href: `/play/track/${track.id}`,
+            target: '_blank',
+            rel: 'noopener',
+            title: `Play ${track.title} in Audio Station`,
+            'aria-label': `Play ${track.title} in Audio Station`,
+          },
+          el('span', { 'aria-hidden': 'true', text: '▶' }),
+        )
+      : null;
+
+  return el(
+    'li',
+    { class: 'track-result' },
+    coverButton,
+    el(
+      'div',
+      { class: 'track-result-main' },
+      titleButton,
+      el(
+        'span',
+        { class: 'track-result-artist' },
+        ...artistNodes(track.artists, track.artist),
+      ),
+    ),
+    albumButton,
+    el('div', { class: 'track-result-tags' }, ...tags),
+    el('span', {
+      class: 'track-result-duration',
+      text: formatDuration(track.duration),
+    }),
+    ...(play ? [play] : []),
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Genre facets                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -1203,6 +1528,10 @@ function buildFacetRows(
         el('span', {
           class: 'facet-count',
           text: formatCount(facet.albumCount),
+          title:
+            state.searchMode === 'tracks'
+              ? 'Count of matching albums'
+              : undefined,
         }),
       );
     });
@@ -1275,6 +1604,10 @@ function renderSeries(): void {
       el('span', {
         class: 'facet-count',
         text: formatCount(facet.albumCount),
+        title:
+          state.searchMode === 'tracks'
+            ? 'Count of matching albums'
+            : undefined,
       }),
     );
   });
@@ -1398,7 +1731,7 @@ function clearFilters(): void {
   renderRegions();
   renderSeries();
   renderActiveFilters();
-  void loadAlbums(true);
+  void loadResults(true);
 }
 
 function renderActiveFilters(): void {
@@ -1500,14 +1833,19 @@ function renderActiveFilters(): void {
 
 async function openAlbum(
   album: AlbumSummary,
-  options: { recordHistory?: boolean } = {},
+  options: { recordHistory?: boolean; query?: string } = {},
 ): Promise<void> {
   if (options.recordHistory !== false) {
     syncUrl({ push: true, album });
   }
 
   const sequence = ++dialogSequence;
-  const query = state.q.trim();
+  // In Tracks mode the top search filters track rows, not the album's track
+  // list, so the dialog opens unfiltered. This also covers reopening a dialog
+  // from history after a reload.
+  const query =
+    options.query ??
+    (state.searchMode === 'tracks' ? '' : state.q.trim());
   const cacheKey = `${album.key}\u0000${query}`;
   state.dialogShowAllTracks = query.length === 0;
 
@@ -2031,6 +2369,30 @@ function renderSkeletons(count = SKELETON_COUNT): void {
   albumGrid.replaceChildren(...cards);
 }
 
+function renderTrackSkeletons(count = SKELETON_COUNT): void {
+  if (count === 0) {
+    trackList.replaceChildren();
+    trackList.removeAttribute('aria-busy');
+    return;
+  }
+
+  trackList.setAttribute('aria-busy', 'true');
+  const rows = Array.from({ length: count }, () =>
+    el(
+      'li',
+      { class: 'track-result skeleton-track', 'aria-hidden': 'true' },
+      el('div', { class: 'skeleton-cover skeleton-thumb' }),
+      el(
+        'div',
+        { class: 'skeleton-lines' },
+        el('div', { class: 'skeleton-line skeleton-line-lg' }),
+        el('div', { class: 'skeleton-line skeleton-line-sm' }),
+      ),
+    ),
+  );
+  trackList.replaceChildren(...rows);
+}
+
 /* ------------------------------------------------------------------ */
 /* Events                                                              */
 /* ------------------------------------------------------------------ */
@@ -2060,7 +2422,7 @@ function applySearchValue(value: string, mode: 'live' | 'commit'): void {
   renderRegions();
   renderSeries();
   renderActiveFilters();
-  void loadAlbums(true);
+  void loadResults(true);
 }
 
 function applySearch(): void {
@@ -2101,8 +2463,11 @@ function bindEvents(): void {
     if (!isSortKey(sortSelect.value) || sortSelect.value === state.sort) return;
     state.sort = sortSelect.value;
     pushFilterState();
-    void loadAlbums(true);
+    void loadResults(true);
   });
+
+  modeAlbumsButton.addEventListener('click', () => setSearchMode('albums'));
+  modeTracksButton.addEventListener('click', () => setSearchMode('tracks'));
 
   genreSearch.addEventListener('input', () => {
     state.genreQuery = genreSearch.value;
@@ -2239,14 +2604,14 @@ function bindEvents(): void {
       renderRegions();
       renderSeries();
       renderActiveFilters();
-      void loadAlbums(true);
+      void loadResults(true);
       return;
     }
 
     if (target.closest('[data-clear-filters]')) clearFilters();
   });
 
-  loadMoreButton.addEventListener('click', () => void loadAlbums(false));
+  loadMoreButton.addEventListener('click', () => void loadResults(false));
 
   $('#dismiss-error').addEventListener('click', hideError);
   $('#empty-clear').addEventListener('click', clearFilters);

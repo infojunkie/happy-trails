@@ -1,14 +1,48 @@
-# In-memory SQLite search index
+# SQLite search index
 
-The album catalogue is aggregated from PostgreSQL and written to an in-memory
-SQLite database at startup (and whenever the change fingerprint moves). SQLite
-replaces the previous JavaScript arrays and `Map`s; query logic now lives in
-SQL. The API keeps its existing fields and adds a separate `regions` facet and
-album field.
+The album catalogue and every track row are aggregated from PostgreSQL and
+written to a SQLite database at startup (and whenever the change fingerprint
+moves). SQLite replaces the previous JavaScript arrays and `Map`s; query logic
+now lives in SQL. The API keeps its existing fields and adds a separate
+`regions` facet and album field, plus a track-level search mode.
 
 The implementation is in [`src/server/sqlite.ts`](../src/server/sqlite.ts);
 normalisation and album keys are in [`src/server/search.ts`](../src/server/search.ts);
 country/region detection is in [`src/server/regions.ts`](../src/server/regions.ts).
+
+## Storage
+
+`INDEX_DB_DIR` controls where the database lives:
+
+- A directory path (the default is `$TMPDIR/happy-trails-index`, usually
+  `/tmp/happy-trails-index`) builds a file-backed database.
+- `:memory:` keeps the database in the Node process heap and skips all file
+  handling. Tests and fixtures use this mode by default via the `databasePath`
+  argument of `SqliteIndex.build()`.
+
+`Library.indexDatabasePath()` names each build
+`happy-trails-index-<pid>-<version>-<uuid>.sqlite` and creates the directory
+with mode `0700` if needed. `prepareIndexStorage()` runs once at startup,
+logs the storage mode, and removes stale `happy-trails-index-*` files from a
+previous process. The directory is treated as dedicated to one live server; do
+not point two running instances at the same directory.
+
+The build writes to a new file while the old index keeps answering requests.
+When the build succeeds, `Library` swaps the connection and calls `close()` on
+the previous index, which closes and deletes its file. A failed build closes
+and deletes the partial file and leaves the previous index in place. Because
+the file is disposable, the build uses `journal_mode = MEMORY` and
+`synchronous = OFF`; no WAL or journal sidecar files are left behind.
+
+Use a local filesystem. SMB/NFS mounts do not provide the POSIX locking and
+file semantics SQLite expects. Mount the containing **directory**, not a
+single `.sqlite` file, because every rebuild creates a new file. See the
+[Docker and non-Docker storage guidance](../README.md#index-storage) in the
+README for volume layout, permissions, and disk sizing.
+
+Measured on a 410k-track library: ~353 MB on disk, ~25 s total build, ~530 MB
+peak build RSS, and ~75 MB steady process RSS (the OS page cache holds the file
+and is reclaimable). `:memory:` mode peaks around 915 MB RSS.
 
 ## Schema
 
@@ -27,7 +61,6 @@ CREATE TABLE albums (
   search_album TEXT NOT NULL,         -- folded album title + source titles
   search_artist TEXT NOT NULL,        -- folded album, parsed, and track artists
   search_source TEXT NOT NULL,        -- folded raw source titles
-  search_track_artist TEXT NOT NULL,  -- folded track-level artists
   search_composer TEXT NOT NULL,      -- folded composer tags
   album_rank  INTEGER NOT NULL,       -- Intl.Collator rank for album
   artist_rank INTEGER NOT NULL,       -- Intl.Collator rank for artist
@@ -95,29 +128,74 @@ CREATE TABLE album_regions (
   PRIMARY KEY (album_id, position)
 ) STRICT;
 
+CREATE TABLE tracks (
+  id              INTEGER PRIMARY KEY,   -- music.id
+  album_id        INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+  title           TEXT NOT NULL,
+  artist          TEXT,                  -- raw track artist; NULL -> album artist
+  source_album    TEXT NOT NULL,         -- raw title, e.g. "X // Bonus Tracks"
+  year            INTEGER,
+  disc            INTEGER,
+  track           INTEGER,
+  duration        INTEGER,
+  date            TEXT,                  -- per-track upload date
+  search_title    TEXT NOT NULL,
+  search_artist   TEXT NOT NULL,         -- folded track artist + album artist
+  search_source   TEXT NOT NULL,
+  search_composer TEXT NOT NULL,
+  artist_rank     INTEGER NOT NULL,      -- visible artist, for sorting
+  album_rank      INTEGER NOT NULL       -- copied from albums
+) STRICT;
+
+CREATE INDEX tracks_artist_order
+  ON tracks(artist_rank, album_rank, disc, track, id);
+CREATE INDEX tracks_album_order
+  ON tracks(album_rank, disc, track, id);
+CREATE INDEX tracks_date_order
+  ON tracks(date DESC, album_rank, disc, track, id);
+CREATE INDEX tracks_year_order
+  ON tracks(year DESC, album_rank, disc, track, id);
+CREATE INDEX tracks_by_album ON tracks(album_id);
+
 CREATE VIRTUAL TABLE album_search USING fts5(
   search_text,
   search_album,
   search_artist,
   search_source,
-  search_track_artist,
   search_composer,
   content = 'albums',
   content_rowid = 'id',
   tokenize = 'trigram'
 );
+
+CREATE VIRTUAL TABLE track_search USING fts5(
+  search_title,
+  search_artist,
+  search_source,
+  search_composer,
+  content = 'tracks',
+  content_rowid = 'id',
+  tokenize = 'trigram'
+);
 ```
 
-`album_search` is an external-content FTS5 table: the text is stored once in
-the `albums` columns, and FTS5 maintains the inverted index. Triggers are
-created after the bulk load and `album_search` is populated with a single
-`'rebuild'` command, which is substantially faster than indexing row by row.
+`album_search` and `track_search` are external-content FTS5 tables: the text
+is stored once in the `albums`/`tracks` columns, and FTS5 maintains the
+inverted index. Triggers are created after the bulk load and each table is
+populated with a single `'rebuild'` command, which is substantially faster than
+indexing row by row.
 
-The separate folded columns are what make fielded search possible. `album`
-includes the merged title and all raw source titles; `source` contains only the
-raw titles; `artist` combines the effective album artist, parsed artists, and
-track-level artists; `trackartist` contains only the track-level names;
-`composer` contains the distinct composer tag values from the tracks.
+The separate folded columns are what make fielded search possible. On the album
+side, `album` includes the merged title and all raw source titles; `source`
+contains only the raw titles; `artist` combines the effective album artist,
+parsed artists, and track-level artists; `composer` contains the distinct
+composer tag values from the tracks.
+
+The track table stores only per-track text: `title`; `artist` (track artist
+plus album artist); `source` (this track's raw source title); and `composer`.
+Album title, genre, region, and series terms resolve through the album index and
+mapping tables by `album_id`, so ~400k track rows do not repeat album-level
+text.
 
 Series are stored in `album_series` rather than a folded text column.
 `serie:` (alias `label:`) matches `album_series.serie_key` exactly, so query
@@ -204,12 +282,14 @@ SELECT a.key, a.album, a.artist, a.year, a.track_count, a.duration, a.latest
 `search_text` contains the merged album title, the effective album artist, all
 parsed artists, every raw source title, every distinct track-level artist,
 composer tag, genre tag, region tag, and series value.
-Fielded terms target `search_album`, `search_artist`, `search_source`,
-`search_track_artist`, or `search_composer` instead. `genre:`, `region:`, and
-`serie:` are categorical and match `album_genres` / `album_regions` /
-`album_series` exactly, so their totals agree with the sidebar facet counts.
-Bare terms target `search_text`. A plain list of keywords is parsed as one
-quoted phrase; explicit `AND`/`OR` terms stay independent.
+Fielded terms target `search_album`, `search_artist`, `search_source`, or
+`search_composer` instead. `track:` is resolved against `track_search` and an
+`EXISTS` over `tracks.album_id`, so it returns albums containing a matching
+track. `genre:`, `region:`, and `serie:` are categorical and match
+`album_genres` / `album_regions` / `album_series` exactly, so their totals agree
+with the sidebar facet counts. Bare terms target `search_text`. A plain list of
+keywords is parsed as one quoted phrase; explicit `AND`/`OR` terms stay
+independent.
 
 ### Genre, region, and series terms
 
@@ -228,6 +308,55 @@ WHERE EXISTS (
 Region terms use `album_regions`/`region_key` and the folded region key; series
 terms use `album_series`/`serie_key`. The sidebar facet counts come from the
 grouped queries below.
+
+### Track search
+
+`queryTracks()` reuses the same parser, folding, materialized CTEs, and boolean
+composition against `tracks`. Per-track terms use `track_search` columns:
+`track:` targets `search_title`, `artist:` targets `search_artist` (which
+contains both the track artist and the album artist), `source:` targets
+`search_source`, and `composer:` targets `search_composer`.
+
+Bare/`all` terms are an OR of the four track columns, the album title (via the
+album `search_album` column), and album-level genre/region/series names. The
+latter use folded `{key, name}` lists cached once per build, which preserves
+substring matching without storing per-track tag text. Album terms are resolved
+by `t.album_id`:
+
+```sql
+-- t.album_id IN (SELECT rowid FROM album_term_0)  -- album title CTE
+EXISTS (
+  SELECT 1 FROM album_genres ag
+   WHERE ag.album_id = t.album_id AND ag.genre_key = ?
+)
+```
+
+Keeping genre/region/serie album-level means the sidebar's `albumCount` is the
+same number in both modes; the UI labels it “Count of matching albums” in
+Tracks mode.
+
+The row query joins the album for identity and display pills:
+
+```sql
+SELECT t.id, t.title, al.key AS album_key, al.album,
+       COALESCE(NULLIF(trim(t.artist), ''), al.artist) AS artist,
+       al.artist AS album_artist,
+       t.source_album, t.year, t.disc, t.track, t.duration
+  FROM tracks t
+  JOIN albums al ON al.id = t.album_id
+ ORDER BY t.date DESC, t.album_rank, t.disc, t.track, t.id
+ LIMIT ? OFFSET ?;
+```
+
+The four sort keys reuse the album meanings: `recent` is the per-track upload
+date, `artist` is the visible artist, `album` is the album rank then disc/track,
+and `year` is the track year.
+
+On the 410k-track reference library, selective fielded track queries answer in
+roughly 25–45 ms, exact album-level facet filters in 25–50 ms, and a broad bare
+term such as `jazz` (about 100k tracks) in roughly 220 ms. The bare-term
+branches are materialized as one `UNION` CTE; composing them as correlated
+`EXISTS` subqueries made the same query take several seconds.
 
 ### Genre, region, and series facets
 
@@ -263,12 +392,13 @@ kind first; it determines every other change.
 
 The split is encoded in
 [`src/server/searchQuery.ts`](../src/server/searchQuery.ts): only substring
-fields appear in `SEARCH_FIELD_COLUMNS` (a partial map). In
-[`src/server/sqlite.ts`](../src/server/sqlite.ts), `termSql()` has an explicit
-branch for each exact field that performs the mapping-table lookup; exact
-fields must never fall through to the FTS path.
-[`src/server/trackSearch.ts`](../src/server/trackSearch.ts) mirrors the same
-split for per-track filtering.
+fields appear in `SEARCH_FIELD_COLUMNS` (a partial map for the album index). In
+[`src/server/sqlite.ts`](../src/server/sqlite.ts), `termSql()` in `queryAlbums()`
+and `queryTracks()` has an explicit branch for each exact field that performs
+the mapping-table lookup; exact fields must never fall through to the FTS path.
+Album-level exact fields work in track mode through `t.album_id` without extra
+storage. [`src/server/trackSearch.ts`](../src/server/trackSearch.ts) mirrors
+the same split for per-track dialog filtering.
 
 A useful test: if the sidebar shows a count for the field, it should be exact,
 because the count is computed from the same keys as the query. Substring
@@ -278,21 +408,23 @@ matching would make the query total larger than the facet count.
 
 1. **Parser**: add the field to `SEARCH_FIELDS` in
    [`searchQuery.ts`](../src/server/searchQuery.ts), add its aliases to
-   `FIELD_ALIASES`, and map it to a SQLite column in `SEARCH_FIELD_COLUMNS`.
+   `FIELD_ALIASES`, and map it to a SQLite column in `SEARCH_FIELD_COLUMNS` for
+   album mode and to a branch in `queryTracks()` for track mode.
 2. **Schema and FTS**: in [`sqlite.ts`](../src/server/sqlite.ts), add a folded
-   `search_<field> TEXT NOT NULL` column to `albums`, add it to the
-   `album_search` FTS5 column list, and add it to every trigger column
-   list/value in `TRIGGER_SQL`, the bulk `INSERT INTO albums(...)` statement,
-   and the bound values. Bump `schema_version` and `PRAGMA user_version`.
-3. **Build**: in the per-album loop, compute
+   `search_<field> TEXT NOT NULL` column to `albums` and/or `tracks`, add it to
+   the matching FTS5 column list, and add it to every trigger column
+   list/value in `TRIGGER_SQL`, the bulk `INSERT` statement, and the bound
+   values. Bump `schema_version` and `PRAGMA user_version`.
+3. **Build**: in the per-album and/or per-track loop, compute
    `const searchField = foldSearch(values.join(' '))` and insert it. Include
-   the raw values in `searchText` if bare terms should match the field too.
+   the raw values in the mode's `all` text if bare terms should match the field
+   too.
 4. **Track filter**: `TrackFields` is `Record<SearchField, string>`, so
    TypeScript forces a value. Add `field: foldSearch(...)` in `trackFields()`;
    `matchesNode()` then uses the normal substring path automatically.
-5. **Tests/docs**: add parser, search, and API tests; update the search syntax
-   table and the help popup. No mapping table or facet count is needed unless
-   the field is also browsed as a facet.
+5. **Tests/docs**: add parser, search, and API tests in both modes; update the
+   search syntax table and the help popup. No mapping table or facet count is
+   needed unless the field is also browsed as a facet.
 
 ### Exact field and facet
 
@@ -421,33 +553,46 @@ album listing's correlated subquery returns them as a JSON array.
 artists, collecting composer tags, extracting bracketed/braced series labels,
 and detecting recurring plain-title series), then:
 
-1. Creates a fresh `:memory:` database and schema.
-2. Inserts genres, regions, series, albums, parsed artists, source titles,
+1. `loadLibraryRows()` runs the album aggregate and the per-track query in one
+   `REPEATABLE READ` transaction, so both views come from the same snapshot.
+2. Creates a fresh database at the configured path (or `:memory:`) and the
+   schema.
+3. Inserts genres, regions, series, albums, parsed artists, source titles,
    comments, and the tag/series mappings in one transaction, yielding to the
-   event loop between chunks.
-3. Calculates ranks and stores build metadata.
-4. Creates the FTS triggers and rebuilds `album_search`.
-5. Returns the database; `Library` swaps it in and closes the previous one.
+   event loop between chunks. It retains an album-key → id/rank map.
+4. Inserts every track row, mapping each raw album title + album artist to its
+   merged album, then verifies that the inserted track count equals the sum of
+   the album track counts.
+5. Calculates ranks (including the track artist ranks) and stores build
+   metadata.
+6. Creates the FTS triggers and rebuilds `album_search` and `track_search`.
+   FTS5 `optimize` plus `VACUUM` was measured at ~15 MB saved for ~2 s of
+   build time, so the build does not run them.
+7. Returns the database; `Library` swaps it in and closes the previous one
+   (deleting its file when file-backed).
 
 The old database stays readable throughout the rebuild, so requests are served
-without a gap. A failed build leaves the previous index in place and is
-reported through `/api/status`.
+without a gap. A failed build leaves the previous index in place, deletes any
+partial file, and is reported through `/api/status`.
 
 ## Current boundaries
 
-- Tracks are still read from PostgreSQL on demand; only album-level search is
-  in SQLite. The next likely step is a `tracks` table (with a track FTS index)
-  for track search and track-level facets.
+- Track genre/region/series filters and sidebar counts are deliberately
+  album-level. Per-track tag storage and track-level facet counts would be a
+  larger schema change; `track:` is the per-track text field.
 - The database is rebuilt in full. Incremental updates would need to consume
   the change stream or a tighter fingerprint and apply upserts; the FTS
   triggers are already in place for row-level updates.
-- The whole build runs in the main thread. Moving it to a worker thread (or
-  streaming PostgreSQL rows and inserting directly) would reduce the build
-  peak; the current 33k-album dataset settles around 370 MB RSS, including the
-  84 MB SQLite database.
-- Search covers album titles, source titles, and artist names. Track titles are
-  not in the index yet; a future `tracks` FTS table would add `track:` as a
-  field.
+- The whole build runs in the main thread, and the ~400k track rows are held in
+  memory while the album aggregation runs. Measured on a 410k-track library:
+  353 MB on disk, ~25 s total build, ~530 MB peak build RSS, and ~75 MB steady
+  process RSS; `:memory:` mode peaks around 915 MB. The old snapshot stays
+  alive during a rebuild, so a change-triggered rebuild uses roughly twice the
+  storage (two files on disk or two databases in memory). Streaming and
+  inserting track rows in chunks would reduce the build peak; the FTS tables
+  dominate the steady database size.
+- Track sorting offers `recent`, `artist`, `album`, and `year`; there is no
+  track-title sort and therefore no `title_rank`.
 - The expression parser supports `AND`, `OR`, implicit AND, parentheses, and
   quoted phrases. `NOT`/negation is not implemented.
 - Region detection is exact-tag only. A future pass could split compound tags

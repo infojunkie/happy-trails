@@ -31,8 +31,9 @@ test('composer terms narrow the track list', () => {
   ]);
 });
 
-test('track artist, source, album, and bare terms use per-track fields', () => {
-  assert.deepEqual(matches('trackartist:clapton'), [
+test('track title, artist, source, album, and bare terms use per-track fields', () => {
+  assert.deepEqual(matches('track:"guitar"'), ['While My Guitar Gently Weeps']);
+  assert.deepEqual(matches('artist:clapton'), [
     'While My Guitar Gently Weeps',
   ]);
   assert.deepEqual(matches('source:"bonus tracks"'), [
@@ -60,11 +61,11 @@ test('genre and region terms use the track genre tags', () => {
 });
 
 test('boolean expressions are evaluated per track', () => {
-  assert.deepEqual(matches('composer:harrison OR trackartist:clapton'), [
+  assert.deepEqual(matches('composer:harrison OR artist:clapton'), [
     'Something',
     'While My Guitar Gently Weeps',
   ]);
-  assert.deepEqual(matches('composer:harrison trackartist:clapton'), [
+  assert.deepEqual(matches('composer:harrison artist:clapton'), [
     'While My Guitar Gently Weeps',
   ]);
   assert.deepEqual(
