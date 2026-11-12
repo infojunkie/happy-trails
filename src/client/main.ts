@@ -1244,10 +1244,10 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
     }),
   );
 
-  const genreChips: HTMLElement[] = [];
+  const tags = el('div', { class: 'album-genres tag-list' });
 
   if (state.playbackEnabled && state.session.authenticated) {
-    genreChips.push(
+    tags.append(
       el(
         'a',
         {
@@ -1264,62 +1264,17 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
     );
   }
 
-  const shownGenres = album.genres.slice(0, 3);
-  for (const name of shownGenres) {
-    const key = genreKey(name);
-    const chip = el(
-      'button',
-      {
-        class: 'chip chip-small',
-        type: 'button',
-        title: `Filter by ${name}`,
-        'aria-pressed': selectedGenreKeys().has(key) ? 'true' : 'false',
-      },
-      el('span', { text: name }),
-    );
-    if (selectedGenreKeys().has(key)) chip.classList.add('is-active');
-    chip.addEventListener('click', () => activateGenre(name));
-    genreChips.push(chip);
-  }
-
-  const shownRegions = album.regions.slice(0, 2);
-  for (const name of shownRegions) {
-    const key = regionKey(name);
-    const chip = el(
-      'button',
-      {
-        class: 'chip chip-small chip-region',
-        type: 'button',
-        title: `Filter by region: ${name}`,
-        'aria-pressed': selectedRegionKeys().has(key) ? 'true' : 'false',
-      },
-      el('span', { text: name }),
-    );
-    if (selectedRegionKeys().has(key)) chip.classList.add('is-active');
-    chip.addEventListener('click', () => activateRegion(name));
-    genreChips.push(chip);
-  }
-
-  const hiddenTags = [
-    ...album.genres.slice(shownGenres.length),
-    ...album.regions.slice(shownRegions.length),
-  ];
-  if (hiddenTags.length > 0) {
-    genreChips.push(
-      el('span', {
-        class: 'chip chip-more',
-        title: hiddenTags.join(', '),
-        text: `+${hiddenTags.length} more`,
-      }),
-    );
-  }
+  appendTagChips(tags, album.genres, album.regions, {
+    genres: 3,
+    regions: 2,
+  });
 
   return el(
     'article',
     { class: 'album-card' },
     coverButton,
     info,
-    el('div', { class: 'album-genres' }, ...genreChips),
+    tags,
   );
 }
 
@@ -1359,6 +1314,64 @@ function createRegionChip(name: string): HTMLElement {
   );
   chip.addEventListener('click', () => activateRegion(name));
   return chip;
+}
+
+interface TagLimits {
+  genres: number;
+  regions: number;
+}
+
+/**
+ * Append genre and region chips to a container, hiding the overflow behind a
+ * +N button. The container needs the `tag-list` class so the `chip-extra`
+ * chips can be revealed by toggling `is-expanded`.
+ */
+function appendTagChips(
+  container: HTMLElement,
+  genres: readonly string[],
+  regions: readonly string[],
+  limits: TagLimits,
+): void {
+  let hidden = 0;
+  const append = (chip: HTMLElement, visible: boolean): void => {
+    if (!visible) {
+      chip.classList.add('chip-extra');
+      hidden += 1;
+    }
+    container.append(chip);
+  };
+
+  genres.forEach((name, index) => {
+    append(createGenreChip(name), index < limits.genres);
+  });
+  regions.forEach((name, index) => {
+    append(createRegionChip(name), index < limits.regions);
+  });
+
+  if (hidden === 0) return;
+
+  const hiddenNames = [
+    ...genres.slice(limits.genres),
+    ...regions.slice(limits.regions),
+  ];
+  const more = el('button', {
+    class: 'chip chip-more',
+    type: 'button',
+    'aria-expanded': 'false',
+    'aria-label': `Show ${hidden} more tags`,
+    title: hiddenNames.join(', '),
+    text: `+${hidden} more`,
+  });
+  more.addEventListener('click', () => {
+    const expanded = container.classList.toggle('is-expanded');
+    more.setAttribute('aria-expanded', String(expanded));
+    more.setAttribute(
+      'aria-label',
+      expanded ? 'Show fewer tags' : `Show ${hidden} more tags`,
+    );
+    more.textContent = expanded ? 'Show less' : `+${hidden} more`;
+  });
+  container.append(more);
 }
 
 /** Open the album dialog for a track result with no track-list filter. */
@@ -1408,26 +1421,11 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
   });
   albumButton.addEventListener('click', () => void openAlbumFromTrack(track));
 
-  const tags: HTMLElement[] = [];
-  for (const name of track.genres.slice(0, 2)) {
-    tags.push(createGenreChip(name));
-  }
-  for (const name of track.regions.slice(0, 2)) {
-    tags.push(createRegionChip(name));
-  }
-  const hiddenTags = [
-    ...track.genres.slice(2),
-    ...track.regions.slice(2),
-  ];
-  if (hiddenTags.length > 0) {
-    tags.push(
-      el('span', {
-        class: 'chip chip-more',
-        title: hiddenTags.join(', '),
-        text: `+${hiddenTags.length} more`,
-      }),
-    );
-  }
+  const tags = el('div', { class: 'track-result-tags tag-list' });
+  appendTagChips(tags, track.genres, track.regions, {
+    genres: 2,
+    regions: 2,
+  });
 
   const play =
     state.playbackEnabled && state.session.authenticated
@@ -1460,7 +1458,7 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
       ),
     ),
     albumButton,
-    el('div', { class: 'track-result-tags' }, ...tags),
+    tags,
     el('span', {
       class: 'track-result-duration',
       text: formatDuration(track.duration),
@@ -1956,42 +1954,12 @@ function renderDialog(
   );
 
   // Genres and regions share one wrapping row, regions following genres.
-  const tagButtons: HTMLElement[] = [];
-  for (const name of album.genres.slice(0, 6)) {
-    const key = genreKey(name);
-    const chip = el(
-      'button',
-      {
-        class: 'chip chip-small',
-        type: 'button',
-        title: `Filter by ${name}`,
-        'aria-pressed': selectedGenreKeys().has(key) ? 'true' : 'false',
-      },
-      el('span', { text: name }),
-    );
-    if (selectedGenreKeys().has(key)) chip.classList.add('is-active');
-    chip.addEventListener('click', () => activateGenre(name));
-    tagButtons.push(chip);
-  }
-  for (const name of album.regions.slice(0, 6)) {
-    const key = regionKey(name);
-    const chip = el(
-      'button',
-      {
-        class: 'chip chip-small chip-region',
-        type: 'button',
-        title: `Filter by region: ${name}`,
-        'aria-pressed': selectedRegionKeys().has(key) ? 'true' : 'false',
-      },
-      el('span', { text: name }),
-    );
-    if (selectedRegionKeys().has(key)) chip.classList.add('is-active');
-    chip.addEventListener('click', () => activateRegion(name));
-    tagButtons.push(chip);
-  }
-  if (tagButtons.length > 0) {
-    heading.append(el('div', { class: 'dialog-genres' }, ...tagButtons));
-  }
+  const tags = el('div', { class: 'dialog-genres tag-list' });
+  appendTagChips(tags, album.genres, album.regions, {
+    genres: 6,
+    regions: 6,
+  });
+  if (tags.childElementCount > 0) heading.append(tags);
 
   const comments = renderDialogComments(album.comments ?? []);
   if (comments) heading.append(comments);

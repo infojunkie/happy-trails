@@ -21,8 +21,12 @@ albums and tracks by redirecting to the synology Audio Station web app.
   (including the labels) remain searchable.
 - An **Albums / Tracks** switch in the header changes the result list. Track
   results are compact rows with album artwork, title and artist, album name,
-  genre/region pills, duration, and (when signed in) a per-track Play control.
-  The mode is stored in the URL (`view=tracks`) and in browser history.
+  the track's own genre/region pills, duration, and (when signed in) a
+  per-track Play control. The mode is stored in the URL (`view=tracks`) and in
+  browser history.
+- Long genre/region lists end in a clickable **+N more** pill in album cards,
+  the album dialog, and track rows. It expands the list to every tag and
+  switches to **Show less** to collapse it again.
 - Genre facet with album counts, facet search, and multi-select. Each selection
   adds a `genre:"<name>"` term to the search bar.
 - Country and region tags in the genre column (Brazil, France, Corsica,
@@ -301,10 +305,10 @@ Notes:
   stale `happy-trails-index-*` files and would delete another live instance's
   index.
 
-On a 410k-track library the on-disk index measures ~353 MB, with a ~25 s total
-build (~9 s PostgreSQL load + ~14 s build), ~530 MB peak build RSS, and ~75 MB
+On a 410k-track library the on-disk index measures ~363 MB, with a ~28 s total
+build (~9 s PostgreSQL load + ~20 s build), ~520 MB peak build RSS, and ~75 MB
 steady process RSS; the OS page cache holds the file and is reclaimable.
-`:memory:` mode peaks around 915 MB RSS. Query latency is effectively the same
+`:memory:` mode peaks around 920 MB RSS. Query latency is effectively the same
 once the file is in page cache.
 
 ## Configuration
@@ -411,11 +415,12 @@ the FTS search text, so labels such as "The Vanilla Tapes", guest artists, and
 composers still match.
 
 Every `music` row is also written to a `tracks` table with its title, track
-artist, album artist, raw source title, and composer, plus a separate
-`track_search` FTS index. Track search deliberately reuses the album index for
-album-title, genre, region, and series terms, so those filters and their
-sidebar counts remain album-level; `track:` searches track titles and, in
-Albums mode, finds albums that contain a matching track.
+artist, album artist, raw source title, composer, and its own genre/region
+display names, plus a separate `track_search` FTS index. Track search
+deliberately reuses the album index for album-title, genre, region, and series
+terms, so those filters and their sidebar counts remain album-level; `track:`
+searches track titles and, in Albums mode, finds albums that contain a matching
+track.
 See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
@@ -826,8 +831,10 @@ Track-level counterpart to `/api/albums`, used by the Tracks result list.
 
 Each row includes the `music.id` (the id `/play/track/:id` accepts), the visible
 `artist` and parsed `artists`, the album artist, the opaque `albumKey` and
-merged `album` title, the raw `sourceAlbum`, disc/track/duration, and the
-album's `genres`/`regions` for the pills. An empty `q` lists every track.
+merged `album` title, the raw `sourceAlbum`, disc/track/duration, and this
+track's own `genres`/`regions` for the pills. `genre:`, `region:`, and
+`serie:` filters and the sidebar counts remain album-level even though the
+pills show the track's own tags. An empty `q` lists every track.
 
 ```json
 {
@@ -1017,12 +1024,12 @@ happy-trails/
   disposable SQLite index.
 - The index contains every album and every track. The sum of the per-album
   track counts is checked against the inserted track rows at build time.
-  Measured on a 410k-track library: about **353 MB on disk**, **~25 s total**
-  (~9 s loading PostgreSQL rows, ~14 s building), **~530 MB peak build RSS**,
+  Measured on a 410k-track library: about **363 MB on disk**, **~28 s total**
+  (~9 s loading PostgreSQL rows, ~20 s building), **~520 MB peak build RSS**,
   and **~75 MB steady process RSS**; the OS page cache holds the file and is
-  reclaimable. With `INDEX_DB_DIR=:memory:` the index uses ~353 MB of process
-  memory and peaks around **915 MB RSS**. A rebuild keeps the old snapshot
-  alive while building the new one; on disk that means two files (~700 MB) and
+  reclaimable. With `INDEX_DB_DIR=:memory:` the index uses ~363 MB of process
+  memory and peaks around **920 MB RSS**. A rebuild keeps the old snapshot
+  alive while building the new one; on disk that means two files (~720 MB) and
   in memory two databases. Re-measure after schema or build-path changes. The
   change check runs every `LIBRARY_CHECK_MS` (default 60s) but only performs
   the full rebuild when the fingerprint changes.

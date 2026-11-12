@@ -40,9 +40,10 @@ single `.sqlite` file, because every rebuild creates a new file. See the
 [Docker and non-Docker storage guidance](../README.md#index-storage) in the
 README for volume layout, permissions, and disk sizing.
 
-Measured on a 410k-track library: ~353 MB on disk, ~25 s total build, ~530 MB
-peak build RSS, and ~75 MB steady process RSS (the OS page cache holds the file
-and is reclaimable). `:memory:` mode peaks around 915 MB RSS.
+Measured on a 410k-track library: ~363 MB on disk, ~28 s total build (~9 s
+loading PostgreSQL rows, ~20 s building), ~520 MB peak build RSS, and ~75 MB
+steady process RSS (the OS page cache holds the file and is reclaimable).
+`:memory:` mode peaks around 920 MB RSS.
 
 ## Schema
 
@@ -139,6 +140,8 @@ CREATE TABLE tracks (
   track           INTEGER,
   duration        INTEGER,
   date            TEXT,                  -- per-track upload date
+  genre_names     TEXT NOT NULL,         -- JSON array of this track's genres
+  region_names    TEXT NOT NULL,         -- JSON array of this track's regions
   search_title    TEXT NOT NULL,
   search_artist   TEXT NOT NULL,         -- folded track artist + album artist
   search_source   TEXT NOT NULL,
@@ -196,6 +199,11 @@ plus album artist); `source` (this track's raw source title); and `composer`.
 Album title, genre, region, and series terms resolve through the album index and
 mapping tables by `album_id`, so ~400k track rows do not repeat album-level
 text.
+
+Each track also stores its own genre and region display names as JSON arrays
+(`genre_names`, `region_names`) for the result-row pills. These are display
+names, not lookup keys: the `genre:`, `region:`, and `serie:` filters and the
+sidebar facet counts remain album-level (see below).
 
 Series are stored in `album_series` rather than a folded text column.
 `serie:` (alias `label:`) matches `album_series.serie_key` exactly, so query
@@ -333,7 +341,10 @@ EXISTS (
 
 Keeping genre/region/serie album-level means the sidebar's `albumCount` is the
 same number in both modes; the UI labels it “Count of matching albums” in
-Tracks mode.
+Tracks mode. The row pills come from `tracks.genre_names`/`region_names`, so a
+track displays its own tags even though clicking a pill filters by the album
+tags. Track-level facets would require per-track tag counts and a mode-aware
+`/api/genres`.
 
 The row query joins the album for identity and display pills:
 
@@ -341,7 +352,8 @@ The row query joins the album for identity and display pills:
 SELECT t.id, t.title, al.key AS album_key, al.album,
        COALESCE(NULLIF(trim(t.artist), ''), al.artist) AS artist,
        al.artist AS album_artist,
-       t.source_album, t.year, t.disc, t.track, t.duration
+       t.source_album, t.year, t.disc, t.track, t.duration,
+       t.genre_names, t.region_names
   FROM tracks t
   JOIN albums al ON al.id = t.album_id
  ORDER BY t.date DESC, t.album_rank, t.disc, t.track, t.id
@@ -561,8 +573,9 @@ and detecting recurring plain-title series), then:
    comments, and the tag/series mappings in one transaction, yielding to the
    event loop between chunks. It retains an album-key → id/rank map.
 4. Inserts every track row, mapping each raw album title + album artist to its
-   merged album, then verifies that the inserted track count equals the sum of
-   the album track counts.
+   merged album, computes the track's own genre/region display names, then
+   verifies that the inserted track count equals the sum of the album track
+   counts.
 5. Calculates ranks (including the track artist ranks) and stores build
    metadata.
 6. Creates the FTS triggers and rebuilds `album_search` and `track_search`.
@@ -577,16 +590,18 @@ partial file, and is reported through `/api/status`.
 
 ## Current boundaries
 
-- Track genre/region/series filters and sidebar counts are deliberately
-  album-level. Per-track tag storage and track-level facet counts would be a
-  larger schema change; `track:` is the per-track text field.
+- Track rows store their own genre/region display names for the pills, but
+  `genre:`, `region:`, and `serie:` filters and sidebar counts remain
+  album-level, so a pill click filters by the album's tags even when the track
+  itself has a narrower set. Track-level facet counts would require per-track
+  tag counts and a mode-aware `/api/genres`.
 - The database is rebuilt in full. Incremental updates would need to consume
   the change stream or a tighter fingerprint and apply upserts; the FTS
   triggers are already in place for row-level updates.
 - The whole build runs in the main thread, and the ~400k track rows are held in
   memory while the album aggregation runs. Measured on a 410k-track library:
-  353 MB on disk, ~25 s total build, ~530 MB peak build RSS, and ~75 MB steady
-  process RSS; `:memory:` mode peaks around 915 MB. The old snapshot stays
+  363 MB on disk, ~28 s total build, ~520 MB peak build RSS, and ~75 MB steady
+  process RSS; `:memory:` mode peaks around 920 MB. The old snapshot stays
   alive during a rebuild, so a change-triggered rebuild uses roughly twice the
   storage (two files on disk or two databases in memory). Streaming and
   inserting track rows in chunks would reduce the build peak; the FTS tables

@@ -50,6 +50,23 @@ const context = await createFixtureContext({
       cover_path: '',
       title_track: false,
     },
+    // Enough genres and regions to exercise the +N expansion in album cards,
+    // the album dialog, and track rows.
+    {
+      album: 'World Sampler',
+      artist: 'Various Artists',
+      year: 2020,
+      track_count: 1,
+      duration: 240,
+      latest: '2024-06-01T10:00:00',
+      genres:
+        'Folk,Pop,Jazz,Blues,Soul,Funk,Rock,Reggae,Brazil,France,Spain,Italy,Germany,Portugal,Japan,USA',
+      track_artists: ['Various Artists'],
+      composers: [],
+      comments: null,
+      cover_path: '',
+      title_track: false,
+    },
   ],
 });
 const server = createApp(context.dependencies).listen(port, '127.0.0.1', () => {

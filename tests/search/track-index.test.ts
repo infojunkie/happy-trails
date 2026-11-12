@@ -69,6 +69,29 @@ test('track rows carry album identity and display metadata', () => {
   assert.equal(track.albumKey, album.key);
 });
 
+test('track rows carry their own genres and regions', () => {
+  const soWhat = tracks('track:"so what"').tracks[0];
+  assert.ok(soWhat);
+  assert.deepEqual(soWhat.genres, ['Jazz']);
+  assert.deepEqual(soWhat.regions, []);
+
+  const filler = tracks('track:"kind of blue track 3"').tracks[0];
+  assert.ok(filler);
+  assert.deepEqual(filler.genres, ['Jazz']);
+  assert.deepEqual(filler.regions, ['USA']);
+
+  // Filters remain album-level: So What is included even though its own tag
+  // has no region, because the album has a USA track.
+  const usaAlbums = albums('region:usa');
+  const expected = usaAlbums.albums.reduce(
+    (sum, album) => sum + album.trackCount,
+    0,
+  );
+  const usa = tracks('region:usa');
+  assert.equal(usa.total, expected);
+  assert.ok(usa.tracks.some((track) => track.title === 'So What'));
+});
+
 test('fielded track search targets the right per-track field', () => {
   assert.deepEqual(titles(tracks('track:"guitar"').tracks), [
     'While My Guitar Gently Weeps',

@@ -808,6 +808,14 @@ button.chip:hover {
   font-size: 0.72rem;
 }
 
+.tag-list .chip-extra {
+  display: none;
+}
+
+.tag-list.is-expanded .chip-extra {
+  display: inline-flex;
+}
+
 .chip-region {
   border-style: dashed;
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));

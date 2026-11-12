@@ -68,6 +68,8 @@ export interface TrackIndexRow {
   /** Raw album title; may include a " // <disc label>" suffix. */
   source_album: string | null;
   composer: string | null;
+  /** Raw per-track genre tag string (comma-separated). */
+  genre: string | null;
   year: number | null;
   track: number | null;
   disc: number | null;
@@ -109,6 +111,7 @@ const TRACK_INDEX_QUERY = `
     ${ALBUM_ARTIST} AS album_artist,
     m.album AS source_album,
     m.composer,
+    m.genre,
     m.year,
     m.track,
     m.disc,

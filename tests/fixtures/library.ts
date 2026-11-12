@@ -341,6 +341,22 @@ export const fixtureTracks = new Map<string, TrackRow[]>([
       }),
     ],
   ],
+  [
+    'World Sampler\u0000Various Artists',
+    [
+      track(100, 'World Sampler Track 1', {
+        artist: 'Various Artists',
+        album_artist: 'Various Artists',
+        source_album: 'World Sampler',
+        genre:
+          'Folk,Pop,Jazz,Blues,Soul,Funk,Rock,Reggae,Brazil,France,Spain,Italy,Germany,Portugal,Japan,USA',
+        year: 2020,
+        track: 1,
+        disc: 1,
+        duration: 240,
+      }),
+    ],
+  ],
 ]);
 
 /**
@@ -370,6 +386,7 @@ function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
               album_artist: source.album_artist,
               source_album: source.source_album,
               composer: source.composer,
+              genre: source.genre,
               year: source.year,
               track: source.track,
               disc: source.disc,
@@ -383,6 +400,7 @@ function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
               album_artist: row.artist,
               source_album: row.album,
               composer: row.composers?.[0] ?? null,
+              genre: row.genres,
               year: row.year,
               track: index + 1,
               disc: 1,

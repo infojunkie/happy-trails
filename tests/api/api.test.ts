@@ -346,7 +346,8 @@ test('GET /api/tracks lists, searches, sorts, and paginates', async () => {
   assert.equal(track.sourceAlbum, 'Kind of Blue');
   assert.equal(track.albumArtist, 'Miles Davis');
   assert.equal(track.duration, 200);
-  assert.ok(track.genres.includes('Jazz'));
+  assert.deepEqual(track.genres, ['Jazz']);
+  assert.deepEqual(track.regions, []);
   assert.ok(track.albumKey.length > 0);
 });
 

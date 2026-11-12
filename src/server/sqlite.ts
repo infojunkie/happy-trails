@@ -156,6 +156,8 @@ const SCHEMA_SQL = `
     track           INTEGER,
     duration        INTEGER,
     date            TEXT,
+    genre_names     TEXT NOT NULL,
+    region_names    TEXT NOT NULL,
     search_title    TEXT NOT NULL,
     search_artist   TEXT NOT NULL,
     search_source   TEXT NOT NULL,
@@ -406,8 +408,8 @@ interface DbTrackRow {
   duration: number | null;
   album_key: string;
   album: string;
-  genres: string;
-  regions: string;
+  genre_names: string;
+  region_names: string;
 }
 
 /** A facet value's folded display name, used for bare-term tag matching. */
@@ -521,6 +523,7 @@ function parseStringArray(value: unknown): string[] {
     return [];
   }
 }
+
 
 /** JSON-quote a token as an FTS5 phrase, escaping embedded double quotes. */
 function ftsPhrase(token: string): string {
@@ -745,9 +748,10 @@ export class SqliteIndex {
         INSERT INTO tracks(
           id, album_id, title, artist, source_album,
           year, disc, track, duration, date,
+          genre_names, region_names,
           search_title, search_artist, search_source, search_composer,
           artist_rank, album_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertAlbumArtist = db.prepare(
         'INSERT INTO album_artists(album_id, position, artist) VALUES (?, ?, ?)',
@@ -973,6 +977,21 @@ export class SqliteIndex {
             .join(' '),
         );
 
+        // Per-track tags are stored for the row pills. Filtering and facet
+        // counts remain album-level (see docs/sqlite-index.md).
+        const trackGenreKeys = new Set<string>();
+        const trackRegionKeys = new Set<string>();
+        for (const tag of splitGenres(row.genre)) {
+          if (isRegionTag(tag.name)) trackRegionKeys.add(regionKey(tag.name));
+          else trackGenreKeys.add(tag.key);
+        }
+        const genreNames = [...trackGenreKeys].map(
+          (key) => genreDisplayNames.get(key) ?? key,
+        );
+        const regionNames = [...trackRegionKeys].map(
+          (key) => regionDisplayNames.get(key) ?? key,
+        );
+
         insertTrack.run(
           row.id,
           albumMeta.id,
@@ -984,6 +1003,8 @@ export class SqliteIndex {
           row.track,
           row.duration,
           row.date,
+          JSON.stringify(genreNames),
+          JSON.stringify(regionNames),
           foldSearch(row.title),
           searchArtist,
           foldSearch(sourceAlbum),
@@ -1012,13 +1033,13 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(indexedTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '9');
+      insertMeta.run('schema_version', '10');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec(`INSERT INTO track_search(track_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 9');
+      db.exec('PRAGMA user_version = 10');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -1486,21 +1507,8 @@ export class SqliteIndex {
            COALESCE(NULLIF(trim(t.artist), ''), al.artist) AS artist,
            al.artist AS album_artist,
            t.source_album, t.year, t.track, t.disc, t.duration,
-           al.key AS album_key, al.album AS album,
-           (SELECT json_group_array(name) FROM (
-              SELECT g.name AS name
-                FROM album_genres ag
-                JOIN genres g ON g.key = ag.genre_key
-               WHERE ag.album_id = t.album_id
-               ORDER BY ag.position
-            )) AS genres,
-           (SELECT json_group_array(name) FROM (
-              SELECT r.name AS name
-                FROM album_regions ar
-                JOIN regions r ON r.key = ar.region_key
-               WHERE ar.album_id = t.album_id
-               ORDER BY ar.position
-            )) AS regions
+           t.genre_names, t.region_names,
+           al.key AS album_key, al.album AS album
          FROM tracks t
          JOIN albums al ON al.id = t.album_id
          ${whereSql}
@@ -1522,8 +1530,8 @@ export class SqliteIndex {
       track: row.track,
       disc: row.disc,
       duration: row.duration,
-      genres: parseStringArray(row.genres),
-      regions: parseStringArray(row.regions),
+      genres: parseStringArray(row.genre_names),
+      regions: parseStringArray(row.region_names),
     }));
 
     return { total, tracks, libraryVersion: this.version };
