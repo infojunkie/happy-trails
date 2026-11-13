@@ -15,6 +15,8 @@ albums and tracks by redirecting to the synology Audio Station web app.
 
 ![Screenshot of albums view](docs/screenshot-albums.png)
 
+![Screenshot of album detail view](docs/screenshot-album.png)
+
 ![Screenshot of tracks view](docs/screenshot-tracks.png)
 
 - Album grid sorted by latest upload date (`MAX(date)`).
