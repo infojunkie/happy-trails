@@ -196,14 +196,13 @@ composer tag values from the tracks.
 
 The track table stores only per-track text: `title`; `artist` (track artist
 plus album artist); `source` (this track's raw source title); and `composer`.
-Album title, genre, region, and series terms resolve through the album index and
-mapping tables by `album_id`, so ~400k track rows do not repeat album-level
-text.
+Album title and series terms resolve through the album index by `album_id`, so
+~400k track rows do not repeat album-level title text.
 
-Each track also stores its own genre and region display names as JSON arrays
-(`genre_names`, `region_names`) for the result-row pills. These are display
-names, not lookup keys: the `genre:`, `region:`, and `serie:` filters and the
-sidebar facet counts remain album-level (see below).
+Each track also stores its own genre and region names and lookup keys as JSON
+arrays (`genre_names`, `region_names`, `genre_keys`, `region_keys`). The names
+drive the result-row pills; the keys make `genre:` and `region:` exact
+per-track filters. Series remains an album-level property.
 
 Series are stored in `album_series` rather than a folded text column.
 `serie:` (alias `label:`) matches `album_series.serie_key` exactly, so query
@@ -326,25 +325,33 @@ contains both the track artist and the album artist), `source:` targets
 `search_source`, and `composer:` targets `search_composer`.
 
 Bare/`all` terms are an OR of the four track columns, the album title (via the
-album `search_album` column), and album-level genre/region/series names. The
-latter use folded `{key, name}` lists cached once per build, which preserves
-substring matching without storing per-track tag text. Album terms are resolved
-by `t.album_id`:
+album `search_album` column), the track's own genre/region keys, and
+album-level series keys. The tag/series branches use folded `{key, name}` lists
+cached once per build, which preserves substring matching without storing
+per-track tag text. Album terms are resolved by `t.album_id`:
 
 ```sql
--- t.album_id IN (SELECT rowid FROM album_term_0)  -- album title CTE
+-- album title via the album index
+t.album_id IN (SELECT rowid FROM album_term_0)
+
+-- per-track genre/region tags
 EXISTS (
-  SELECT 1 FROM album_genres ag
-   WHERE ag.album_id = t.album_id AND ag.genre_key = ?
+  SELECT 1 FROM json_each(t.region_keys) tag
+   WHERE tag.value = ?
+)
+
+-- album-level series
+EXISTS (
+  SELECT 1 FROM album_series ase
+   WHERE ase.album_id = t.album_id AND ase.serie_key = ?
 )
 ```
 
-Keeping genre/region/serie album-level means the sidebar's `albumCount` is the
-same number in both modes; the UI labels it “Count of matching albums” in
-Tracks mode. The row pills come from `tracks.genre_names`/`region_names`, so a
-track displays its own tags even though clicking a pill filters by the album
-tags. Track-level facets would require per-track tag counts and a mode-aware
-`/api/genres`.
+Fielded `genre:` and `region:` terms use the same `json_each` lookup, so only
+tracks carrying that tag match. `serie:` remains album-level because a series
+belongs to the album, not an individual track. Sidebar facet counts remain
+album counts; the UI labels them “Count of matching albums” in Tracks mode. The
+row pills come from `tracks.genre_names`/`region_names`.
 
 The row query joins the album for identity and display pills:
 
@@ -592,11 +599,9 @@ partial file, and is reported through `/api/status`.
 
 ## Current boundaries
 
-- Track rows store their own genre/region display names for the pills, but
-  `genre:`, `region:`, and `serie:` filters and sidebar counts remain
-  album-level, so a pill click filters by the album's tags even when the track
-  itself has a narrower set. Track-level facet counts would require per-track
-  tag counts and a mode-aware `/api/genres`.
+- Track `genre:` and `region:` filters use the track's own tags; `serie:`
+  remains album-level, since series belong to albums rather than individual
+  tracks. Sidebar facet counts are album counts, not track counts.
 - The database is rebuilt in full. Incremental updates would need to consume
   the change stream or a tighter fingerprint and apply upserts; the FTS
   triggers are already in place for row-level updates.

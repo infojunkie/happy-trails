@@ -32,7 +32,7 @@ test('Tracks mode switches results and records the URL', async ({ page }) => {
   await expect(page.locator('#result-summary')).toHaveText(/[\d,]+ tracks/);
 });
 
-test('track search filters rows and genre filters stay album-level', async ({
+test('track search filters rows and facet counts stay album-level', async ({
   page,
 }) => {
   await page.goto('/?view=tracks');
@@ -62,6 +62,23 @@ test('track search filters rows and genre filters stay album-level', async ({
   await expect(
     page.locator('.track-result .track-result-title').first(),
   ).toBeVisible();
+});
+
+test('track-mode region filters use the track tags', async ({ page }) => {
+  await page.goto('/?view=tracks');
+  await expect(
+    page.locator('.track-result .track-result-title').first(),
+  ).toBeVisible();
+
+  await page
+    .locator('#search')
+    .fill('region:Iceland album:"Putumayo - Family Gathering"');
+  await page.locator('#search').press('Enter');
+
+  await expect(page.locator('.track-result')).toHaveCount(1);
+  await expect(page.locator('.track-result-title')).toHaveText(
+    'Icelandic Track',
+  );
 });
 
 test('opening a track row shows the album dialog without a track filter', async ({

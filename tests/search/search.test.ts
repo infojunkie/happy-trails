@@ -585,7 +585,7 @@ test('detected plain-title series are searchable through the index', async () =>
   try {
     const search = (q: string) =>
       local.index.queryAlbums({
-                q,
+        q,
         sort: 'album',
         offset: 0,
         limit: 50,
@@ -600,7 +600,8 @@ test('detected plain-title series are searchable through the index', async () =>
       '\u0000sem limite\u0000',
     );
 
-    assert.equal(search('serie:putumayo').total, artists.length);
+    // The base fixture also has Putumayo - Family Gathering.
+    assert.equal(search('serie:putumayo').total, artists.length + 1);
     assert.equal(search('serie:"jazz is dead"').total, volumes.length);
     // Default SERIES_EXCEPTIONS drops "Legacy" from "[2016 Legacy Edition]".
     assert.equal(search('serie:legacy').total, 0);
@@ -616,7 +617,8 @@ test('detected plain-title series are searchable through the index', async () =>
     assert.ok(
       series.some(
         (serie) =>
-          serie.name === 'Putumayo' && serie.albumCount === artists.length,
+          serie.name === 'Putumayo' &&
+          serie.albumCount === artists.length + 1,
       ),
     );
     assert.ok(
@@ -652,7 +654,7 @@ test('albums with an embedded series are not plain-title detected', async () => 
   try {
     const search = (q: string) =>
       local.index.queryAlbums({
-                q,
+        q,
         sort: 'album',
         offset: 0,
         limit: 50,

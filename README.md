@@ -419,11 +419,11 @@ composers still match.
 
 Every `music` row is also written to a `tracks` table with its title, track
 artist, album artist, raw source title, composer, and its own genre/region
-display names, plus a separate `track_search` FTS index. Track search
-deliberately reuses the album index for album-title, genre, region, and series
-terms, so those filters and their sidebar counts remain album-level; `track:`
-searches track titles and, in Albums mode, finds albums that contain a matching
-track.
+display names and keys, plus a separate `track_search` FTS index. Track search
+uses the track's own tags for `genre:` and `region:` filters; album-title and
+`serie:` terms resolve through the album, and the sidebar facet counts remain
+album counts. `track:` searches track titles and, in Albums mode, finds albums
+that contain a matching track.
 See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
@@ -829,7 +829,7 @@ Track-level counterpart to `/api/albums`, used by the Tracks result list.
 
 | Parameter | Description |
 | --- | --- |
-| `q` | The same search syntax. Bare terms match the track title, artists, source title, composer, album title, and album genre/region/series names. `artist:` matches the track or album artist; `genre:`, `region:`, and `serie:` are exact album-level filters. |
+| `q` | The same search syntax. Bare terms match the track title, artists, source title, composer, album title, the track's own genre/region tags, and album series names. `artist:` matches the track or album artist; `genre:` and `region:` are exact per-track tag filters; `serie:` is an exact album-level filter. |
 | `sort` | `recent` (default; per-track upload date), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
 | `limit` | Default `48`, maximum `200`. |
@@ -837,9 +837,9 @@ Track-level counterpart to `/api/albums`, used by the Tracks result list.
 Each row includes the `music.id` (the id `/play/track/:id` accepts), the visible
 `artist` and parsed `artists`, the album artist, the opaque `albumKey` and
 merged `album` title, the raw `sourceAlbum`, disc/track/duration, and this
-track's own `genres`/`regions` for the pills. `genre:`, `region:`, and
-`serie:` filters and the sidebar counts remain album-level even though the
-pills show the track's own tags. An empty `q` lists every track.
+track's own `genres`/`regions` for the pills. `genre:` and `region:` filter by
+those track tags; `serie:` remains album-level. Sidebar facet counts are album
+counts. An empty `q` lists every track.
 
 ```json
 {

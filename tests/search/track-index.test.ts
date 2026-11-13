@@ -80,16 +80,12 @@ test('track rows carry their own genres and regions', () => {
   assert.deepEqual(filler.genres, ['Jazz']);
   assert.deepEqual(filler.regions, ['USA']);
 
-  // Filters remain album-level: So What is included even though its own tag
-  // has no region, because the album has a USA track.
-  const usaAlbums = albums('region:usa');
-  const expected = usaAlbums.albums.reduce(
-    (sum, album) => sum + album.trackCount,
-    0,
-  );
+  // Track filters use the track's own tag: So What has no USA region even
+  // though another track on the same album does.
   const usa = tracks('region:usa');
-  assert.equal(usa.total, expected);
-  assert.ok(usa.tracks.some((track) => track.title === 'So What'));
+  assert.ok(usa.tracks.every((track) => track.regions.includes('USA')));
+  assert.ok(!usa.tracks.some((track) => track.title === 'So What'));
+  assert.ok(usa.tracks.some((track) => track.title === 'Kind of Blue Track 3'));
 });
 
 test('fielded track search targets the right per-track field', () => {
@@ -114,32 +110,57 @@ test('fielded track search targets the right per-track field', () => {
   assert.ok(tracks('composer:monk').total > 0);
 });
 
-test('genre, region, and series filters use the album mapping tables', () => {
-  const jazzTracks = tracks('genre:jazz');
-  const jazzAlbums = albums('genre:jazz');
-  const expectedJazz = jazzAlbums.albums.reduce(
-    (sum, album) => sum + album.trackCount,
-    0,
-  );
-  assert.equal(jazzTracks.total, expectedJazz);
+test('genre and region filters use the track tags; series stays album-level', () => {
+  const all = tracks().tracks;
+  const expectedJazz = all.filter((track) =>
+    track.genres.includes('Jazz'),
+  ).length;
+  assert.equal(tracks('genre:jazz').total, expectedJazz);
 
   // Exact keys: a prefix is not a partial genre match.
   assert.equal(tracks('genre:jaz').total, 0);
 
+  const expectedUsa = all.filter((track) =>
+    track.regions.includes('USA'),
+  ).length;
   const usaTracks = tracks('region:usa');
-  const usaAlbums = albums('region:usa');
-  assert.equal(
-    usaTracks.total,
-    usaAlbums.albums.reduce((sum, album) => sum + album.trackCount, 0),
-  );
+  assert.equal(usaTracks.total, expectedUsa);
+  assert.ok(usaTracks.tracks.every((track) => track.regions.includes('USA')));
 
+  // Series is an album property: every track of Blue Train belongs to it.
   assert.equal(tracks('serie:"Blue Note"').total, 5);
 });
 
-test('bare terms match track metadata, album titles, and album tags', () => {
+test('track-mode region filters use the track tag, not the album tag', () => {
+  const iceland = tracks('region:iceland');
+  assert.ok(iceland.tracks.every((track) =>
+    track.regions.includes('Iceland'),
+  ));
+
+  // Only the track with its own Iceland tag is returned from this album.
+  const putumayo = iceland.tracks.filter(
+    (track) => track.album === 'Putumayo - Family Gathering',
+  );
+  assert.deepEqual(putumayo.map((track) => track.title), [
+    'Icelandic Track',
+  ]);
+
+  // Album mode still reports the album under the Iceland facet.
+  assert.ok(
+    albums('region:iceland').albums.some(
+      (album) => album.album === 'Putumayo - Family Gathering',
+    ),
+  );
+});
+
+test('bare terms match track metadata, album titles, and track tags', () => {
   assert.ok(tracks('freeloader').total > 0);
   assert.equal(tracks('kind of blue').total, 5);
   assert.equal(tracks('jazz').total, tracks('genre:jazz').total);
+  assert.equal(
+    tracks('iceland album:"Putumayo - Family Gathering"').total,
+    1,
+  );
 });
 
 test('track search composes boolean expressions', () => {

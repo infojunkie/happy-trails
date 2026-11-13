@@ -158,6 +158,8 @@ const SCHEMA_SQL = `
     date            TEXT,
     genre_names     TEXT NOT NULL,
     region_names    TEXT NOT NULL,
+    genre_keys      TEXT NOT NULL,
+    region_keys     TEXT NOT NULL,
     search_title    TEXT NOT NULL,
     search_artist   TEXT NOT NULL,
     search_source   TEXT NOT NULL,
@@ -195,7 +197,7 @@ const SCHEMA_SQL = `
     ON album_regions(region_key, album_id);
   CREATE INDEX album_series_by_serie
     ON album_series(serie_key, album_id);
-  -- Track search resolves album-level terms by album_id.
+  -- Track search resolves album title/series terms by album_id.
   CREATE INDEX album_genres_by_album
     ON album_genres(album_id, genre_key);
   CREATE INDEX album_regions_by_album
@@ -757,10 +759,10 @@ export class SqliteIndex {
         INSERT INTO tracks(
           id, album_id, title, artist, source_album,
           year, disc, track, duration, date,
-          genre_names, region_names,
+          genre_names, region_names, genre_keys, region_keys,
           search_title, search_artist, search_source, search_composer,
           artist_rank, album_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertAlbumArtist = db.prepare(
         'INSERT INTO album_artists(album_id, position, artist) VALUES (?, ?, ?)',
@@ -986,8 +988,8 @@ export class SqliteIndex {
             .join(' '),
         );
 
-        // Per-track tags are stored for the row pills. Filtering and facet
-        // counts remain album-level (see docs/sqlite-index.md).
+        // Per-track tags drive the row pills and the genre/region filters.
+        // Facet counts and series remain album-level (see docs/sqlite-index.md).
         const trackGenreKeys = new Set<string>();
         const trackRegionKeys = new Set<string>();
         for (const tag of splitGenres(row.genre)) {
@@ -1014,6 +1016,8 @@ export class SqliteIndex {
           row.date,
           JSON.stringify(genreNames),
           JSON.stringify(regionNames),
+          JSON.stringify([...trackGenreKeys]),
+          JSON.stringify([...trackRegionKeys]),
           foldSearch(row.title),
           searchArtist,
           foldSearch(sourceAlbum),
@@ -1042,13 +1046,13 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(indexedTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '10');
+      insertMeta.run('schema_version', '11');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec(`INSERT INTO track_search(track_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 10');
+      db.exec('PRAGMA user_version = 11');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -1352,10 +1356,10 @@ export class SqliteIndex {
     };
 
     /**
-     * Match a bare term against the track fields, the album title, and
-     * album-level genre/region/series names. The branches are materialized as
-     * one UNION so a broad term such as "jazz" is not evaluated with a
-     * correlated subquery for every track.
+     * Match a bare term against the track fields, the album title, the track's
+     * own genre/region tags, and album-level series names. The branches are
+     * materialized as one UNION so a broad term such as "jazz" is not
+     * evaluated with a correlated subquery for every track.
      */
     const allTerm = (phrase: string): string => {
       const branches: string[] = [];
@@ -1399,10 +1403,9 @@ export class SqliteIndex {
         cteParams.push(phrase);
       }
 
-      const addKeys = (
+      const addTrackTagKeys = (
         names: readonly SearchName[],
-        table: 'album_genres' | 'album_regions' | 'album_series',
-        column: 'genre_key' | 'region_key' | 'serie_key',
+        column: 'genre_keys' | 'region_keys',
       ): void => {
         const keys = names
           .filter((item) => item.search.includes(phrase))
@@ -1411,15 +1414,31 @@ export class SqliteIndex {
         const placeholders = keys.map(() => '?').join(', ');
         branches.push(
           `SELECT t.id FROM tracks t
-             JOIN ${table} tag ON tag.album_id = t.album_id
-            WHERE tag.${column} IN (${placeholders})`,
+            WHERE EXISTS (
+              SELECT 1 FROM json_each(t.${column}) tag
+               WHERE tag.value IN (${placeholders})
+            )`,
         );
         cteParams.push(...keys);
       };
 
-      addKeys(this.genreSearchNames, 'album_genres', 'genre_key');
-      addKeys(this.regionSearchNames, 'album_regions', 'region_key');
-      addKeys(this.seriesSearchNames, 'album_series', 'serie_key');
+      const addSeriesKeys = (names: readonly SearchName[]): void => {
+        const keys = names
+          .filter((item) => item.search.includes(phrase))
+          .map((item) => item.key);
+        if (keys.length === 0) return;
+        const placeholders = keys.map(() => '?').join(', ');
+        branches.push(
+          `SELECT t.id FROM tracks t
+             JOIN album_series tag ON tag.album_id = t.album_id
+            WHERE tag.serie_key IN (${placeholders})`,
+        );
+        cteParams.push(...keys);
+      };
+
+      addTrackTagKeys(this.genreSearchNames, 'genre_keys');
+      addTrackTagKeys(this.regionSearchNames, 'region_keys');
+      addSeriesKeys(this.seriesSearchNames);
 
       if (branches.length === 0) return '0';
 
@@ -1429,9 +1448,7 @@ export class SqliteIndex {
     };
 
     const termSql = (term: SearchTermNode): string => {
-      // Genre/region/series are categorical and album-level: match the album
-      // mapping tables exactly, so the sidebar's album counts agree with the
-      // track filters.
+      // Genres and regions are per-track tags in track mode.
       if (term.field === 'genre' || term.field === 'region') {
         const key =
           term.field === 'genre'
@@ -1439,17 +1456,16 @@ export class SqliteIndex {
             : regionKey(term.value);
         if (!key || CONTROL_CHARS.test(key)) return '0';
 
-        const table =
-          term.field === 'genre' ? 'album_genres' : 'album_regions';
         const column =
-          term.field === 'genre' ? 'genre_key' : 'region_key';
+          term.field === 'genre' ? 'genre_keys' : 'region_keys';
         params.push(key);
         return `EXISTS (
-          SELECT 1 FROM ${table} tag
-           WHERE tag.album_id = t.album_id AND tag.${column} = ?
+          SELECT 1 FROM json_each(t.${column}) tag
+           WHERE tag.value = ?
         )`;
       }
 
+      // Series is an album-level property.
       if (term.field === 'serie') {
         const key = foldSearch(term.value).replace(/\s+/g, ' ').trim();
         if (!key || CONTROL_CHARS.test(key)) return '0';
@@ -1475,10 +1491,11 @@ export class SqliteIndex {
         case 'composer':
           return ftsTerm(['search_composer'], phrase);
         case 'all':
-          // Bare terms match the track's own metadata, the album title, and
-          // album-level tags/series. They deliberately do not match the whole
-          // album search text, which would make every track of an album match
-          // a guest artist or composer credited on a different track.
+          // Bare terms match the track's own metadata, the album title, the
+          // track's own genre/region tags, and album-level series. They
+          // deliberately do not match the whole album search text, which would
+          // make every track of an album match a guest artist or composer
+          // credited on a different track.
           return allTerm(phrase);
         default:
           return '0';
