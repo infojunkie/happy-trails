@@ -491,6 +491,22 @@ test('plain-title detection normalizes dashes, colons, and parentheses', () => {
   );
 });
 
+test('plain-title detection handles year/volume suffixes and non-generic titles', () => {
+  const detected = detectPlainSeries(
+    ['1', '2', '3', '4', '5'].map((volume) =>
+      seriesAlbum(
+        `Mr Music Hits 1989 Vol. ${volume}`,
+        'Various Artists',
+        { trackCount: 14 },
+      ),
+    ),
+  );
+  assert.equal(
+    detected.get('Mr Music Hits 1989 Vol. 1\u0000Various Artists'),
+    'Mr Music Hits',
+  );
+});
+
 test('plain-title detection ignores exact titles that are artist names', () => {
   const albums = [
     seriesAlbum('The Beatles', 'The Beatles'),

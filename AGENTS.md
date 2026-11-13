@@ -14,6 +14,8 @@
 
 ## Responding to user prompts
 
+- If the user asks a question, never code. Just Answer the question first.
+
 - Don't jump into coding.
 
 - Ask questions first, to make sure you understand the details behind the user's thought.

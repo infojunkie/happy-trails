@@ -80,16 +80,20 @@ function stripEnclosures(album: string): string {
 }
 
 /**
- * Normalize an album title for plain-title matching: remove enclosures and the
- * multi-CD `//` suffix, then truncate at a standalone dash or a colon.
- * `truncated` records that a dash/colon suffix was removed, which allows
- * one-word label series such as "Putumayo - Acoustic Africa".
+ * Normalize an album title for plain-title matching: remove enclosures, the
+ * multi-CD `//` suffix, a year + Vol./Volume marker before a volume number
+ * (`Mr Music Hits 1989 Vol. 4` -> `Mr Music Hits 4`), then truncate at a
+ * standalone dash or a colon. `truncated` records that a dash/colon suffix was
+ * removed, which allows one-word label series such as
+ * "Putumayo - Acoustic Africa".
  */
 function seriesBaseTitle(album: string): {
   base: string;
   truncated: boolean;
 } {
   const normalized = normalizeAlbumName(stripEnclosures(album))
+    .replace(/\s+\d{4}\s+(?:vol\.?|volume)\s+/gi, ' ')
+    .replace(/\s+(?:vol\.?|volume)\s+(?=\d+\s*$)/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   const base = normalized
@@ -217,11 +221,68 @@ const PLAIN_SERIES_MAX_PREFIX_WORDS = 6;
 const PLAIN_SERIES_MIN_AVERAGE_TRACKS = 2;
 
 /**
- * Words that make a repeated title too generic to be a series ("Greatest
- * Hits", "The Best Of …", "Live", "Vol. 2", …).
+ * Words that make a repeated prefix too generic to be a series when *every*
+ * meaningful word is one of them ("Greatest Hits", "The Best Of …", "Live",
+ * "Vol. 2", …). A prefix such as "Mr Music Hits" is kept because "Mr" and
+ * "Music" are not generic.
  */
-const GENERIC_SERIES_PREFIX =
-  /(?:^|\b)(?:greatest|best|hits|collection|anthology|classics?|essential|complete|ultimate|gold|platinum|singles|rarities|live|definitive|cover|covers|love|volume|vol|ao vivo)(?:\b|$)/;
+const GENERIC_SERIES_WORDS = new Set([
+  'greatest',
+  'best',
+  'hits',
+  'collection',
+  'anthology',
+  'classic',
+  'classics',
+  'essential',
+  'complete',
+  'ultimate',
+  'gold',
+  'platinum',
+  'single',
+  'singles',
+  'rarity',
+  'rarities',
+  'live',
+  'definitive',
+  'cover',
+  'covers',
+  'love',
+  'songs',
+  'volume',
+  'vol',
+  'very',
+  'ao',
+  'vivo',
+]);
+
+const IGNORED_SERIES_WORDS = new Set([
+  'the',
+  'a',
+  'an',
+  'of',
+  'and',
+  'to',
+  'in',
+  'on',
+  'at',
+  'for',
+  'with',
+  'from',
+]);
+
+function isGenericSeriesPrefix(prefix: string): boolean {
+  const words = prefix
+    .split(/\s+/)
+    .map((word) =>
+      word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase(),
+    )
+    .filter((word) => word && !IGNORED_SERIES_WORDS.has(word));
+  if (words.length === 0) return true;
+  return words.every(
+    (word) => /^\d+$/.test(word) || GENERIC_SERIES_WORDS.has(word),
+  );
+}
 
 interface PrefixStat {
   albums: Set<string>;
@@ -328,7 +389,7 @@ export function detectPlainSeries(
   const qualifying = new Map<string, string>();
   for (const [prefix, stat] of stats) {
     if (stat.albums.size < PLAIN_SERIES_MIN_ALBUMS) continue;
-    if (GENERIC_SERIES_PREFIX.test(prefix)) continue;
+    if (isGenericSeriesPrefix(prefix)) continue;
 
     const exact = stat.exact.filter((album) => !album.titleTrack);
     const exactOk =

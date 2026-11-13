@@ -477,8 +477,11 @@ not run through the plain-title detector, so `Cuba : Les danses des dieux
 folded into their stem when the stem recurs with different numbers, so
 `{Network Medien / World Network 38}` yields `Network Medien / World Network`;
 a label with only one numeric suffix, such as `{Club Top 13}` or `{2 em 1}`,
-is kept intact. Generic titles such as `Greatest Hits` are ignored, and
-variable artist or volume text is not part of the series value.
+is kept intact. Plain titles also discard a `<year> Vol./Volume <n>` marker
+before matching, so `Mr Music Hits 1989 Vol. 4` belongs to `Mr Music Hits`.
+A prefix is rejected as generic only when all of its meaningful words are
+generic, so `Greatest Hits` and `Live` are ignored while `Mr Music Hits` is
+kept. Variable artist or volume text is not part of the series value.
 `SERIES_EXCEPTIONS` drops misleading labels such as `Legacy` or `Collector's`;
 it defaults to those two and appends any configured additions. Values are
 stored in `album_series`, matched exactly with `serie:` (alias `label:`), and
