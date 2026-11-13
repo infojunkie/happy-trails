@@ -1774,7 +1774,7 @@ h4.disc-heading {
 
 .track-row {
   display: grid;
-  grid-template-columns: 2.2rem minmax(0, 1fr) auto auto;
+  grid-template-columns: 2.2rem minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   padding: 8px 6px;
@@ -1851,13 +1851,6 @@ h4.disc-heading {
 
 .track-composer-name {
   overflow-wrap: anywhere;
-}
-
-.track-format {
-  color: var(--text-muted);
-  font-size: 0.72rem;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .track-duration {
@@ -1982,10 +1975,6 @@ h4.disc-heading {
   .track-row {
     grid-template-columns: 1.7rem minmax(0, 1fr) auto;
     gap: 8px;
-  }
-
-  .track-format {
-    display: none;
   }
 
   .dialog-body {

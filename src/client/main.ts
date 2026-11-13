@@ -21,12 +21,10 @@ import {
 } from './facets.js';
 import { linkifiedText } from './linkify.js';
 import {
-  formatBitrate,
   formatCount,
   formatDate,
   formatDateTime,
   formatDuration,
-  formatFrequency,
   formatTotalDuration,
 } from './format.js';
 
@@ -2325,11 +2323,6 @@ function renderTrackRow(track: Track): HTMLElement {
     );
   }
 
-  const formats = [
-    formatFrequency(track.frequency),
-    formatBitrate(track.bitrate),
-  ].filter((value): value is string => value !== null);
-
   return el(
     'li',
     { class: 'track-row' },
@@ -2338,7 +2331,6 @@ function renderTrackRow(track: Track): HTMLElement {
       text: track.track === null ? '—' : String(track.track),
     }),
     main,
-    el('span', { class: 'track-format', text: formats.join(' · ') }),
     el('span', { class: 'track-duration', text: formatDuration(track.duration) }),
   );
 }

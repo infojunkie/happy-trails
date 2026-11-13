@@ -59,14 +59,3 @@ export function formatDateTime(iso: string): string {
     timeStyle: 'short',
   });
 }
-
-export function formatFrequency(hz: number | null): string | null {
-  if (!hz || hz <= 0) return null;
-  const khz = hz / 1000;
-  return `${Number.isInteger(khz) ? khz.toFixed(0) : khz.toFixed(1)} kHz`;
-}
-
-export function formatBitrate(bps: number | null): string | null {
-  if (!bps || bps <= 0) return null;
-  return `${Math.round(bps / 1000)} kbps`;
-}

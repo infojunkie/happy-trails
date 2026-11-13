@@ -67,7 +67,7 @@ albums and tracks by redirecting to the synology Audio Station web app.
   enables when a newer snapshot is available and reloads the current view; it
   never triggers a rebuild itself.
 - Additional sort orders: artist A–Z, album A–Z, and release year.
-- Album dialog with the full track list, duration, sample rate, and bitrate.
+- Album dialog with the full track list and duration.
   Composer tags appear as a separate italic **Composer** line when they differ
   from the track and album artists; each composer name is a link that runs a
   top-level search. When a search narrows the tracks, the dialog defaults to
@@ -998,7 +998,7 @@ happy-trails/
 │   ├── client/
 │   │   ├── api.ts        API client
 │   │   ├── dom.ts        Safe createElement helper
-│   │   ├── format.ts     Duration/date/bitrate formatting
+│   │   ├── format.ts     Duration/date formatting
 │   │   ├── linkify.ts    Plain-text comment URL linkification
 │   │   └── main.ts       State, rendering, and events
 │   └── shared/
