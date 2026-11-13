@@ -104,23 +104,23 @@ function seriesBaseTitle(album: string): {
   return { base, truncated: base !== normalized };
 }
 
-/** Case/accent/apostrophe-insensitive key for series exception matching. */
-function seriesExceptionKey(value: string): string {
+/** Case/accent/apostrophe-insensitive key for configured series names. */
+function seriesNameKey(value: string): string {
   return foldSearch(value)
     .replace(/['’`´]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function exceptionKeySet(exceptions: readonly string[]): Set<string> {
-  return new Set(exceptions.map(seriesExceptionKey));
+function seriesNameKeySet(values: readonly string[]): Set<string> {
+  return new Set(values.map(seriesNameKey));
 }
 
 function isExceptedSeries(
   value: string,
   exceptionKeys: ReadonlySet<string>,
 ): boolean {
-  return exceptionKeys.has(seriesExceptionKey(value));
+  return exceptionKeys.has(seriesNameKey(value));
 }
 
 /** A label stem followed by a numeric volume, e.g. "World Network 38". */
@@ -181,7 +181,7 @@ export function embeddedSeries(
   album: string,
   exceptions: readonly string[] = [],
 ): string[] {
-  const exceptionKeys = exceptionKeySet(exceptions);
+  const exceptionKeys = seriesNameKeySet(exceptions);
   const matches: Array<{ index: number; value: string }> = [];
 
   for (const match of album.matchAll(CURLY_SERIES)) {
@@ -317,17 +317,21 @@ function mostCommonDisplay(display: Map<string, number>): string {
  *   ("The Wire Tapper 42").
  *
  * A one-word label prefix followed by ` - ` or `:` in the source title is also
- * eligible ("Putumayo - Acoustic Africa" -> "Putumayo"). Exact titles that are
- * also artist names ("The Beatles") are treated as self-titled/tribute albums,
- * not series. The shortest qualifying prefix wins, variable artist/volume text
- * is not part of the detected value, and configured exceptions are skipped.
- * Returns album key -> series name.
+ * eligible ("Putumayo - Acoustic Africa" -> "Putumayo"). A one-word exact title
+ * without such a suffix is only eligible when named in `allowlist` (e.g.
+ * "Millennium"), because most repeated one-word titles are albums, not series.
+ * Exact titles that are also artist names ("The Beatles") are treated as
+ * self-titled/tribute albums, not series. The shortest qualifying prefix wins,
+ * variable artist/volume text is not part of the detected value, and configured
+ * exceptions are skipped. Returns album key -> series name.
  */
 export function detectPlainSeries(
   albums: readonly SeriesAlbum[],
   exceptions: readonly string[] = [],
+  allowlist: readonly string[] = [],
 ): Map<string, string> {
-  const exceptionKeys = exceptionKeySet(exceptions);
+  const exceptionKeys = seriesNameKeySet(exceptions);
+  const allowKeys = seriesNameKeySet(allowlist);
   const artistNames = new Set(
     albums.map((album) => foldSearch(album.artist).trim()),
   );
@@ -340,8 +344,12 @@ export function detectPlainSeries(
     bases.set(album.key, base);
     const words = base.split(/\s+/);
 
-    // One-word label series such as "Putumayo - <album>".
-    const minPrefix = truncated && words.length === 1 ? 1 : 2;
+    // One-word label series such as "Putumayo - <album>", or an exact
+    // one-word title explicitly allowlisted such as "Millennium".
+    const oneWordEligible =
+      words.length === 1 &&
+      (truncated || allowKeys.has(seriesNameKey(base)));
+    const minPrefix = oneWordEligible ? 1 : 2;
     if (words.length < minPrefix) continue;
 
     const foldedTitle = foldSearch(base);

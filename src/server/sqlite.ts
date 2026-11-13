@@ -825,6 +825,7 @@ export class SqliteIndex {
       const plainSeries = detectPlainSeries(
         seriesAlbums,
         config.seriesExceptions,
+        config.seriesAllowlist,
       );
 
       const seriesByKey = new Map<string, string[]>();

@@ -491,6 +491,42 @@ test('plain-title detection normalizes dashes, colons, and parentheses', () => {
   );
 });
 
+test('series allowlist admits named one-word titles with the usual safeguards', () => {
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+  const albums = artists.map((artist) => seriesAlbum('Millennium', artist));
+
+  assert.equal(detectPlainSeries(albums).size, 0);
+
+  const detected = detectPlainSeries(albums, [], ['millennium']);
+  for (const artist of artists) {
+    assert.equal(detected.get(`Millennium\u0000${artist}`), 'Millennium');
+  }
+
+  // The regular safeguards still apply.
+  assert.equal(
+    detectPlainSeries(albums.slice(0, 4), [], ['Millennium']).size,
+    0,
+  );
+  assert.equal(
+    detectPlainSeries(
+      artists.map((artist) => seriesAlbum('Live', artist)),
+      [],
+      ['Live'],
+    ).size,
+    0,
+  );
+  assert.equal(
+    detectPlainSeries(
+      artists.map((artist) =>
+        seriesAlbum('Millennium', artist, { titleTrack: true }),
+      ),
+      [],
+      ['Millennium'],
+    ).size,
+    0,
+  );
+});
+
 test('plain-title detection handles year/volume suffixes and non-generic titles', () => {
   const detected = detectPlainSeries(
     ['1', '2', '3', '4', '5'].map((volume) =>

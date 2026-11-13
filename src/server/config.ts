@@ -140,6 +140,17 @@ function seriesExceptions(): string[] {
   return [...DEFAULT_SERIES_EXCEPTIONS, ...extra];
 }
 
+/** One-word series names allowed without a dash/colon title suffix. */
+function seriesAllowlist(): string[] {
+  const raw = process.env.SERIES_ALLOWLIST?.trim();
+  return raw
+    ? raw
+        .split('|')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+}
+
 const dsmUrl = (process.env.DSM_URL ?? process.env.DSADDR ?? '').trim();
 
 export interface DsmFrontendTarget {
@@ -348,6 +359,8 @@ export const config = {
   regionTags: regionTags(),
   /** Series/label names to ignore even when detected. */
   seriesExceptions: seriesExceptions(),
+  /** One-word series names allowed without a dash/colon title suffix. */
+  seriesAllowlist: seriesAllowlist(),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
   dsmFrontendUrl: frontendTarget.url,
