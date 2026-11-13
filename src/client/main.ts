@@ -1261,7 +1261,7 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
           title: 'Play in Synology Audio Station',
           'aria-label': `Play ${album.album} in Synology Audio Station`,
         },
-        el('span', { class: 'play-glyph', 'aria-hidden': 'true', text: '▶' }),
+        el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
         el('span', { text: 'Play' }),
       ),
     );
@@ -1442,7 +1442,7 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
             title: `Play ${track.title} in Audio Station`,
             'aria-label': `Play ${track.title} in Audio Station`,
           },
-          el('span', { 'aria-hidden': 'true', text: '▶' }),
+          el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
         )
       : null;
 
@@ -2257,7 +2257,7 @@ function renderTrackRow(track: Track): HTMLElement {
           title: `Play ${track.title} in Audio Station`,
           'aria-label': `Play ${track.title} in Audio Station`,
         },
-        el('span', { 'aria-hidden': 'true', text: '▶' }),
+        el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
       ),
     );
   }

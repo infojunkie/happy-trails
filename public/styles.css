@@ -839,9 +839,15 @@ button.chip:hover {
   filter: brightness(1.08);
 }
 
-.play-glyph {
-  font-size: 0.62rem;
-  line-height: 1;
+.album-play .play-icon {
+  width: 8px;
+  height: 9px;
+}
+
+.play-icon {
+  display: block;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
 }
 
 .chip-x {
@@ -1679,6 +1685,7 @@ button.chip:hover {
 .dialog-close {
   display: grid;
   place-items: center;
+  flex: none;
   align-self: start;
   justify-self: end;
   width: 34px;
@@ -1818,9 +1825,12 @@ h4.disc-heading {
   background: var(--accent);
   border-radius: 50%;
   color: var(--on-accent);
-  font-size: 0.56rem;
-  line-height: 1;
   text-decoration: none;
+}
+
+.track-play .play-icon {
+  width: 7px;
+  height: 8px;
 }
 
 .track-play:hover {
