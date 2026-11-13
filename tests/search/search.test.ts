@@ -527,6 +527,34 @@ test('series allowlist admits named one-word titles with the usual safeguards', 
   );
 });
 
+test('plain-title detection accepts apostrophe-prefixed volume numbers', () => {
+  const years = ['71', '72', '73', '74', '75'];
+  const detected = detectPlainSeries(
+    years.map((year) =>
+      seriesAlbum(`NOW Yearbook '${year}`, 'Various Artists'),
+    ),
+  );
+
+  for (const year of years) {
+    assert.equal(
+      detected.get(`NOW Yearbook '${year}\u0000Various Artists`),
+      'NOW Yearbook',
+    );
+  }
+});
+
+test('plain-title detection compares whole titles longer than six words', () => {
+  const title = "Now That's What I Call An Era";
+  const artists = ['A', 'B', 'C', 'D', 'E'];
+  const detected = detectPlainSeries(
+    artists.map((artist) => seriesAlbum(`${title} (${artist})`, artist)),
+  );
+
+  for (const artist of artists) {
+    assert.equal(detected.get(`${title} (${artist})\u0000${artist}`), title);
+  }
+});
+
 test('plain-title detection handles year/volume suffixes and non-generic titles', () => {
   const detected = detectPlainSeries(
     ['1', '2', '3', '4', '5'].map((volume) =>

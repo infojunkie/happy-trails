@@ -224,13 +224,15 @@ Plain-title detection is library-wide. Before the bulk load the builder
 normalizes each album title: it strips `[...]`, `{...}`, and `(...)` text, the
 ` // …` suffix, a `<year> Vol./Volume <n>` marker (leaving the volume number),
 and any text after a standalone ` - ` or a `:` (`Mr Music Hits 1989 Vol. 4`
-becomes `Mr Music Hits 4`). It records 2–6 word prefixes (plus a one-word
-prefix when a dash/colon suffix was removed, to catch labels such as
-`Putumayo`, or when the name is listed in `SERIES_ALLOWLIST`, to catch repeated
-one-word titles such as `Millennium`) and qualifies one when it appears in at
-least five albums and is either an exact repeated title, a prefix completed by
-the album artist, or a prefix completed by a 1–3 digit volume number. Albums whose title is also a
-track title, one-track extracts, and generic prefixes are excluded, as are
+becomes `Mr Music Hits 4`). It records 2–6 word prefixes plus the whole title
+when it is longer (and a one-word prefix when a dash/colon suffix was removed,
+to catch labels such as `Putumayo`, or when the name is listed in
+`SERIES_ALLOWLIST`, to catch repeated one-word titles such as `Millennium`). It
+qualifies one when it appears in at least five albums and is either an exact
+repeated title, a prefix completed by the album artist, or a prefix completed
+by a 1–3 digit volume number; a volume may carry a leading apostrophe
+(`NOW Yearbook '83`). Albums whose title is also a track title, one-track
+extracts, and generic prefixes are excluded, as are
 names in `SERIES_EXCEPTIONS`. A prefix is generic only when all of its
 meaningful words are generic, so `Greatest Hits` and `Live` are rejected while
 `Mr Music Hits` is kept. Albums that already carry an explicit `{...}` or `[...]`

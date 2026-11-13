@@ -465,10 +465,13 @@ index build time from recurring normalized titles. Normalization removes
 bracketed/braced and parenthesized text, the multi-CD ` // …` suffix, and any
 text after a standalone ` - ` or a `:`:
 
-- a title repeated by at least five albums (e.g. `Sem Limite`, `Série Bis`),
-  excluding albums named after one of their tracks and one-track extracts;
+- a title repeated by at least five albums (e.g. `Sem Limite`, `Série Bis`,
+  `Now That's What I Call An Era`), excluding albums named after one of their
+  tracks and one-track extracts; whole titles longer than six words are still
+  compared exactly;
 - a recurring prefix completed by the album artist (`A Arte de <artist>`);
-- a recurring prefix completed by a volume number (`The Wire Tapper 42`);
+- a recurring prefix completed by a volume number (`The Wire Tapper 42`,
+  `NOW Yearbook '83`); the volume may carry a leading apostrophe;
 - a one-word label prefix followed by ` - ` or `:`
   (`Putumayo - Acoustic Africa`, `Jazz Is Dead 5: Doug Carn`).
 

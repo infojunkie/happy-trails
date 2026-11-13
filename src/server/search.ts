@@ -221,6 +221,24 @@ const PLAIN_SERIES_MAX_PREFIX_WORDS = 6;
 const PLAIN_SERIES_MIN_AVERAGE_TRACKS = 2;
 
 /**
+ * Prefix lengths considered for one normalized title: 2–6 words, plus the
+ * whole title when it is longer. A repeated full title is strong series
+ * evidence, so the word cap only bounds the shorter variable-suffix prefixes.
+ */
+function seriesPrefixLengths(
+  wordCount: number,
+  minLength: number,
+): number[] {
+  const lengths: number[] = [];
+  const capped = Math.min(PLAIN_SERIES_MAX_PREFIX_WORDS, wordCount);
+  for (let length = minLength; length <= capped; length += 1) {
+    lengths.push(length);
+  }
+  if (wordCount > capped) lengths.push(wordCount);
+  return lengths;
+}
+
+/**
  * Words that make a repeated prefix too generic to be a series when *every*
  * meaningful word is one of them ("Greatest Hits", "The Best Of …", "Live",
  * "Vol. 2", …). A prefix such as "Mr Music Hits" is kept because "Mr" and
@@ -310,11 +328,12 @@ function mostCommonDisplay(display: Map<string, number>): string {
  * suffixes are removed, a prefix is a series when it recurs across at least
  * five albums and one of these holds:
  *
- * - the whole title repeats (e.g. "Sem Limite"), excluding albums named after
- *   one of their tracks and one-track extracts;
+ * - the whole title repeats (e.g. "Sem Limite", "Now That's What I Call An
+ *   Era"), excluding albums named after one of their tracks and one-track
+ *   extracts; whole titles longer than six words are still compared exactly;
  * - the title continues with the album artist ("A Arte de <artist>");
  * - the title continues with a 1–3 digit volume number
- *   ("The Wire Tapper 42").
+ *   ("The Wire Tapper 42", "NOW Yearbook '83").
  *
  * A one-word label prefix followed by ` - ` or `:` in the source title is also
  * eligible ("Putumayo - Acoustic Africa" -> "Putumayo"). A one-word exact title
@@ -355,11 +374,7 @@ export function detectPlainSeries(
     const foldedTitle = foldSearch(base);
     const foldedArtist = foldSearch(album.artist);
 
-    for (
-      let length = minPrefix;
-      length <= Math.min(PLAIN_SERIES_MAX_PREFIX_WORDS, words.length);
-      length += 1
-    ) {
+    for (const length of seriesPrefixLengths(words.length, minPrefix)) {
       const prefix = words.slice(0, length).join(' ');
       const foldedPrefix = foldSearch(prefix);
 
@@ -388,7 +403,11 @@ export function detectPlainSeries(
         stat.exact.push(album);
       } else if (remainder === foldedArtist) {
         stat.artistSuffix += 1;
-      } else if (remainder !== null && /^\d{1,3}$/.test(remainder)) {
+      } else if (
+        remainder !== null &&
+        // Year-style volumes such as "NOW Yearbook '83".
+        /^\d{1,3}$/.test(remainder.replace(/^['’`´]+/, ''))
+      ) {
         stat.numberSuffix += 1;
       }
     }
@@ -429,11 +448,7 @@ export function detectPlainSeries(
     const words = base.split(/\s+/);
     const minLength = words.length === 1 ? 1 : 2;
 
-    for (
-      let length = minLength;
-      length <= Math.min(PLAIN_SERIES_MAX_PREFIX_WORDS, words.length);
-      length += 1
-    ) {
+    for (const length of seriesPrefixLengths(words.length, minLength)) {
       const serie = qualifying.get(
         foldSearch(words.slice(0, length).join(' ')),
       );
