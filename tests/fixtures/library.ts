@@ -342,6 +342,21 @@ export const fixtureTracks = new Map<string, TrackRow[]>([
     ],
   ],
   [
+    'Blue Train {Blue Note}\u0000John Coltrane',
+    [
+      track(40, 'Blue Train', {
+        artist: 'John Coltrane',
+        album_artist: 'John Coltrane',
+        source_album: 'Blue Train {Blue Note}',
+        genre: 'Jazz',
+        year: 1958,
+        track: 1,
+        disc: 1,
+        composer: 'John Coltrane',
+      }),
+    ],
+  ],
+  [
     'World Sampler\u0000Various Artists',
     [
       track(100, 'World Sampler Track 1', {

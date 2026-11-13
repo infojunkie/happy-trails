@@ -150,6 +150,33 @@ test('album dialog shows merged tracks, composer lines, and artist punctuation',
   await expectSummaryFor(page, { q: 'composer:"John Lennon"' });
 });
 
+test('album dialog shows series pills and searches the serie field', async ({
+  page,
+}) => {
+  await page.goto(`/?q=${encodeURIComponent('album:"Blue Train"')}`);
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await page
+    .locator('.album-title', { hasText: 'Blue Train {Blue Note}' })
+    .click();
+  await expect(page.locator('#album-dialog')).toBeVisible();
+
+  const pill = page.locator('#album-dialog .dialog-series .chip', {
+    hasText: 'Blue Note',
+  });
+  await expect(pill).toBeVisible();
+  await pill.click();
+
+  await expect(page.locator('#album-dialog')).toBeHidden();
+  await expect(page.locator('#search')).toHaveValue('serie:"Blue Note"');
+  await expectSummaryFor(page, { q: 'serie:"Blue Note"' });
+
+  // Albums without a series do not render the row.
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await openAlbum(page, 'Abbey Road');
+  await expect(page.locator('#album-dialog .dialog-series')).toHaveCount(0);
+});
+
 test('album dialog genre and region chips activate filters', async ({ page }) => {
   await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
   await expect(page.locator('.album-card').first()).toBeVisible();

@@ -556,7 +556,9 @@ SELECT comment FROM album_comments
 
 `album_comments` holds the distinct, trimmed `comment` values collected from
 all rows merged into the album, sorted so the listing is deterministic. The
-album listing's correlated subquery returns them as a JSON array.
+album listing's correlated subquery returns them as a JSON array. The shared
+album-summary columns also join `album_series`/`series`, so both the listing
+and the single-album lookup return each album's series names.
 
 ## Build and publication
 

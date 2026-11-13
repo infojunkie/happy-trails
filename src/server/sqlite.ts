@@ -355,6 +355,13 @@ const ALBUM_SUMMARY_COLUMNS = `
       WHERE ar.album_id = a.id
       ORDER BY ar.position
    )) AS regions,
+  (SELECT json_group_array(name) FROM (
+     SELECT s.name AS name
+       FROM album_series ase
+       JOIN series s ON s.key = ase.serie_key
+      WHERE ase.album_id = a.id
+      ORDER BY ase.position
+   )) AS series,
   (SELECT json_group_array(comment) FROM (
      SELECT ac.comment AS comment
        FROM album_comments ac
@@ -393,6 +400,7 @@ interface DbAlbumRow {
   artists: string;
   genres: string;
   regions: string;
+  series: string;
   comments: string;
 }
 
@@ -430,6 +438,7 @@ function mapAlbumRow(row: DbAlbumRow): AlbumSummary {
     latest: row.latest,
     genres: parseStringArray(row.genres),
     regions: parseStringArray(row.regions),
+    series: parseStringArray(row.series),
     comments: parseStringArray(row.comments),
   };
 }

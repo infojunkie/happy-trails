@@ -1966,6 +1966,28 @@ function renderDialog(
   });
   if (tags.childElementCount > 0) heading.append(tags);
 
+  const series = album.series ?? [];
+  if (series.length > 0) {
+    const serieChips = series.map((name) => {
+      const query = facetTerm('serie', name);
+      const chip = el(
+        'button',
+        {
+          class: 'chip chip-small chip-serie',
+          type: 'button',
+          title: `Search for ${query}`,
+          'aria-label': `Search for ${query}`,
+        },
+        el('span', { text: name }),
+      );
+      chip.addEventListener('click', () => navigateToSearch(query));
+      return chip;
+    });
+    heading.append(
+      el('div', { class: 'dialog-genres dialog-series' }, ...serieChips),
+    );
+  }
+
   const comments = renderDialogComments(album.comments ?? []);
   if (comments) heading.append(comments);
 

@@ -22,6 +22,8 @@ export interface AlbumSummary {
   genres: string[];
   /** Country/region tags from the genre column, deduplicated. */
   regions: string[];
+  /** Series/label names this album belongs to, in index order. */
+  series: string[];
   /** Distinct non-empty comments from the album's tracks, deduplicated. */
   comments: string[];
 }

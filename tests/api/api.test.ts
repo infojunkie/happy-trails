@@ -406,6 +406,17 @@ test('obsolete genre and region parameters are ignored', async () => {
   assert.equal(ignored.total, all.total);
 });
 
+test('GET /api/albums includes the album series', async () => {
+  const blueTrain = await findAlbum(
+    main.server.baseUrl,
+    'Blue Train {Blue Note}',
+  );
+  assert.deepEqual(blueTrain.series, ['Blue Note']);
+
+  const abbey = await findAlbum(main.server.baseUrl, 'Abbey Road');
+  assert.deepEqual(abbey.series, []);
+});
+
 test('GET /api/albums aggregates and deduplicates track comments', async () => {
   const all = await albums(main.server.baseUrl, '/api/albums?limit=200');
   assert.ok(all.albums.every((album) => Array.isArray(album.comments)));

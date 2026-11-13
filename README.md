@@ -75,9 +75,12 @@ albums and tracks by redirecting to the synology Audio Station web app.
   track matches, the toggle is omitted. Album Play follows the current toggle
   state. Merged multi-CD albums group tracks under their original disc labels,
   since disc numbers frequently collide across the source titles.
+- The album dialog header shows a pill for each series the album belongs to,
+  directly below the genre/region tags. Clicking a pill runs the equivalent
+  `serie:"<name>"` search.
 - Track comments are aggregated across an album's tracks, deduplicated, and
-  shown in the album dialog header beneath the tag pills. Absolute `http(s)`
-  URLs inside comments are clickable and open in a new tab.
+  shown in the album dialog header beneath the tag and series pills. Absolute
+  `http(s)` URLs inside comments are clickable and open in a new tab.
 - Album covers from Synology AudioStation, proxied and cached by the server.
   Albums without covers keep the generated gradient/initials cover.
 - An **Artwork** button in the album dialog when the album folder contains
@@ -753,6 +756,7 @@ listing; compare it with `/api/status` before deciding to reload.
       "latest": "2026-10-13T19:25:15",
       "genres": ["Jazz", "Funk"],
       "regions": ["Ethiopia", "France"],
+      "series": [],
       "comments": ["https://aratkilo.bandcamp.com/album/danama"]
     }
   ]
@@ -760,9 +764,10 @@ listing; compare it with `/api/status` before deciding to reload.
 ```
 
 `duration` is in seconds. `key` is an opaque base64url value identifying the
-`(album, artist)` pair. `comments` contains the album's distinct non-empty
-track comments, deduplicated and sorted; the client renders `http(s)` URLs in
-them as external links.
+`(album, artist)` pair. `series` lists the series/label names the album belongs
+to, in index order. `comments` contains the album's distinct non-empty track
+comments, deduplicated and sorted; the client renders `http(s)` URLs in them as
+external links.
 
 `track:` is also accepted here: it matches track titles and returns the albums
 that contain a matching track, using the track index.
