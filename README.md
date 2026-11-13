@@ -13,7 +13,9 @@ albums and tracks by redirecting to the synology Audio Station web app.
 
 ## Features
 
-![Screenshot](docs/screenshot.png)
+![Screenshot of albums view](docs/screenshot-albums.png)
+
+![Screenshot of tracks view](docs/screenshot-tracks.png)
 
 - Album grid sorted by latest upload date (`MAX(date)`).
 - Multi-CD albums whose titles differ only by a whitespace-separated
