@@ -1093,6 +1093,7 @@ function createSearchButton(
   value: string,
   className: string,
   label = value,
+  query = value,
 ): HTMLButtonElement {
   const button = el('button', {
     class: className,
@@ -1101,8 +1102,12 @@ function createSearchButton(
     title: `Search for ${value}`,
     'aria-label': `Search for ${value}`,
   });
-  button.addEventListener('click', () => navigateToSearch(value));
+  button.addEventListener('click', () => navigateToSearch(query));
   return button;
+}
+
+function composerQueryFor(name: string): string {
+  return `composer:"${name.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
 function artistNodes(
@@ -2270,10 +2275,18 @@ function renderTrackRow(track: Track): HTMLElement {
                 segment.name,
                 'composer-link link-inline',
                 segment.text,
+                composerQueryFor(segment.name),
               )
             : segment.text,
         )
-      : [createSearchButton(composer, 'composer-link link-inline')];
+      : [
+          createSearchButton(
+            composer,
+            'composer-link link-inline',
+            composer,
+            composerQueryFor(composer),
+          ),
+        ];
 
     main.append(
       el(

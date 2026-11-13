@@ -146,8 +146,8 @@ test('album dialog shows merged tracks, composer lines, and artist punctuation',
 
   await comeTogether.locator('.composer-link', { hasText: 'John Lennon' }).click();
   await expect(page.locator('#album-dialog')).toBeHidden();
-  await expect(page.locator('#search')).toHaveValue('John Lennon');
-  await expectSummaryFor(page, { q: 'John Lennon' });
+  await expect(page.locator('#search')).toHaveValue('composer:"John Lennon"');
+  await expectSummaryFor(page, { q: 'composer:"John Lennon"' });
 });
 
 test('album dialog genre and region chips activate filters', async ({ page }) => {
@@ -246,8 +246,8 @@ test('Back from a dialog search reopens the album dialog', async ({ page }) => {
     .first()
     .click();
   await expect(page.locator('#album-dialog')).toBeHidden();
-  await expect(page.locator('#search')).toHaveValue('John Lennon');
-  await expectSummaryFor(page, { q: 'John Lennon' });
+  await expect(page.locator('#search')).toHaveValue('composer:"John Lennon"');
+  await expectSummaryFor(page, { q: 'composer:"John Lennon"' });
 
   await page.goBack();
   await expect(page.locator('#album-dialog')).toBeVisible();
