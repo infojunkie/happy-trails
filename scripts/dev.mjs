@@ -49,5 +49,9 @@ function run(command, args) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
+run(process.execPath, [
+  path.join(root, 'scripts', 'build-client.mjs'),
+  '--watch',
+]);
 run(bin('tsc'), ['-p', 'tsconfig.client.json', '--watch', '--preserveWatchOutput']);
 run(bin('tsx'), ['watch', 'src/server/index.ts']);

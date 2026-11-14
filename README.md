@@ -158,22 +158,23 @@ The search index is written to `$TMPDIR/happy-trails-index` by default. Set
 `INDEX_DB_DIR` to a stable local directory in `.env`, or use
 `INDEX_DB_DIR=:memory:`; see [Index storage](#index-storage).
 
-For development, run the TypeScript client watcher and the server with
-auto-restart:
+For development, run the client bundler, the TypeScript typecheck watcher, and
+the server with auto-restart:
 
 ```bash
 npm run dev
 ```
 
-`npm run dev` compiles the client into `public/client/` and starts the API with
-`tsx watch`. Other useful scripts:
+`npm run dev` runs esbuild in watch mode, rebuilds `public/client/main.js` and
+`main.css`, type-checks the client, and restarts the API with `tsx watch`.
+Other useful scripts:
 
 | Script | Purpose |
 | --- | --- |
-| `npm run build` | Build server (`dist/`), client (`public/client/`), and vendor assets (`public/vendor/`) |
+| `npm run build` | Build server (`dist/`) and the client bundle (`public/client/`) |
 | `npm run typecheck` | Type-check both targets without emitting |
 | `npm start` | Run the built server |
-| `npm run dev` | Watch client and server |
+| `npm run dev` | Watch client, typecheck, and server |
 
 ## Docker
 
@@ -1035,8 +1036,8 @@ happy-trails/
 │       └── types.ts      Shared API types and sort keys
 ├── public/
 │   ├── index.html
-│   ├── styles.css        Compiled client files are written to public/client/
-│   └── vendor/           Generated Cover Flow assets (public/vendor/coverflow/)
+│   ├── styles.css        App stylesheet, linked after the generated vendor CSS
+│   └── client/           Generated esbuild bundle (main.js) and vendor CSS
 ├── tests/
 │   ├── api/              Express endpoint tests
 │   ├── artwork/          FileStation path-mapping tests
@@ -1048,17 +1049,17 @@ happy-trails/
 ├── .github/workflows/    CI: lint, typecheck, backend and UI tests
 ├── eslint.config.js      ESLint flat config
 ├── playwright.config.ts  Fixture-server-backed browser tests
-├── scripts/dev.mjs       Runs the client and server watchers
-├── scripts/copy-coverflow.mjs  Copies the Cover Flow dist and notices to public/
+├── scripts/build-client.mjs  esbuild bundle, vendor CSS, and license notices
+├── scripts/dev.mjs       Runs the client bundler, typecheck, and server watchers
 ├── tsconfig.test.json    Typechecks the test suite
 └── .env.example
 ```
 
 Cover Flow uses the MIT-licensed
 [@northstarxyzz/coverflow](https://github.com/NorthStarXyzz/coverflow)
-component. `npm run build:vendor` copies its built files, license, and
-third-party notices into `public/vendor/coverflow/`; the browser discovers them
-through the import map in `public/index.html`.
+component. esbuild bundles it and its stylesheet into
+`public/client/main.js` / `main.css`; the build also writes the dependency
+license and third-party notices to `public/third-party-notices.txt`.
 
 ## Operational notes
 

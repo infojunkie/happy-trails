@@ -10,13 +10,11 @@
   "scripts": {
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "npm run build:vendor && tsc -p tsconfig.client.json",
-    "build:vendor": "node scripts/copy-coverflow.mjs",
+    "build:client": "node scripts/build-client.mjs",
     "build:docker": "TAG=$(npm pkg get version --workspaces=false); docker build --network=host -t happy-trails:v$TAG . && docker save happy-trails:v$TAG | gzip > happy-trails-$TAG.tar.gz",
-    "predev": "npm run build:vendor",
     "dev": "node scripts/dev.mjs",
     "lint": "eslint .",
-    "watch:client": "tsc -p tsconfig.client.json --watch --preserveWatchOutput",
+    "watch:client": "node scripts/build-client.mjs --watch",
     "watch:server": "tsx watch src/server/index.ts",
     "start": "node dist/server/index.js",
     "start:docker": "TAG=$(npm pkg get version --workspaces=false); docker run --rm -p 3000:3000 -v happy-trails-index:/data -v \"$PWD/.env:/app/.env:ro\" happy-trails:v$TAG",
@@ -39,7 +37,8 @@
     "pg": "^8.13.1"
   },
   "allowScripts": {
-    "@northstarxyzz/coverflow@0.1.0": true
+    "@northstarxyzz/coverflow@0.1.0": true,
+    "esbuild@0.28.2": true
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -48,6 +47,7 @@
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
+    "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",
     "tsx": "^4.19.2",

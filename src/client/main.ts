@@ -1,3 +1,4 @@
+import '@northstarxyzz/coverflow/style.css';
 import { Coverflow, type CoverflowItem } from '@northstarxyzz/coverflow';
 import {
   isFilterMode,

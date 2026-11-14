@@ -1,8 +1,7 @@
 node_modules
 dist
 public/client
-public/shared
-public/vendor
+public/third-party-notices.txt
 .env
 .env.*
 !.env.example
