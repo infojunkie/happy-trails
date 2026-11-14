@@ -116,11 +116,16 @@ function seriesNameKeySet(values: readonly string[]): Set<string> {
   return new Set(values.map(seriesNameKey));
 }
 
+/** True when the series name contains any configured exception. */
 function isExceptedSeries(
   value: string,
   exceptionKeys: ReadonlySet<string>,
 ): boolean {
-  return exceptionKeys.has(seriesNameKey(value));
+  const key = seriesNameKey(value);
+  for (const exception of exceptionKeys) {
+    if (exception !== '' && key.includes(exception)) return true;
+  }
+  return false;
 }
 
 /** A label stem followed by a numeric volume, e.g. "World Network 38". */

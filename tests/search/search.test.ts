@@ -456,6 +456,12 @@ test('embedded series honors the exception list', () => {
     embeddedSeries('X [2016 Legacy Edition] {ACT}', ['Legacy']),
     ['ACT'],
   );
+  // Exceptions match any part of the series name, not only the whole value.
+  assert.deepEqual(
+    embeddedSeries('X {Sony Legacy Recordings}', ['Legacy']),
+    [],
+  );
+  assert.deepEqual(embeddedSeries('X {Live in Japan}', ['Japan']), []);
 });
 
 test('plain-title detection normalizes dashes, colons, and parentheses', () => {
@@ -594,6 +600,13 @@ test('plain-title detection honors the exception list', () => {
     seriesAlbum(`Collectors - ${artist}`, 'Various Artists'),
   );
   assert.equal(detectPlainSeries(collectors, ["Collector's"]).size, 0);
+
+  // Exceptions also match inside a detected series name.
+  const japan = artists.map((artist) =>
+    seriesAlbum(`Live in Japan - ${artist}`, 'Various Artists'),
+  );
+  assert.ok(detectPlainSeries(japan).size > 0);
+  assert.equal(detectPlainSeries(japan, ['Japan']).size, 0);
 });
 
 test('plain-title detection skips covers, generic titles, and extracts', () => {

@@ -349,7 +349,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
-| `SERIES_EXCEPTIONS` | `Legacy`, `Collector's` | Additional series/label names to ignore, separated by a vertical-bar character. Appended to the defaults; matching ignores case, accents, and apostrophes. |
+| `SERIES_EXCEPTIONS` | `Legacy`, `Collector's` | Additional series/label names to ignore, separated by a vertical-bar character. A detected name is dropped when it contains any entry, so `Japan` also removes `Live in Japan`. Appended to the defaults; matching ignores case, accents, and apostrophes. |
 | `SERIES_ALLOWLIST` | — | Additional series names allowed to be detected as one-word titles even when the album title has no ` - ` or `:` suffix, such as `Millennium`. Separated by a vertical-bar character; matching ignores case, accents, and apostrophes. The regular safeguards (five-album minimum, title-track and generic-name exclusions) still apply. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
@@ -492,7 +492,9 @@ A prefix is rejected as generic only when all of its meaningful words are
 generic, so `Greatest Hits` and `Live` are ignored while `Mr Music Hits` is
 kept. Variable artist or volume text is not part of the series value.
 `SERIES_EXCEPTIONS` drops misleading labels such as `Legacy` or `Collector's`;
-it defaults to those two and appends any configured additions. Values are
+a detected name is dropped when it contains any entry, so `Japan` also removes
+`Live in Japan`. It defaults to `Legacy` and `Collector's` and appends any
+configured additions. Values are
 stored in `album_series`, matched exactly with `serie:` (alias `label:`), and
 are also part of the all-field text.
 

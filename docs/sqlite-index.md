@@ -215,9 +215,10 @@ completed by a volume number (`The Wire Tapper 42`), or a label prefix followed
 by ` - ` / `:` (`Putumayo`, `Jazz Is Dead`). Numeric volume suffixes on embedded
 labels are folded into their stem when the stem recurs with different numbers
 (`{Network Medien / World Network 38}` → `Network Medien / World Network`); a
-lone numeric suffix such as `{Club Top 13}` or `{2 em 1}` is kept. Names in
-`SERIES_EXCEPTIONS` (defaults: `Legacy`, `Collector's`) are dropped. The field
-names are parsed in
+lone numeric suffix such as `{Club Top 13}` or `{2 em 1}` is kept. Names
+containing any `SERIES_EXCEPTIONS` entry (defaults: `Legacy`, `Collector's`)
+are dropped, so `Japan` also removes `Live in Japan`. The field names are
+parsed in
 [`src/server/searchQuery.ts`](../src/server/searchQuery.ts).
 
 Plain-title detection is library-wide. Before the bulk load the builder
