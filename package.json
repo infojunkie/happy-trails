@@ -1,6 +1,6 @@
 {
   "name": "happy-trails",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "private": true,
   "description": "Browse the Synology mediaserver music library.",
   "type": "module",
@@ -10,8 +10,10 @@
   "scripts": {
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "tsc -p tsconfig.client.json",
+    "build:client": "npm run build:vendor && tsc -p tsconfig.client.json",
+    "build:vendor": "node scripts/copy-coverflow.mjs",
     "build:docker": "TAG=$(npm pkg get version --workspaces=false); docker build --network=host -t happy-trails:v$TAG . && docker save happy-trails:v$TAG | gzip > happy-trails-$TAG.tar.gz",
+    "predev": "npm run build:vendor",
     "dev": "node scripts/dev.mjs",
     "lint": "eslint .",
     "watch:client": "tsc -p tsconfig.client.json --watch --preserveWatchOutput",
@@ -36,8 +38,12 @@
     "express": "^5.1.0",
     "pg": "^8.13.1"
   },
+  "allowScripts": {
+    "@northstarxyzz/coverflow@0.1.0": true
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@northstarxyzz/coverflow": "git+https://github.com/NorthStarXyzz/coverflow.git",
     "@playwright/test": "^1.65.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",

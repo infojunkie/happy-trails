@@ -2,6 +2,7 @@ node_modules
 dist
 public/client
 public/shared
+public/vendor
 .env
 .env.*
 !.env.example

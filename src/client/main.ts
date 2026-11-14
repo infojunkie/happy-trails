@@ -1,3 +1,4 @@
+import { Coverflow, type CoverflowItem } from '@northstarxyzz/coverflow';
 import {
   isFilterMode,
   isSortKey,
@@ -35,6 +36,29 @@ const SEARCH_DEBOUNCE_MS = 400;
 const STATUS_POLL_MS = 30_000;
 
 type SearchMode = 'albums' | 'tracks';
+type AlbumView = 'grid' | 'coverflow';
+
+const ALBUM_VIEW_KEY = 'happy-trails.album-view';
+
+interface AlbumViewMode {
+  id: AlbumView;
+  label: string;
+  /** Inline SVG path on a 24×24 viewBox. */
+  icon: string;
+}
+
+const ALBUM_VIEW_MODES: readonly AlbumViewMode[] = [
+  {
+    id: 'grid',
+    label: 'Grid view',
+    icon: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+  },
+  {
+    id: 'coverflow',
+    label: 'Cover Flow view',
+    icon: 'M2 8 7 5v14l-5-3zM9.5 3h5v18h-5zM22 8l-5-3v14l5-3z',
+  },
+];
 
 interface State {
   selectedGenres: string[];
@@ -58,6 +82,7 @@ interface State {
   q: string;
   sort: SortKey;
   searchMode: SearchMode;
+  albumView: AlbumView;
   albums: AlbumSummary[];
   total: number;
   tracks: TrackSummary[];
@@ -96,6 +121,7 @@ const state: State = {
   q: '',
   sort: 'recent',
   searchMode: 'albums',
+  albumView: loadAlbumView(),
   albums: [],
   total: 0,
   tracks: [],
@@ -112,6 +138,11 @@ const state: State = {
   reloadingLibrary: false,
 };
 
+/** Live Cover Flow instance, or null when the grid is active. */
+let coverflow: Coverflow | null = null;
+/** True while an album page request is in flight. */
+let albumsLoading = false;
+
 const searchInput = $<HTMLInputElement>('#search');
 const sortSelect = $<HTMLSelectElement>('#sort');
 const modeAlbumsButton = $<HTMLButtonElement>('#mode-albums');
@@ -119,6 +150,9 @@ const modeTracksButton = $<HTMLButtonElement>('#mode-tracks');
 const statsEl = $('#library-stats');
 const resultSummary = $('#result-summary');
 const albumGrid = $('#album-grid');
+const coverflowEl = $('#album-coverflow');
+const coverflowCaption = $('#coverflow-caption');
+const viewSwitch = $('#view-switch');
 const trackList = $<HTMLUListElement>('#track-list');
 const emptyState = $('#empty-state');
 const emptyTitle = $('#empty-title');
@@ -273,18 +307,96 @@ function renderModeControls(): void {
   }
 }
 
+function loadAlbumView(): AlbumView {
+  try {
+    return localStorage.getItem(ALBUM_VIEW_KEY) === 'coverflow'
+      ? 'coverflow'
+      : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
+
+function saveAlbumView(view: AlbumView): void {
+  try {
+    localStorage.setItem(ALBUM_VIEW_KEY, view);
+  } catch {
+    // localStorage may be unavailable; the current session still keeps it.
+  }
+}
+
+function viewIcon(pathData: string): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS(namespace, 'path');
+  path.setAttribute('d', pathData);
+  path.setAttribute('fill', 'currentColor');
+  svg.append(path);
+  return svg;
+}
+
+/** One icon button per available album view, driven by the mode registry. */
+function renderViewSwitch(): void {
+  viewSwitch.replaceChildren(
+    ...ALBUM_VIEW_MODES.map((mode) => {
+      const button = el(
+        'button',
+        {
+          class: 'view-switch-option',
+          type: 'button',
+          title: mode.label,
+          'aria-label': mode.label,
+          'aria-pressed': String(state.albumView === mode.id),
+          'data-view': mode.id,
+        },
+        viewIcon(mode.icon),
+      );
+      button.addEventListener('click', () => setAlbumView(mode.id));
+      return button;
+    }),
+  );
+}
+
+function syncAlbumViewVisibility(): void {
+  const tracks = state.searchMode === 'tracks';
+  const flow = !tracks && state.albumView === 'coverflow';
+  viewSwitch.hidden = tracks;
+  albumGrid.hidden = tracks || flow;
+  coverflowEl.hidden = !flow;
+  if (!flow) disposeCoverflow();
+}
+
+function setAlbumView(view: AlbumView): void {
+  if (state.albumView === view) return;
+  state.albumView = view;
+  saveAlbumView(view);
+  renderViewSwitch();
+  syncAlbumViewVisibility();
+  if (state.searchMode !== 'albums') return;
+
+  if (albumsLoading && state.albums.length === 0) {
+    if (view === 'coverflow') renderCoverflowStatus('Loading albums…');
+    else renderSkeletons();
+    return;
+  }
+  renderAlbums();
+}
+
 /** Reflect the Albums/Tracks switch and the mode-specific result chrome. */
 function renderSearchMode(): void {
   const tracks = state.searchMode === 'tracks';
   modeAlbumsButton.setAttribute('aria-pressed', String(!tracks));
   modeTracksButton.setAttribute('aria-pressed', String(tracks));
-  albumGrid.hidden = tracks;
   trackList.hidden = !tracks;
   emptyTitle.textContent = tracks ? 'No tracks found' : 'No albums found';
   loadMoreButton.textContent = tracks ? 'Load more tracks' : 'Load more albums';
   searchInput.placeholder = tracks
     ? 'Search tracks…'
     : 'Search the mediatheque…';
+  syncAlbumViewVisibility();
 }
 
 function setSearchMode(mode: SearchMode): void {
@@ -317,7 +429,7 @@ function renderResults(): void {
 
 function renderCurrentSkeletons(count = SKELETON_COUNT): void {
   if (state.searchMode === 'tracks') renderTrackSkeletons(count);
-  else renderSkeletons(count);
+  else renderAlbumSkeletons(count);
 }
 
 /** The facet controls mirror a query made only of facet terms. */
@@ -883,11 +995,12 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
   albumAbort = controller;
   const sequence = ++requestSequence;
 
+  albumsLoading = true;
   if (reset) {
     state.albums = [];
     loadMoreButton.hidden = true;
     emptyState.hidden = true;
-    renderSkeletons();
+    renderAlbumSkeletons();
   }
   setSummary(reset ? 'Loading…' : `Loading more of ${formatCount(state.total)}…`);
   loadMoreButton.disabled = true;
@@ -934,17 +1047,169 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
     updateRefreshControl();
     return null;
   } finally {
-    if (albumAbort === controller) albumAbort = null;
+    if (albumAbort === controller) {
+      albumAbort = null;
+      albumsLoading = false;
+    }
     if (sequence === requestSequence) {
       albumGrid.removeAttribute('aria-busy');
+      coverflowEl.removeAttribute('aria-busy');
       loadMoreButton.disabled = false;
       updateRefreshControl();
     }
   }
 }
 
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const chroma = (1 - Math.abs(2 * l - 1)) * s;
+  const sector = hue / 60;
+  const x = chroma * (1 - Math.abs((sector % 2) - 1));
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (sector < 1) {
+    r = chroma;
+    g = x;
+  } else if (sector < 2) {
+    r = x;
+    g = chroma;
+  } else if (sector < 3) {
+    g = chroma;
+    b = x;
+  } else if (sector < 4) {
+    g = x;
+    b = chroma;
+  } else if (sector < 5) {
+    r = x;
+    b = chroma;
+  } else {
+    r = chroma;
+    b = x;
+  }
+  const base = l - chroma / 2;
+  const channel = (value: number): string =>
+    Math.round((value + base) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
+/** Placeholder accent matching the grid covers' key-derived hue. */
+function coverAccent(key: string): string {
+  return hslToHex(hashString(key) % 360, 42, 38);
+}
+
+function coverflowItems(): CoverflowItem[] {
+  return state.albums.map((album) => ({
+    id: album.key,
+    title: album.album,
+    subtitle: [album.artist, album.year === null ? '' : String(album.year)]
+      .filter(Boolean)
+      .join(' · '),
+    artwork: `/api/albums/${encodeURIComponent(album.key)}/cover`,
+    accent: coverAccent(album.key),
+  }));
+}
+
+function renderCoverflowCaption(album: AlbumSummary | undefined): void {
+  if (!album) {
+    coverflowCaption.hidden = true;
+    coverflowCaption.replaceChildren();
+    return;
+  }
+
+  const title = el('button', {
+    class: 'coverflow-caption-title',
+    type: 'button',
+    text: album.album,
+    'aria-haspopup': 'dialog',
+    'aria-label': `Open ${album.album} by ${album.artist}`,
+  });
+  title.addEventListener('click', () => void openAlbum(album));
+
+  const meta: Array<Node | string> = [
+    ...artistNodes(album.artists, album.artist),
+  ];
+  if (album.year !== null) meta.push(' · ', String(album.year));
+
+  coverflowCaption.replaceChildren(
+    title,
+    el('span', { class: 'coverflow-caption-meta' }, ...meta),
+  );
+  coverflowCaption.hidden = false;
+}
+
+function disposeCoverflow(): void {
+  coverflow?.dispose();
+  coverflow = null;
+  coverflowEl.replaceChildren();
+  coverflowEl.removeAttribute('aria-busy');
+  renderCoverflowCaption(undefined);
+}
+
+function renderCoverflowStatus(text: string | null): void {
+  disposeCoverflow();
+  if (text === null) return;
+  coverflowEl.setAttribute('aria-busy', 'true');
+  coverflowEl.append(
+    el(
+      'p',
+      { class: 'coverflow-status' },
+      el('span', { class: 'spinner', 'aria-hidden': 'true' }),
+      el('span', { text }),
+    ),
+  );
+}
+
+function renderAlbumSkeletons(count = SKELETON_COUNT): void {
+  if (state.albumView === 'coverflow') {
+    renderCoverflowStatus(count === 0 ? null : 'Loading albums…');
+    return;
+  }
+  renderSkeletons(count);
+}
+
+function renderCoverflow(): void {
+  coverflowEl.removeAttribute('aria-busy');
+  if (state.albums.length === 0) {
+    disposeCoverflow();
+    return;
+  }
+
+  const items = coverflowItems();
+  if (coverflow) {
+    coverflow.setItems(items);
+    renderCoverflowCaption(state.albums[coverflow.state.selectedIndex]);
+    return;
+  }
+
+  coverflowEl.replaceChildren();
+  coverflow = new Coverflow(coverflowEl, {
+    items,
+    label: 'Album covers',
+    reflection: true,
+    maxCardSize: 360,
+    onSelect: (item) => {
+      renderCoverflowCaption(
+        state.albums.find((candidate) => candidate.key === item.id),
+      );
+    },
+    onAction: (item) => {
+      const album = state.albums.find((candidate) => candidate.key === item.id);
+      if (album) void openAlbum(album);
+    },
+  });
+  renderCoverflowCaption(state.albums[coverflow.state.selectedIndex]);
+}
+
 function renderAlbums(): void {
-  albumGrid.replaceChildren(...state.albums.map(renderAlbumCard));
+  if (state.searchMode === 'albums' && state.albumView === 'coverflow') {
+    renderCoverflow();
+  } else {
+    albumGrid.replaceChildren(...state.albums.map(renderAlbumCard));
+  }
   emptyState.hidden = state.albums.length > 0;
   loadMoreButton.hidden =
     state.albums.length === 0 || state.albums.length >= state.total;
@@ -2723,6 +2988,7 @@ async function boot(): Promise<void> {
   }
 }
 
+renderViewSwitch();
 readUrlState();
 lastSyncedUrl = currentUrl();
 bindEvents();

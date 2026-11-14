@@ -13,11 +13,13 @@ albums and tracks by redirecting to the synology Audio Station web app.
 
 ## Features
 
-![Screenshot of albums view](docs/screenshot-albums.png)
+![Screenshot of albums grid](docs/screenshot-albums.png)
 
-![Screenshot of album detail view](docs/screenshot-album.png)
+![Screenshot of albums cover flow](docs/screenshot-coverflow.png)
 
-![Screenshot of tracks view](docs/screenshot-tracks.png)
+![Screenshot of album detail](docs/screenshot-album.png)
+
+![Screenshot of track listing](docs/screenshot-tracks.png)
 
 - Album grid sorted by latest upload date (`MAX(date)`).
 - Multi-CD albums whose titles differ only by a whitespace-separated
@@ -28,6 +30,13 @@ albums and tracks by redirecting to the synology Audio Station web app.
   the track's own genre/region pills, duration, and (when signed in) a
   per-track Play control. The mode is stored in the URL (`view=tracks`) and in
   browser history.
+- A **view switch** at the right of the results header offers **Grid** and
+  **Cover Flow** album layouts, one icon per mode. Cover Flow adds a 3D
+  carousel with drag, wheel, and arrow-key navigation, reflections, and
+  click/Enter activation that opens the album dialog. The caption below the
+  flow matches the grid: the album title opens the dialog and each artist name
+  runs an artist search. The choice is remembered in `localStorage`
+  (`happy-trails.album-view`); the switch is hidden in Tracks mode.
 - Long genre/region lists end in a clickable **+N more** pill in album cards,
   the album dialog, and track rows. It expands the list to every tag and
   switches to **Show less** to collapse it again.
@@ -108,6 +117,8 @@ albums and tracks by redirecting to the synology Audio Station web app.
 ## Requirements
 
 - Node.js 24 or newer (the server uses the built-in `node:sqlite` module).
+- `git` available to `npm install`; the Cover Flow component is a pinned GitHub
+  dependency (see [.npmrc](.npmrc)).
 - Read access to a PostgreSQL database containing the [`music`](docs/mediaserver.sql) table.
 - A writable local directory for the SQLite search index (default
   `$TMPDIR/happy-trails-index`), or `INDEX_DB_DIR=:memory:` to avoid disk
@@ -159,7 +170,7 @@ npm run dev
 
 | Script | Purpose |
 | --- | --- |
-| `npm run build` | Build server (`dist/`) and client (`public/client/`) |
+| `npm run build` | Build server (`dist/`), client (`public/client/`), and vendor assets (`public/vendor/`) |
 | `npm run typecheck` | Type-check both targets without emitting |
 | `npm start` | Run the built server |
 | `npm run dev` | Watch client and server |
@@ -1024,7 +1035,8 @@ happy-trails/
 │       └── types.ts      Shared API types and sort keys
 ├── public/
 │   ├── index.html
-│   └── styles.css        Compiled client files are written to public/client/
+│   ├── styles.css        Compiled client files are written to public/client/
+│   └── vendor/           Generated Cover Flow assets (public/vendor/coverflow/)
 ├── tests/
 │   ├── api/              Express endpoint tests
 │   ├── artwork/          FileStation path-mapping tests
@@ -1037,9 +1049,16 @@ happy-trails/
 ├── eslint.config.js      ESLint flat config
 ├── playwright.config.ts  Fixture-server-backed browser tests
 ├── scripts/dev.mjs       Runs the client and server watchers
+├── scripts/copy-coverflow.mjs  Copies the Cover Flow dist and notices to public/
 ├── tsconfig.test.json    Typechecks the test suite
 └── .env.example
 ```
+
+Cover Flow uses the MIT-licensed
+[@northstarxyzz/coverflow](https://github.com/NorthStarXyzz/coverflow)
+component. `npm run build:vendor` copies its built files, license, and
+third-party notices into `public/vendor/coverflow/`; the browser discovers them
+through the import map in `public/index.html`.
 
 ## Operational notes
 

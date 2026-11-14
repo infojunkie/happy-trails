@@ -5,12 +5,13 @@ FROM node:24-alpine AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json package-lock.json .npmrc ./
+RUN apk add --no-cache git && npm ci
 
 COPY tsconfig.json tsconfig.server.json tsconfig.client.json ./
 COPY src ./src
 COPY public ./public
+COPY scripts ./scripts
 RUN npm run build
 
 # ---- runtime: production dependencies, compiled assets, no .env -----------

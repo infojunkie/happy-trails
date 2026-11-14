@@ -765,6 +765,54 @@ p {
   align-items: center;
 }
 
+.results-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.view-switch {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.view-switch-option {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.view-switch-option:hover,
+.view-switch-option:focus-visible {
+  color: var(--text);
+}
+
+.view-switch-option[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+}
+
+.view-switch-option svg {
+  width: 17px;
+  height: 17px;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -877,6 +925,88 @@ button.chip:hover {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(206px, 1fr));
   gap: clamp(14px, 1.6vw, 20px);
+}
+
+.album-coverflow-wrap {
+  position: relative;
+}
+
+.album-coverflow {
+  margin-bottom: 18px;
+}
+
+.album-coverflow .cf-root {
+  height: clamp(320px, 46vh, 540px);
+  --cf-foreground: var(--text);
+  --cf-muted: var(--text-muted);
+  --cf-focus: var(--accent);
+  --cf-card-radius: 8px;
+}
+
+/* Activation opens the album dialog; playback controls are not used here. */
+.album-coverflow .cf-action {
+  display: none !important;
+}
+
+/* The component's plain-text caption is replaced by the interactive one. */
+.album-coverflow .cf-caption {
+  display: none;
+}
+
+.coverflow-caption {
+  position: absolute;
+  right: 12%;
+  bottom: 5%;
+  left: 12%;
+  z-index: 2;
+  text-align: center;
+  line-height: 1.45;
+}
+
+.coverflow-caption-title {
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  font-size: clamp(17px, 1.8vw, 22px);
+  font-weight: 550;
+  letter-spacing: -0.025em;
+  line-height: 1.45;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.coverflow-caption-title:hover,
+.coverflow-caption-title:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.coverflow-caption-meta {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverflow-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 240px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
 .album-card {
@@ -1946,6 +2076,16 @@ h4.disc-heading {
 
   .album-title {
     font-size: 0.85rem;
+  }
+
+  .coverflow-caption {
+    right: 8%;
+    bottom: 4%;
+    left: 8%;
+  }
+
+  .coverflow-caption-title {
+    font-size: 1.05rem;
   }
 
   .header-controls {

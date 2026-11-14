@@ -8,6 +8,7 @@ export default tseslint.config(
       'dist/**',
       'public/client/**',
       'public/shared/**',
+      'public/vendor/**',
       'test-results/**',
       'playwright-report/**',
       'blob-report/**',
