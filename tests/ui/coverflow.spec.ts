@@ -42,6 +42,11 @@ test('Cover Flow activates the selected album by click and keyboard', async ({
   await expect(page.locator('#dialog-title')).toHaveText(firstTitle ?? '');
   await page.locator('#album-dialog .dialog-close').click();
   await expect(page.locator('#album-dialog')).toBeHidden();
+  // The close gesture consumes the album history entry; wait for that
+  // navigation to settle before driving the carousel.
+  await expect
+    .poll(() => page.evaluate(() => window.history.state?.album ?? null))
+    .toBeNull();
 
   await page.locator('.cf-viewport').focus();
   await page.keyboard.press('ArrowRight');

@@ -36,8 +36,8 @@ jobs:
       - name: API and search tests
         run: npm run test:backend
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
 
       - name: UI tests
         run: npm run test:ui

@@ -9,3 +9,4 @@ public/third-party-notices.txt
 .gitignore
 *.log
 npm-debug.log*
+*.tar.gz

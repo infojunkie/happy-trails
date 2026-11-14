@@ -15,7 +15,7 @@ const watch = process.argv.includes('--watch');
 async function writeNotices() {
   const packages = [
     ['@northstarxyzz/coverflow', ['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md']],
-    // Leaflet notices will be added here when the map view lands.
+    ['leaflet', ['LICENSE']],
   ];
   const sections = [];
   for (const [name, files] of packages) {

@@ -1,5 +1,8 @@
 import '@northstarxyzz/coverflow/style.css';
+import 'leaflet/dist/leaflet.css';
 import { Coverflow, type CoverflowItem } from '@northstarxyzz/coverflow';
+import { createCover, hashString } from './cover.js';
+import type { AlbumMapHandle, AlbumMapPlacement } from './map.js';
 import {
   isFilterMode,
   isSortKey,
@@ -37,7 +40,7 @@ const SEARCH_DEBOUNCE_MS = 400;
 const STATUS_POLL_MS = 30_000;
 
 type SearchMode = 'albums' | 'tracks';
-type AlbumView = 'grid' | 'coverflow';
+type AlbumView = 'grid' | 'coverflow' | 'map';
 
 const ALBUM_VIEW_KEY = 'happy-trails.album-view';
 
@@ -58,6 +61,11 @@ const ALBUM_VIEW_MODES: readonly AlbumViewMode[] = [
     id: 'coverflow',
     label: 'Cover Flow view',
     icon: 'M2 8 7 5v14l-5-3zM9.5 3h5v18h-5zM22 8l-5-3v14l5-3z',
+  },
+  {
+    id: 'map',
+    label: 'World map view',
+    icon: 'M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z',
   },
 ];
 
@@ -141,6 +149,11 @@ const state: State = {
 
 /** Live Cover Flow instance, or null when the grid is active. */
 let coverflow: Coverflow | null = null;
+/** Live world map instance, or null before the map view is opened. */
+let albumMap: AlbumMapHandle | null = null;
+let albumMapLoading = false;
+/** Fit the map to the pins after the next album reset. */
+let mapNeedsFit = true;
 /** True while an album page request is in flight. */
 let albumsLoading = false;
 
@@ -153,6 +166,14 @@ const resultSummary = $('#result-summary');
 const albumGrid = $('#album-grid');
 const coverflowEl = $('#album-coverflow');
 const coverflowCaption = $('#coverflow-caption');
+const mapViewEl = $('#album-map-view');
+const mapEl = $('#album-map');
+const mapEmptyNote = $('#album-map-empty');
+const mapUnplacedSection = $('#album-unplaced-section');
+const mapUnplacedPanel = $('#album-unplaced-panel');
+const mapUnplacedToggle = $<HTMLButtonElement>('#album-unplaced-toggle');
+const mapUnplacedCount = $('#album-unplaced-count');
+const mapUnplacedList = $<HTMLUListElement>('#album-unplaced-list');
 const viewSwitch = $('#view-switch');
 const trackList = $<HTMLUListElement>('#track-list');
 const emptyState = $('#empty-state');
@@ -240,25 +261,6 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function hashString(value: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function initials(value: string): string {
-  const cleaned = value.replace(/\[[^\]]*\]|\([^)]*\)/g, ' ');
-  const words = cleaned.split(/\s+/).filter(Boolean);
-  const letters = words
-    .slice(0, 2)
-    .map((word) => word.charAt(0).toUpperCase())
-    .join('');
-  return letters || '♪';
-}
-
 function setSummary(text: string): void {
   resultSummary.textContent = text;
 }
@@ -308,11 +310,14 @@ function renderModeControls(): void {
   }
 }
 
+function isAlbumView(value: string | null): value is AlbumView {
+  return value === 'grid' || value === 'coverflow' || value === 'map';
+}
+
 function loadAlbumView(): AlbumView {
   try {
-    return localStorage.getItem(ALBUM_VIEW_KEY) === 'coverflow'
-      ? 'coverflow'
-      : 'grid';
+    const stored = localStorage.getItem(ALBUM_VIEW_KEY);
+    return isAlbumView(stored) ? stored : 'grid';
   } catch {
     return 'grid';
   }
@@ -364,19 +369,127 @@ function renderViewSwitch(): void {
 function syncAlbumViewVisibility(): void {
   const tracks = state.searchMode === 'tracks';
   const flow = !tracks && state.albumView === 'coverflow';
+  const mapView = !tracks && state.albumView === 'map';
   viewSwitch.hidden = tracks;
-  albumGrid.hidden = tracks || flow;
+  albumGrid.hidden = tracks || flow || mapView;
   coverflowEl.hidden = !flow;
+  mapViewEl.hidden = !mapView;
+  if (!mapView) mapUnplacedSection.hidden = true;
+  if (mapView) {
+    // The map branch of renderAlbums restores this when more pages exist.
+    loadMoreButton.hidden = true;
+    void ensureAlbumMap();
+  }
   if (!flow) disposeCoverflow();
+  if (!mapView) albumMap?.hide();
+}
+
+async function ensureAlbumMap(): Promise<void> {
+  if (state.searchMode !== 'albums' || state.albumView !== 'map') return;
+  if (albumMap) {
+    albumMap.invalidate();
+    return;
+  }
+  if (albumMapLoading) return;
+
+  albumMapLoading = true;
+  try {
+    const { createAlbumMap } = await import('./map.js');
+    const handle = await createAlbumMap(mapEl, {
+      onOpenAlbum: (album) => void openAlbum(album),
+      onPlacement: renderMapDock,
+      fullscreenTarget: mapViewEl,
+    });
+    if (state.searchMode !== 'albums' || state.albumView !== 'map') {
+      handle.destroy();
+      return;
+    }
+    albumMap = handle;
+    const fit = mapNeedsFit;
+    mapNeedsFit = false;
+    handle.setAlbums(state.albums, fit);
+    handle.invalidate();
+  } catch (error) {
+    const retry = el('button', {
+      class: 'button-secondary',
+      type: 'button',
+      text: 'Retry',
+    });
+    retry.addEventListener('click', () => {
+      mapEl.replaceChildren();
+      void ensureAlbumMap();
+    });
+    mapEl.replaceChildren(
+      el(
+        'div',
+        { class: 'map-status map-status-error', role: 'alert' },
+        el('p', { text: describe(error) }),
+        retry,
+      ),
+    );
+  } finally {
+    albumMapLoading = false;
+  }
+}
+
+function renderUnplacedItem(
+  album: AlbumSummary,
+  unresolved: readonly string[],
+): HTMLLIElement {
+  const reason =
+    unresolved.length > 0 ? `Unmapped: ${unresolved.join(', ')}` : '';
+  const item = el(
+    'button',
+    {
+      class: 'album-unplaced-item',
+      type: 'button',
+      title: reason || undefined,
+      'aria-label': `Open ${album.album} by ${album.artist}${
+        reason ? `. ${reason}` : ''
+      }`,
+    },
+    createCover(album),
+    el(
+      'span',
+      { class: 'album-unplaced-text' },
+      el('span', { class: 'album-unplaced-album', text: album.album }),
+      el('span', { class: 'album-unplaced-artist', text: album.artist }),
+      ...(reason
+        ? [el('span', { class: 'album-unplaced-reason', text: reason })]
+        : []),
+    ),
+  );
+  item.addEventListener('click', () => void openAlbum(album));
+  return el('li', {}, item);
+}
+
+function renderMapDock(placement: AlbumMapPlacement): void {
+  const count = placement.unplaced.length;
+  mapUnplacedSection.hidden = count === 0;
+  mapUnplacedCount.textContent = String(count);
+  mapUnplacedList.replaceChildren(
+    ...placement.unplaced.map((album) =>
+      renderUnplacedItem(album, placement.unresolved.get(album.key) ?? []),
+    ),
+  );
+  mapEmptyNote.hidden = !(
+    state.albums.length > 0 && placement.placedCount === 0
+  );
 }
 
 function setAlbumView(view: AlbumView): void {
   if (state.albumView === view) return;
   state.albumView = view;
   saveAlbumView(view);
+  pushFilterState();
   renderViewSwitch();
   syncAlbumViewVisibility();
   if (state.searchMode !== 'albums') return;
+
+  if (view === 'map') {
+    renderAlbums();
+    return;
+  }
 
   if (albumsLoading && state.albums.length === 0) {
     if (view === 'coverflow') renderCoverflowStatus('Loading albums…');
@@ -797,11 +910,21 @@ function handleLoginDeepLink(): void {
 /* Initial load                                                        */
 /* ------------------------------------------------------------------ */
 
-function applyFilterParams(params: URLSearchParams): void {
+function applyFilterParams(
+  params: URLSearchParams,
+  options: { useStoredView?: boolean } = {},
+): void {
   state.q = (params.get('q') ?? '').slice(0, 200);
   const sort = params.get('sort');
   state.sort = isSortKey(sort) ? sort : 'recent';
   state.searchMode = params.get('view') === 'tracks' ? 'tracks' : 'albums';
+  const layout = params.get('layout');
+  state.albumView = isAlbumView(layout)
+    ? layout
+    : options.useStoredView
+      ? loadAlbumView()
+      : 'grid';
+  if (!options.useStoredView) saveAlbumView(state.albumView);
   searchInput.value = state.q;
   sortSelect.value = state.sort;
   syncSelectionsFromQuery();
@@ -814,7 +937,18 @@ function readFilterState(): void {
 
 function readUrlState(): void {
   const params = new URLSearchParams(location.search);
-  applyFilterParams(params);
+  applyFilterParams(params, { useStoredView: true });
+
+  // Make the initial history entry reflect the remembered view mode, without
+  // dropping deep-link parameters or adding a history entry.
+  if (!params.has('layout') && state.albumView !== 'grid') {
+    params.set('layout', state.albumView);
+    history.replaceState(
+      history.state,
+      '',
+      `${location.pathname}?${params.toString()}`,
+    );
+  }
 
   const login = params.get('login') === '1';
   const playTrackId = params.get('playTrack');
@@ -854,6 +988,7 @@ function buildFilterUrl(): string {
   if (state.q) params.set('q', state.q);
   if (state.sort !== 'recent') params.set('sort', state.sort);
   if (state.searchMode === 'tracks') params.set('view', 'tracks');
+  if (state.albumView !== 'grid') params.set('layout', state.albumView);
   const query = params.toString();
   return query ? `${location.pathname}?${query}` : location.pathname;
 }
@@ -1001,6 +1136,7 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
     state.albums = [];
     loadMoreButton.hidden = true;
     emptyState.hidden = true;
+    mapNeedsFit = true;
     renderAlbumSkeletons();
   }
   setSummary(reset ? 'Loading…' : `Loading more of ${formatCount(state.total)}…`);
@@ -1165,6 +1301,7 @@ function renderCoverflowStatus(text: string | null): void {
 }
 
 function renderAlbumSkeletons(count = SKELETON_COUNT): void {
+  if (state.albumView === 'map') return;
   if (state.albumView === 'coverflow') {
     renderCoverflowStatus(count === 0 ? null : 'Loading albums…');
     return;
@@ -1206,6 +1343,22 @@ function renderCoverflow(): void {
 }
 
 function renderAlbums(): void {
+  if (state.searchMode === 'albums' && state.albumView === 'map') {
+    emptyState.hidden = state.albums.length > 0;
+    loadMoreButton.hidden =
+      state.albums.length === 0 || state.albums.length >= state.total;
+    updateSummary();
+    renderActiveFilters();
+    if (albumMap) {
+      const fit = mapNeedsFit;
+      mapNeedsFit = false;
+      albumMap.setAlbums(state.albums, fit);
+    } else {
+      void ensureAlbumMap();
+    }
+    return;
+  }
+
   if (state.searchMode === 'albums' && state.albumView === 'coverflow') {
     renderCoverflow();
   } else {
@@ -1326,31 +1479,6 @@ function albumMeta(album: AlbumSummary): string {
   );
   if (album.duration > 0) parts.push(formatTotalDuration(album.duration));
   return parts.join(' · ');
-}
-
-function createCover(
-  album: Pick<AlbumSummary, 'key' | 'album'>,
-  extraClass = '',
-): HTMLElement {
-  const cover = el('span', {
-    class: `cover ${extraClass}`.trim(),
-    'aria-hidden': 'true',
-  });
-  cover.style.setProperty('--cover-hue', String(hashString(album.key) % 360));
-  cover.append(el('span', { class: 'cover-initials', text: initials(album.album) }));
-
-  const image = el('img', {
-    class: 'cover-image',
-    alt: '',
-    loading: 'lazy',
-    decoding: 'async',
-  });
-  image.addEventListener('load', () => cover.classList.add('has-cover'));
-  image.addEventListener('error', () => image.remove());
-  image.src = `/api/albums/${encodeURIComponent(album.key)}/cover`;
-  cover.append(image);
-
-  return cover;
 }
 
 function createSearchButton(
@@ -2729,6 +2857,14 @@ function bindEvents(): void {
 
   modeAlbumsButton.addEventListener('click', () => setSearchMode('albums'));
   modeTracksButton.addEventListener('click', () => setSearchMode('tracks'));
+
+  mapUnplacedToggle.addEventListener('click', () => {
+    const expanded =
+      mapUnplacedToggle.getAttribute('aria-expanded') !== 'false';
+    const next = !expanded;
+    mapUnplacedToggle.setAttribute('aria-expanded', String(next));
+    mapUnplacedPanel.hidden = !next;
+  });
 
   genreSearch.addEventListener('input', () => {
     state.genreQuery = genreSearch.value;

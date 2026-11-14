@@ -1,3 +1,4 @@
+import { placeCatalogKeys } from '../shared/placeCatalog.js';
 import { regionKey } from '../shared/text.js';
 import { config } from './config.js';
 
@@ -7,7 +8,8 @@ import { config } from './config.js';
  * ISO 3166 country names are generated with Intl.DisplayNames in the languages
  * that commonly appear in the catalogue. A curated list adds continents,
  * subnational regions, historical countries, and spelling variants that CLDR
- * does not provide. `REGION_TAGS` appends site-specific names.
+ * does not provide; the shared place catalog adds cities and manual place
+ * overrides. `REGION_TAGS` appends site-specific names.
  *
  * Matching is exact (after folding case, accents, and apostrophe variants), so
  * compound tags such as "Jazz/Brazil" remain genres until a separate splitting
@@ -102,6 +104,7 @@ function buildKeys(): Set<string> {
   const keys = new Set<string>();
   for (const alias of REGION_ALIASES) addName(keys, alias);
   for (const alias of config.regionTags) addName(keys, alias);
+  for (const key of placeCatalogKeys()) keys.add(key);
   addIsoNames(keys);
   return keys;
 }

@@ -296,6 +296,41 @@
             </div>
           </div>
         </section>
+
+        <section
+          id="album-unplaced-section"
+          class="facet-section facet-section-unplaced"
+          aria-labelledby="album-unplaced-heading"
+          hidden
+        >
+          <div class="facets-header">
+            <h2>
+              <button
+                id="album-unplaced-toggle"
+                class="facet-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="album-unplaced-panel"
+              >
+                <span id="album-unplaced-heading">Not on the map</span>
+                <span
+                  id="album-unplaced-count"
+                  class="album-unplaced-count"
+                  aria-live="polite"
+                  >0</span
+                >
+                <span class="facet-chevron" aria-hidden="true">▾</span>
+              </button>
+            </h2>
+          </div>
+          <div id="album-unplaced-panel" class="facet-panel">
+            <ul
+              id="album-unplaced-list"
+              class="album-unplaced-list"
+              aria-label="Albums not on the map"
+            ></ul>
+          </div>
+        </section>
       </aside>
 
       <main class="content">
@@ -324,6 +359,19 @@
           <div class="album-coverflow-wrap">
             <div id="album-coverflow" class="album-coverflow" hidden></div>
             <div id="coverflow-caption" class="coverflow-caption" hidden></div>
+          </div>
+          <div id="album-map-view" class="album-map-view" hidden>
+            <div class="album-map-canvas">
+              <div id="album-map" class="album-map" aria-label="Album map"></div>
+              <p
+                id="album-map-empty"
+                class="album-map-empty"
+                role="status"
+                hidden
+              >
+                No region-tagged albums on this page
+              </p>
+            </div>
           </div>
         </div>
         <ul id="track-list" class="track-results" aria-label="Tracks" hidden></ul>

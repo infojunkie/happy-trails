@@ -30,13 +30,26 @@ albums and tracks by redirecting to the synology Audio Station web app.
   the track's own genre/region pills, duration, and (when signed in) a
   per-track Play control. The mode is stored in the URL (`view=tracks`) and in
   browser history.
-- A **view switch** at the right of the results header offers **Grid** and
-  **Cover Flow** album layouts, one icon per mode. Cover Flow adds a 3D
-  carousel with drag, wheel, and arrow-key navigation, reflections, and
-  click/Enter activation that opens the album dialog. The caption below the
-  flow matches the grid: the album title opens the dialog and each artist name
-  runs an artist search. The choice is remembered in `localStorage`
-  (`happy-trails.album-view`); the switch is hidden in Tracks mode.
+- A **view switch** at the right of the results header offers **Grid**,
+  **Cover Flow**, and **World map** album layouts, one icon per mode. Cover
+  Flow adds a 3D carousel with drag, wheel, and arrow-key navigation,
+  reflections, and click/Enter activation that opens the album dialog. The
+  caption below the flow matches the grid: the album title opens the dialog
+  and each artist name runs an artist search. The choice is remembered in
+  `localStorage` (`happy-trails.album-view`) and recorded in the URL as
+  `layout=coverflow` or `layout=map` (grid is the unparameterized default), so
+  Back/Forward restore it; the switch is hidden in Tracks mode.
+- **World map** plots the current page on an offline Natural Earth basemap in
+  the Equal Earth projection, with countries tinted by a deterministic pastel
+  palette. Albums are
+  grouped by place and shown as fanned cover pins; clicking a cover opens the
+  album dialog. An album with several disjoint regions appears at each, and
+  **Load more** appends the next page's pins. The map can be made full-screen.
+  If the map data fails to load, a Retry action reloads both the country
+  lookup and the basemap. Albums without a resolved region appear in a collapsible
+  **Not on the map** section beneath the filters in the left sidebar; unmapped
+  tags are called out there, while albums with no region tag are listed
+  without an extra label.
 - Long genre/region lists end in a clickable **+N more** pill in album cards,
   the album dialog, and track rows. It expands the list to every tag and
   switches to **Show less** to collapse it again.
@@ -172,6 +185,8 @@ Other useful scripts:
 | Script | Purpose |
 | --- | --- |
 | `npm run build` | Build server (`dist/`) and the client bundle (`public/client/`) |
+| `npm run build:places` | Regenerate the map country lookup and world basemap from Natural Earth |
+| `npm run audit:places` | Audit live region tags against the place catalog (requires database access) |
 | `npm run typecheck` | Type-check both targets without emitting |
 | `npm start` | Run the built server |
 | `npm run dev` | Watch client, typecheck, and server |
@@ -603,16 +618,66 @@ without buffering them in server memory. Availability is cached briefly in
 memory; missing files are retried sooner than present ones. The service
 account needs read access to the music share.
 
+### Places and map geolocation
+
+Region tags are the only input to the map geolocation layer. The server
+classifies genre tags as regions during index building; the map never parses
+album or artist text. Country names and coordinates are generated from
+[Natural Earth](https://www.naturalearthdata.com/) (public domain) and
+`Intl.DisplayNames` in the catalogue's six languages, then merged with the
+manual catalog in
+[`src/shared/placeCatalog.ts`](../src/shared/placeCatalog.ts).
+
+Catalog entries add cities, subnational regions, macro-regions, historical
+names, spelling variants, and coordinate overrides:
+
+```ts
+{
+  name: 'Vancouver',
+  tier: 'city',
+  countryCode: 'CA',
+  lat: 49.2827,
+  lon: -123.1207,
+}
+```
+
+`tier` is `city`, `subnational`, `country`, or `macro`; `countryCode` is the ISO
+alpha-2 parent/sovereign country. Because the catalog also feeds region-tag
+recognition, adding an entry makes that name a region tag (visible in the
+Regions facet and `region:` searches) and requires an index rebuild. Manual
+entries take priority over the generated country lookup.
+
+The generated assets are committed under `public/map/`: `places.json` maps
+folded country names to locations, and `world-110m.geojson` is the compact
+basemap. Regenerate them with `npm run build:places` (the script downloads
+Natural Earth data and caches it under `node_modules/.cache/`). The app never
+fetches map data from a third party at runtime. Map mode renders these assets
+with a lazily loaded [Leaflet](https://leafletjs.com) chunk (BSD-2-Clause); its
+license is included in the generated third-party notices. Leaflet core does not
+ship Equal Earth, so the map registers a small custom `L.CRS` built from the
+Equal Earth formulas in
+[`src/shared/equalEarth.ts`](../src/shared/equalEarth.ts); no projection plugin
+is needed. Map pins group albums by resolved location, fan out co-located
+covers, and open the album dialog when a cover is activated.
+
+`npm run audit:places` checks the live library against the catalog and reports
+unresolved region tags, city-name candidates, compound tags containing place
+names, and catalog entries no longer present. It also skips a small denylist of
+genre/people names that are not places (`Americana`, `Berber`, `Turkestan`,
+`Roma`). Compound tags containing `/` or `+` are normalized manually in the
+track metadata; the audit lists them with their place parts to support that
+cleanup.
+
 ### Navigation history
 
-Every committed search, facet change, match-mode change, sort change, and clear
-action pushes a browser history entry whose URL carries the filter state.
-Typing in the search box is debounced (400 ms): the first live query in an
-editing session pushes one entry and later edits replace it, so the URL always
-matches the visible results. Enter or leaving the search field commits the
-session, and Back returns to the state before editing rather than stepping
-through every keystroke. Loading more albums and scroll position are not part
-of the recorded state.
+Every committed search, facet change, match-mode change, sort change, view-mode
+change, and clear action pushes a browser history entry whose URL carries the
+filter and layout state. Typing in the search box is debounced (400 ms): the
+first live query in an editing session pushes one entry and later edits replace
+it, so the URL always matches the visible results. Enter or leaving the search
+field commits the session, and Back returns to the state before editing rather
+than stepping through every keystroke. Loading more albums, scroll position,
+map pan/zoom, and full-screen changes are not part of the recorded state.
 
 Opening an album pushes another entry. The full album summary is stored in
 `history.state` (the URL is unchanged), so Back closes the dialog and returns to
@@ -699,8 +764,10 @@ npm run test:artwork           # media-path to FileStation path mapping
 npm run test:config            # DSM frontend URL parsing
 npm run test:search            # parser + SQLite search/tag combinations
 npm run test:security          # proof-of-vulnerability audit suite
-npm run test:ui                # Playwright UI tests
-npm run test:ui:headed         # Playwright with a visible browser
+npm run test:ui                # Playwright UI tests (Chromium + Firefox)
+npm run test:ui:chromium       # Playwright, Chromium only
+npm run test:ui:firefox        # Playwright, Firefox only
+npm run test:ui:headed         # Playwright with visible browsers
 ```
 
 - API tests start the real Express app via `createApp()` with an injected fixture index.
@@ -708,7 +775,7 @@ npm run test:ui:headed         # Playwright with a visible browser
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
 - UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
-- Playwright is configured in `playwright.config.ts`; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running.
+- Playwright is configured in `playwright.config.ts` with Chromium and Firefox projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running.
 - `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.
 
 ## API
@@ -1030,14 +1097,19 @@ happy-trails/
 │   │   ├── dom.ts        Safe createElement helper
 │   │   ├── format.ts     Duration/date formatting
 │   │   ├── linkify.ts    Plain-text comment URL linkification
-│   │   └── main.ts       State, rendering, and events
+│   │   ├── main.ts       State, rendering, and events
+│   │   └── map.ts        Lazy-loaded Leaflet map, cover pins, and full-screen
 │   └── shared/
+│       ├── equalEarth.ts    Equal Earth projection formulas
+│       ├── placeCatalog.ts  Manual cities/regions/overrides and non-place denylist
+│       ├── placeLookup.ts   Catalog + generated country lookup resolution
 │       ├── text.ts       Folding and region keys shared with the browser
 │       └── types.ts      Shared API types and sort keys
 ├── public/
 │   ├── index.html
 │   ├── styles.css        App stylesheet, linked after the generated vendor CSS
-│   └── client/           Generated esbuild bundle (main.js) and vendor CSS
+│   ├── client/           Generated esbuild bundle (main.js) and vendor CSS
+│   └── map/              Generated country lookup and Natural Earth basemap
 ├── tests/
 │   ├── api/              Express endpoint tests
 │   ├── artwork/          FileStation path-mapping tests
@@ -1049,7 +1121,9 @@ happy-trails/
 ├── .github/workflows/    CI: lint, typecheck, backend and UI tests
 ├── eslint.config.js      ESLint flat config
 ├── playwright.config.ts  Fixture-server-backed browser tests
+├── scripts/audit-places.mjs  Live region-tag/place-catalog audit
 ├── scripts/build-client.mjs  esbuild bundle, vendor CSS, and license notices
+├── scripts/build-place-data.mjs  Natural Earth lookup and basemap generator
 ├── scripts/dev.mjs       Runs the client bundler, typecheck, and server watchers
 ├── tsconfig.test.json    Typechecks the test suite
 └── .env.example

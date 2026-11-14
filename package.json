@@ -1,6 +1,6 @@
 {
   "name": "happy-trails",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "private": true,
   "description": "Browse the Synology mediaserver music library.",
   "type": "module",
@@ -11,6 +11,8 @@
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc -p tsconfig.server.json",
     "build:client": "node scripts/build-client.mjs",
+    "build:places": "node --import tsx scripts/build-place-data.mjs",
+    "audit:places": "node --import tsx scripts/audit-places.mjs",
     "build:docker": "TAG=$(npm pkg get version --workspaces=false); docker build --network=host -t happy-trails:v$TAG . && docker save happy-trails:v$TAG | gzip > happy-trails-$TAG.tar.gz",
     "dev": "node scripts/dev.mjs",
     "lint": "eslint .",
@@ -27,8 +29,10 @@
     "test:security": "node --import tsx --test tests/security/*.test.ts",
     "pretest:ui": "npm run build:client",
     "test:ui": "playwright test",
+    "test:ui:chromium": "playwright test --project=chromium",
+    "test:ui:firefox": "playwright test --project=firefox",
     "test:ui:headed": "playwright test --headed",
-    "test:install-browsers": "playwright install chromium",
+    "test:install-browsers": "playwright install chromium firefox",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
@@ -45,11 +49,13 @@
     "@northstarxyzz/coverflow": "git+https://github.com/NorthStarXyzz/coverflow.git",
     "@playwright/test": "^1.65.0",
     "@types/express": "^5.0.0",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",
+    "leaflet": "^1.9.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.72.1"
