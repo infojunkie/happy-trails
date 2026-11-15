@@ -342,3 +342,18 @@ test('the fitted map leaves room for northern-most pins', async ({ page }) => {
   expect(pinBox).not.toBeNull();
   expect(pinBox!.y).toBeGreaterThanOrEqual(mapBox!.y + 4);
 });
+
+test('region filters restrict multi-region albums to the selected places', async ({
+  page,
+}) => {
+  await page.goto(`/?q=${encodeURIComponent('region:Brazil')}`);
+  await expect(page.locator('#album-grid .album-card').first()).toBeVisible();
+  await page.locator('#view-switch button[data-view="map"]').click();
+
+  const pin = page.locator(
+    '.map-pin-cover[aria-label="Open World Sampler by Various Artists"]',
+  );
+  await expect(pin).toHaveCount(1);
+  const group = page.locator('.map-pin-group').filter({ has: pin });
+  await expect(group).toHaveAttribute('aria-label', /^Brazil:/);
+});

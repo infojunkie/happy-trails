@@ -43,8 +43,10 @@ albums and tracks by redirecting to the synology Audio Station web app.
   the Equal Earth projection, with countries tinted by a deterministic pastel
   palette. Albums are
   grouped by place and shown as fanned cover pins; clicking a cover opens the
-  album dialog. An album with several disjoint regions appears at each, and
-  **Load more** appends the next page's pins. The map can be made full-screen.
+  album dialog. An album with several disjoint regions appears at each when no
+  region filter is active; with a region filter, it is pinned only in the
+  selected region(s). **Load more** appends the next page's pins. The map can
+  be made full-screen.
   If the map data fails to load, a Retry action reloads both the country
   lookup and the basemap. Albums without a resolved region appear in a collapsible
   **Not on the map** section beneath the filters in the left sidebar; unmapped

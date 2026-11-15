@@ -407,7 +407,7 @@ async function ensureAlbumMap(): Promise<void> {
     albumMap = handle;
     const fit = mapNeedsFit;
     mapNeedsFit = false;
-    handle.setAlbums(state.albums, fit);
+    handle.setAlbums(albumsForMap(), fit);
     handle.invalidate();
   } catch (error) {
     const retry = el('button', {
@@ -430,6 +430,21 @@ async function ensureAlbumMap(): Promise<void> {
   } finally {
     albumMapLoading = false;
   }
+}
+
+/**
+ * When a region filter is active, only pin each album in the selected
+ * region(s) instead of every region it carries.
+ */
+function albumsForMap(): AlbumSummary[] {
+  if (state.selectedRegions.length === 0) return state.albums;
+  const selected = selectedRegionKeys();
+  return state.albums.map((album) => ({
+    ...album,
+    regions: album.regions.filter((region) =>
+      selected.has(regionKey(region)),
+    ),
+  }));
 }
 
 function renderUnplacedItem(
@@ -1352,7 +1367,7 @@ function renderAlbums(): void {
     if (albumMap) {
       const fit = mapNeedsFit;
       mapNeedsFit = false;
-      albumMap.setAlbums(state.albums, fit);
+      albumMap.setAlbums(albumsForMap(), fit);
     } else {
       void ensureAlbumMap();
     }
