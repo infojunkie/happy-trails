@@ -344,6 +344,8 @@ function mostCommonDisplay(display: Map<string, number>): string {
  * eligible ("Putumayo - Acoustic Africa" -> "Putumayo"). A one-word exact title
  * without such a suffix is only eligible when named in `allowlist` (e.g.
  * "Millennium"), because most repeated one-word titles are albums, not series.
+ * An allowlisted name is also considered as a one-word prefix of a longer
+ * title, so `Éthiopiques` can capture `Éthiopiques 1: ...` volumes.
  * Exact titles that are also artist names ("The Beatles") are treated as
  * self-titled/tribute albums, not series. The shortest qualifying prefix wins,
  * variable artist/volume text is not part of the detected value, and configured
@@ -368,11 +370,12 @@ export function detectPlainSeries(
     bases.set(album.key, base);
     const words = base.split(/\s+/);
 
-    // One-word label series such as "Putumayo - <album>", or an exact
-    // one-word title explicitly allowlisted such as "Millennium".
+    // One-word label series such as "Putumayo - <album>", an exact one-word
+    // title explicitly allowlisted such as "Millennium", or an allowlisted
+    // first word before a volume number such as "Éthiopiques 1".
+    const allowFirstWord = allowKeys.has(seriesNameKey(words[0] ?? ''));
     const oneWordEligible =
-      words.length === 1 &&
-      (truncated || allowKeys.has(seriesNameKey(base)));
+      allowFirstWord || (truncated && words.length === 1);
     const minPrefix = oneWordEligible ? 1 : 2;
     if (words.length < minPrefix) continue;
 
@@ -451,7 +454,10 @@ export function detectPlainSeries(
     const base = bases.get(album.key);
     if (!base) continue;
     const words = base.split(/\s+/);
-    const minLength = words.length === 1 ? 1 : 2;
+    const minLength =
+      words.length === 1 || allowKeys.has(seriesNameKey(words[0] ?? ''))
+        ? 1
+        : 2;
 
     for (const length of seriesPrefixLengths(words.length, minLength)) {
       const serie = qualifying.get(

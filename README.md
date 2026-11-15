@@ -377,7 +377,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
 | `SERIES_EXCEPTIONS` | `Legacy`, `Collector's` | Additional series/label names to ignore, separated by a vertical-bar character. A detected name is dropped when it contains any entry, so `Japan` also removes `Live in Japan`. Appended to the defaults; matching ignores case, accents, and apostrophes. |
-| `SERIES_ALLOWLIST` | — | Additional series names allowed to be detected as one-word titles even when the album title has no ` - ` or `:` suffix, such as `Millennium`. Separated by a vertical-bar character; matching ignores case, accents, and apostrophes. The regular safeguards (five-album minimum, title-track and generic-name exclusions) still apply. |
+| `SERIES_ALLOWLIST` | — | Additional series names allowed to be detected as one-word titles (`Millennium`) or as the first word of volume-numbered titles (`Éthiopiques 1: …`), even when the album title has no ` - ` or `:` suffix. Separated by a vertical-bar character; matching ignores case, accents, and apostrophes. The regular safeguards (five-album minimum, title-track and generic-name exclusions) still apply. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
 ### Behind DSM's reverse proxy
@@ -504,8 +504,10 @@ text after a standalone ` - ` or a `:`:
 
 A one-word exact title without a ` - ` or `:` suffix, such as `Millennium`, is
 only considered when listed in `SERIES_ALLOWLIST`; repeated one-word titles are
-usually ordinary albums rather than series. The five-album minimum and the
-other safeguards still apply.
+usually ordinary albums rather than series. An allowlisted name also works as
+the first word of a longer title, so `Éthiopiques` captures
+`Éthiopiques 1: …` volumes. The five-album minimum and the other safeguards
+still apply.
 
 An album whose title already carries an explicit `{...}` or `[...]` series is
 not run through the plain-title detector, so `Cuba : Les danses des dieux

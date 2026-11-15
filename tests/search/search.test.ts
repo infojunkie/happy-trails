@@ -561,6 +561,25 @@ test('plain-title detection compares whole titles longer than six words', () => 
   }
 });
 
+test('series allowlist admits a named first-word prefix before volumes', () => {
+  const volumes = ['1', '2', '3', '4', '5'];
+  const albums = volumes.map((volume, index) =>
+    seriesAlbum(`Éthiopiques ${volume}: Volume ${index + 1}`, 'Various Artists'),
+  );
+
+  assert.equal(detectPlainSeries(albums).size, 0);
+
+  const detected = detectPlainSeries(albums, [], ['ethiopiques']);
+  for (const [index, volume] of volumes.entries()) {
+    assert.equal(
+      detected.get(
+        `Éthiopiques ${volume}: Volume ${index + 1}\u0000Various Artists`,
+      ),
+      'Éthiopiques',
+    );
+  }
+});
+
 test('plain-title detection handles year/volume suffixes and non-generic titles', () => {
   const detected = detectPlainSeries(
     ['1', '2', '3', '4', '5'].map((volume) =>
