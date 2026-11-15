@@ -872,6 +872,16 @@ export const PLACE_CATALOG: readonly PlaceCatalogEntry[] = [
     lat: 53.1424,
     lon: -7.6921,
   },
+  // Intl.DisplayNames spells TT with an ampersand; the catalogue uses the
+  // plain "and" form found in track tags and keeps the ampersand as an alias.
+  {
+    name: 'Trinidad and Tobago',
+    aliases: ['Trinidad & Tobago'],
+    tier: 'country',
+    countryCode: 'TT',
+    lat: 10.999,
+    lon: -60.918,
+  },
 ];
 
 let catalogByKey: Map<string, PlaceCatalogEntry> | null = null;
