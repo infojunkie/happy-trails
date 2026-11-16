@@ -19,9 +19,11 @@ design and current status.
 
 ![Screenshot of albums cover flow](docs/screenshot-coverflow.png)
 
+![Screenshot of albums map](docs/screenshot-map.png)
+
 ![Screenshot of album detail](docs/screenshot-album.png)
 
-![Screenshot of track listing](docs/screenshot-tracks.png)
+![Screenshot of track listing with playback](docs/screenshot-tracks.png)
 
 - Album grid sorted by latest upload date (`MAX(date)`).
 - Multi-CD albums whose titles differ only by a whitespace-separated
