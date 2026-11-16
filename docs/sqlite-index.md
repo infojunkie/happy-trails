@@ -139,6 +139,7 @@ CREATE TABLE tracks (
   disc            INTEGER,
   track           INTEGER,
   duration        INTEGER,
+  playable        INTEGER NOT NULL,      -- browser-native format? (0/1)
   date            TEXT,                  -- per-track upload date
   genre_names     TEXT NOT NULL,         -- JSON array of this track's genres
   region_names    TEXT NOT NULL,         -- JSON array of this track's regions

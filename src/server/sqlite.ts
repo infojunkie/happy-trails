@@ -9,6 +9,7 @@ import type {
 import { regionKey } from '../shared/text.js';
 import { parseArtists } from './artists.js';
 import { config } from './config.js';
+import { isPlayableAudioExtension } from './audio.js';
 import type { AlbumRow, TrackIndexRow } from './db.js';
 import { isRegionTag } from './regions.js';
 import {
@@ -155,6 +156,7 @@ const SCHEMA_SQL = `
     disc            INTEGER,
     track           INTEGER,
     duration        INTEGER,
+    playable        INTEGER NOT NULL,
     date            TEXT,
     genre_names     TEXT NOT NULL,
     region_names    TEXT NOT NULL,
@@ -416,6 +418,7 @@ interface DbTrackRow {
   disc: number | null;
   track: number | null;
   duration: number | null;
+  playable: number;
   album_key: string;
   album: string;
   genre_names: string;
@@ -758,11 +761,11 @@ export class SqliteIndex {
       const insertTrack = db.prepare(`
         INSERT INTO tracks(
           id, album_id, title, artist, source_album,
-          year, disc, track, duration, date,
+          year, disc, track, duration, playable, date,
           genre_names, region_names, genre_keys, region_keys,
           search_title, search_artist, search_source, search_composer,
           artist_rank, album_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertAlbumArtist = db.prepare(
         'INSERT INTO album_artists(album_id, position, artist) VALUES (?, ?, ?)',
@@ -1014,6 +1017,7 @@ export class SqliteIndex {
           row.disc,
           row.track,
           row.duration,
+          isPlayableAudioExtension(row.format) ? 1 : 0,
           row.date,
           JSON.stringify(genreNames),
           JSON.stringify(regionNames),
@@ -1047,13 +1051,13 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(indexedTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '11');
+      insertMeta.run('schema_version', '12');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec(`INSERT INTO track_search(track_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 11');
+      db.exec('PRAGMA user_version = 12');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -1533,7 +1537,7 @@ export class SqliteIndex {
            t.id, t.title,
            COALESCE(NULLIF(trim(t.artist), ''), al.artist) AS artist,
            al.artist AS album_artist,
-           t.source_album, t.year, t.track, t.disc, t.duration,
+           t.source_album, t.year, t.track, t.disc, t.duration, t.playable,
            t.genre_names, t.region_names,
            al.key AS album_key, al.album AS album
          FROM tracks t
@@ -1557,6 +1561,7 @@ export class SqliteIndex {
       track: row.track,
       disc: row.disc,
       duration: row.duration,
+      playable: row.playable === 1,
       genres: parseStringArray(row.genre_names),
       regions: parseStringArray(row.region_names),
     }));

@@ -66,6 +66,8 @@ export class Library {
       checkIntervalMs: config.checkIntervalMs,
       error: this.lastError,
       playbackEnabled: config.dsmUrl !== null,
+      nativePlaybackEnabled: config.nativePlaybackEnabled,
+      audioStationFallbackEnabled: config.audioStationFallbackEnabled,
     };
   }
 

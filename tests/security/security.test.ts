@@ -160,6 +160,7 @@ test('F1 fix: /play/:key redirects only to allow-listed app origins', async () =
           return 1;
         },
         playTrack: async () => 1,
+        openStream: async () => null,
       },
     },
     { allowedFrontendOrigins: ALLOWED_FRONTEND_ORIGINS },

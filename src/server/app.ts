@@ -14,12 +14,13 @@ import {
   type TracksResponse,
 } from '../shared/types.js';
 import { artwork } from './artwork.js';
+import { isPlayableAudioExtension } from './audio.js';
 import { parseArtists, parseComposers } from './artists.js';
 import { createTrackMatcher } from './trackSearch.js';
 import { config } from './config.js';
 import { covers } from './covers.js';
 import { loadTracks } from './db.js';
-import { DsmError } from './dsm.js';
+import { DsmError, normalizeAudioContentType } from './dsm.js';
 import { library } from './library.js';
 import {
   loginRateLimiter,
@@ -31,6 +32,15 @@ import { userSessions } from './userSessions.js';
 
 const MAX_SEARCH_LENGTH = 200;
 const MAX_OFFSET = 1_000_000;
+/** Track audio is immutable and private to one browser session. */
+const STREAM_CACHE_CONTROL = 'private, max-age=3600';
+const FORWARDED_AUDIO_HEADERS = [
+  'content-length',
+  'content-range',
+  'accept-ranges',
+  'last-modified',
+  'etag',
+] as const;
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 /** Works both for src/server/*.ts (tsx) and dist/server/*.js (built). */
@@ -65,7 +75,11 @@ export interface AppDependencies {
   >;
   playback: Pick<
     typeof playback,
-    'enabled' | 'audioStationUrlFor' | 'playAlbum' | 'playTrack'
+    | 'enabled'
+    | 'audioStationUrlFor'
+    | 'playAlbum'
+    | 'playTrack'
+    | 'openStream'
   >;
   config: Pick<
     typeof config,
@@ -73,6 +87,7 @@ export interface AppDependencies {
     | 'maxPageSize'
     | 'dsmUrl'
     | 'dsmFrontendAllowedOrigins'
+    | 'nativePlaybackEnabled'
     | 'trustProxy'
   >;
   loginRateLimiter: Pick<LoginRateLimiter, 'check' | 'record'>;
@@ -604,10 +619,101 @@ export function createApp(
         duration: row.duration,
         bitrate: row.bitrate,
         frequency: row.frequency,
+        playable: isPlayableAudioExtension(row.format),
       })),
     };
     res.json(body);
   });
+
+  /**
+   * Stream one track through happy-trails. The browser only ever sees this
+   * same-origin URL; the DSM session cookie and SynoToken stay on the server.
+   */
+  const streamTrack = async (req: Request, res: Response): Promise<void> => {
+    if (!dependencies.config.nativePlaybackEnabled) {
+      res.status(503).json({ error: 'Native playback is not enabled.' });
+      return;
+    }
+
+    const rawId =
+      typeof req.params.id === 'string' ? req.params.id : '';
+    const musicId = /^\d+$/.test(rawId) ? Number(rawId) : Number.NaN;
+    if (!Number.isSafeInteger(musicId) || musicId < 1) {
+      res.status(400).json({ error: 'Invalid track id' });
+      return;
+    }
+
+    const session = dependencies.userSessions.get(req);
+    if (!session) {
+      res.status(401).json({ error: 'Sign in to stream music.' });
+      return;
+    }
+
+    const range =
+      typeof req.headers.range === 'string' ? req.headers.range : undefined;
+    const ifRange =
+      typeof req.headers['if-range'] === 'string'
+        ? req.headers['if-range']
+        : undefined;
+
+    let audio;
+    try {
+      audio = await dependencies.playback.openStream(session.client, musicId, {
+        range,
+        ifRange,
+        method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+      });
+    } catch (error) {
+      console.error('[stream] could not open audio:', error);
+      res.status(502).json({ error: 'Could not stream this track.' });
+      return;
+    }
+
+    if (!audio) {
+      res.status(404).json({ error: 'Track not found' });
+      return;
+    }
+
+    res.setHeader('Cache-Control', STREAM_CACHE_CONTROL);
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    if (audio.status === 416) {
+      const contentRange = audio.headers['content-range'];
+      if (typeof contentRange === 'string') {
+        res.setHeader('Content-Range', contentRange);
+      }
+      audio.stream.resume();
+      res.status(416).end();
+      return;
+    }
+
+    res.status(audio.status);
+    res.setHeader(
+      'Content-Type',
+      normalizeAudioContentType(audio.headers['content-type']),
+    );
+    for (const name of FORWARDED_AUDIO_HEADERS) {
+      const value = audio.headers[name];
+      if (typeof value === 'string') res.setHeader(name, value);
+    }
+
+    if (req.method === 'HEAD') {
+      audio.stream.resume();
+      res.end();
+      return;
+    }
+
+    audio.stream.on('error', (error) => {
+      console.error('[stream] audio stream failed:', error);
+      if (!res.headersSent) res.status(502).end();
+      else res.destroy();
+    });
+    res.on('close', () => audio.stream.destroy());
+    audio.stream.pipe(res);
+  };
+
+  app.get('/api/stream/:id', streamTrack);
+  app.head('/api/stream/:id', streamTrack);
 
   app.get('/play/track/:id', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');

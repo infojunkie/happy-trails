@@ -4,8 +4,10 @@ A small, read-only web app for browsing and searching the music library of the S
 `mediaserver` PostgreSQL database. A SQLite search index is built from the source
 database to create search facets that are surfaced through a full-text query interface and
 facet filters. The album display retrieves album cover, booklet, comments and other metadata
-from the Synology API. The app also signs in Synology users and allows to playback
-albums and tracks by redirecting to the synology Audio Station web app.
+from the Synology API. The app also signs in Synology users and plays albums and
+tracks natively in the browser, with the Synology Audio Station web app kept as an
+optional fallback. See [docs/native-playback.md](docs/native-playback.md) for the
+design and current status.
 
 - **Backend:** Node.js + Express + `pg` + the built-in `node:sqlite` module, written in TypeScript.
 - **Frontend:** vanilla TypeScript (no framework), compiled to ES modules.
@@ -30,6 +32,17 @@ albums and tracks by redirecting to the synology Audio Station web app.
   the track's own genre/region pills, duration, and (when signed in) a
   per-track Play control. The mode is stored in the URL (`view=tracks`) and in
   browser history.
+- **Native playback** in a fixed footer player with play/pause, restart,
+  previous/next, an interactive seek bar, elapsed/remaining time, cover and
+  metadata, volume/mute, keyboard shortcuts, OS media-session controls
+  (metadata, artwork, timeline, and media keys), and a play queue. Play controls
+  and the footer are only shown while signed in. Album Play queues the album; a
+  track Play queues the album from that track onward. The queue supports
+  removing, reordering, clearing, and click-to-play, advances automatically with
+  a preloaded next track, and survives a page reload paused (the restored queue
+  appears after sign-in). Tracks whose format the browser cannot decode are
+  marked with an unsupported-format warning and can use the Audio Station
+  fallback.
 - A **view switch** at the right of the results header offers **Grid**,
   **Cover Flow**, and **World map** album layouts, one icon per mode. Cover
   Flow adds a 3D carousel with drag, wheel, and arrow-key navigation,
@@ -81,7 +94,13 @@ albums and tracks by redirecting to the synology Audio Station web app.
   implicit AND, and parentheses. Quoted values are matched as contiguous
   phrases. A query made only of plain keywords is treated as one phrase; use
   `AND` to combine independent words. The `?` button beside the search bar
-  opens a syntax help popup with clickable examples.
+  opens a collapsible **Help** dialog with **Keyboard shortcuts** and **Search
+  syntax** sections, including clickable examples.
+- Keyboard shortcuts: `/` focuses the search field and `?` opens the help
+  dialog. With the player open, `Space` toggles playback, `←`/`→` seek,
+  `Shift`+`←`/`→` skip tracks, `↑`/`↓` adjust volume, `M` mutes, and `R`
+  restarts the current track. The help dialog lists these plus the Cover Flow
+  and map keys.
 - Album and artist names are search shortcuts in cards and in the album dialog;
   genre tags add a `genre:"<name>"` term and region tags add a
   `region:"<name>"` term everywhere. Name links clear facet selections, while
@@ -364,7 +383,9 @@ All variables are optional; see [`.env.example`](.env.example).
 | `MUSIC_TABLE` | `music` | Table to read. Must be a plain identifier. |
 | `TRACK_TABLE` | `track` | Table used to map a music path to an AudioStation cover id. |
 | `INDEX_DB_DIR` | `$TMPDIR/happy-trails-index` | Directory for the on-disk SQLite search index. Must be writable and on a local filesystem; use a dedicated directory per running instance. Set to `:memory:` to keep the index in RAM. See [Index storage](#index-storage). |
-| `DSM_URL` | — | Synology DSM base URL; required for user sign-in and album covers. Falls back to `DSADDR`. |
+| `DSM_URL` | — | Synology DSM base URL; required for user sign-in, native streaming, and album covers. Falls back to `DSADDR`. |
+| `NATIVE_PLAYBACK_ENABLED` | `true` | Expose `GET /api/stream/:id` for the native player. Requires `DSM_URL`. Set to `false` to use the Audio Station handoff only. |
+| `AUDIO_STATION_FALLBACK_ENABLED` | `true` | Keep the Audio Station handoff available as a fallback. Also requires a resolved `DSM_FRONTEND_URL` (or `DSM_URL`). |
 | `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise use `:port` to keep the host the browser used and change only the port (for example `:5001`); path rewriting is not supported. With `:port`, the host must match `DSM_FRONTEND_ALLOWED_ORIGINS`. |
 | `DSM_FRONTEND_ALLOWED_ORIGINS` | — | Comma-separated exact origins the app is served from (`scheme://host[:port]`, no path), for example `https://mediatheque.example:8443,https://nas-local:8443`. Required when `DSM_FRONTEND_URL` is `:port`. A request whose `Host` (or `X-Forwarded-Host`, for proxies that rewrite it) matches an entry uses that origin; any other host disables the redirect. The entry's scheme is also used for the redirect, so list the scheme DSM is served under (normally the same as the app). `Origin` and `Referer` are never trusted for this. |
 | `DSM_USER` / `DSM_PASS` | — | Optional service account used for album covers and artwork lookups. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
@@ -426,6 +447,51 @@ limiting works either way.
 Never use `TRUST_PROXY=true`: with an appending proxy, Express would trust a
 client-supplied `X-Forwarded-For` entry. Leave `TRUST_PROXY` unset when the app
 is accessed directly.
+
+### On a LAN with Caddy
+
+The repository includes a [`Caddyfile`](Caddyfile) that serves the app on port
+8080 to other devices on the local network. Keep the app on its default
+loopback bind:
+
+```dotenv
+HOST=127.0.0.1
+PORT=3000
+TRUST_PROXY=loopback
+```
+
+`TRUST_PROXY=loopback` makes Express trust Caddy's forwarding headers when Caddy
+runs on the same host. If Caddy runs in a container, use the bridge address or
+subnet instead, as described above.
+
+Start the app, then from the repository root:
+
+```bash
+caddy run --config Caddyfile
+```
+
+Browse to `http://<laptop-lan-ip>:8080`. The Caddyfile forwards Range requests
+and disables response buffering for the Audio Station stream. It also disables
+Caddy's admin endpoint so the standalone proxy can run alongside a Caddy system
+service; remove the `admin off` block if this is your only Caddy instance. The
+default block is plain HTTP; sign-in sends DSM credentials, so use it only on a
+trusted LAN or uncomment the `tls internal` HTTPS example and trust Caddy's
+local CA on the client devices.
+
+If the page works from the laptop but not from other LAN devices, allow the
+port through the host firewall. On Ubuntu/Pop!_OS with UFW:
+
+```bash
+sudo ufw allow from 192.168.0.0/24 to any port 8080 proto tcp
+sudo ufw status verbose
+```
+
+Adjust the subnet to match the LAN. If the devices are on a guest Wi-Fi or an
+AP with client isolation, they will still be unable to reach the laptop.
+
+If you use the Audio Station fallback with `DSM_FRONTEND_URL=:port`, add the
+Caddy origin (for example `http://192.168.1.20:8080`) to
+`DSM_FRONTEND_ALLOWED_ORIGINS`.
 
 ## Theory of operation
 
@@ -693,7 +759,26 @@ the dialog close it for navigation but keep the dialog entry behind the new
 state, so Back reopens the album. A page reload also restores an open dialog
 from `history.state`.
 
-### Sign-in and playback handoff
+### Sign-in and playback
+
+Native playback streams a track through `GET /api/stream/:id`, which proxies
+Synology's `AudioStation/stream.cgi` with the signed-in user's session. The
+browser never receives the DSM token or cookies. Range requests are forwarded,
+so the footer player can seek. The footer player, preload/advance logic, queue
+editing, and persistence are described in
+[docs/native-playback.md](docs/native-playback.md).
+
+Play controls on album cards, the album dialog, and track rows start native
+playback. They, and the footer, are only shown while signed in; the stream
+endpoint independently returns `401` without a session. Album Play queues the
+whole album; a track Play queues the album from that track onward.
+Ctrl/Cmd-click (or a middle-click) on a Play link opens the Audio Station
+handoff instead. The album dialog also shows a secondary **Audio Station** link
+when the fallback is enabled, and an unplayable track's error state links to
+it.
+
+The Audio Station handoff below remains available as a fallback when
+`AUDIO_STATION_FALLBACK_ENABLED` is true and a frontend target is configured.
 
 Users sign in with their own DSM account from the app's header. The browser
 posts the username and password to `POST /api/session/login`; the server
@@ -762,24 +847,45 @@ The suite is deterministic and does not require PostgreSQL, DSM, or network acce
 npm run test:install-browsers  # once per machine/CI
 npm run lint                   # ESLint
 npm run typecheck              # server, client, and tests
-npm test                       # API + search + artwork + UI
+npm test                       # API + search + artwork + all UI browsers
+npm run test:chromium          # backend + Chromium UI
+npm run test:firefox           # backend + Firefox UI
+npm run test:webkit            # backend + WebKit UI
 npm run test:api               # Express endpoints
 npm run test:artwork           # media-path to FileStation path mapping
 npm run test:config            # DSM frontend URL parsing
 npm run test:search            # parser + SQLite search/tag combinations
 npm run test:security          # proof-of-vulnerability audit suite
-npm run test:ui                # Playwright UI tests (Chromium + Firefox)
+npm run test:ui                # Playwright UI tests (Chromium + Firefox + WebKit)
 npm run test:ui:chromium       # Playwright, Chromium only
 npm run test:ui:firefox        # Playwright, Firefox only
+npm run test:ui:webkit         # Playwright, WebKit only
 npm run test:ui:headed         # Playwright with visible browsers
 ```
 
+On Linux, `npx playwright install --with-deps chromium firefox webkit` installs
+the required system libraries (it needs `sudo`). If every WebKit test fails
+immediately with `Host system is missing dependencies` or `libavif13`, the
+WebKit browser cannot launch, so even non-audio tests fail before the page
+opens. Install the system dependencies once:
+
+```bash
+sudo npx playwright install-deps webkit
+# On Ubuntu 22.04 / Pop!_OS 22.04, the fallback build may instead need:
+sudo apt install libavif13
+```
+
+CI installs WebKit with `--with-deps`. Playwright's WebKit is desktop WebKit,
+not Apple Safari; real Safari/iOS behavior still needs a device or cloud-browser
+check.
+
 - API tests start the real Express app via `createApp()` with an injected fixture index.
+- Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup.
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and album-from-track queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, and playback continuing while album dialogs open.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
-- Playwright is configured in `playwright.config.ts` with Chromium and Firefox projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running.
+- Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.
 - `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.
 
 ## API
@@ -1051,10 +1157,21 @@ Passwords are not written to disk or echoed back.
 `POST /api/session/logout` destroys the server-side session and clears the
 cookie.
 
+### `GET|HEAD /api/stream/:musicId`
+
+Streams one track for the native player. Requires a signed-in `mw_session`.
+`musicId` is the track's `music.id`; the server maps it to the Audio Station
+song id (`music_<track.id>`) and proxies `AudioStation/stream.cgi`. `Range` and
+`If-Range` are forwarded and `206`/`Content-Range`/`Accept-Ranges` are passed
+back, so seeking works. Unknown tracks return `404`, an unsigned session `401`,
+an out-of-range request `416`, and a DSM failure `502`. Responses are
+`Cache-Control: private, max-age=3600`. The endpoint is unavailable (`503`) when
+`NATIVE_PLAYBACK_ENABLED=false`.
+
 ### `GET /play/:key`
 
-The target of the album Play links; it is an HTML/redirect endpoint rather
-than JSON. If the browser has no signed-in DSM session, it redirects to
+The Audio Station fallback target for album Play links; it is an HTML/redirect
+endpoint rather than JSON. If the browser has no signed-in DSM session, it redirects to
 `/?login=1&play=…` (plus `playQuery=…` when filtering is active) so the app can
 show the sign-in dialog. Otherwise it queues the album in Audio Station using
 that user's session (replacing the web-player queue) and redirects `303` to the
@@ -1065,9 +1182,9 @@ changes playback state and is meant to be opened in a browser tab.
 
 ### `GET /play/track/:id`
 
-The target of the per-track blue play controls. `id` is the track's `music.id`.
-It follows the same sign-in and redirect flow as the album Play endpoint, but
-queues only that track in Audio Station. Signed-out requests redirect to
+The Audio Station fallback target for per-track Play controls. `id` is the
+track's `music.id`. It follows the same sign-in and redirect flow as the album
+Play endpoint, but queues only that track in Audio Station. Signed-out requests redirect to
 `/?login=1&playTrack=…`; invalid ids show an HTML `400` page, and playback
 failures show the standard HTML error page. This route changes playback state.
 
@@ -1087,10 +1204,10 @@ happy-trails/
 │   │   ├── config.ts     Environment configuration
 │   │   ├── covers.ts     Bounded cover cache and cover lookup
 │   │   ├── db.ts         Pool and SQL queries
-│   │   ├── dsm.ts        Synology login, covers, FileStation, and web-player client
+│   │   ├── dsm.ts        Synology login, covers, FileStation, audio, and web-player client
 │   │   ├── index.ts      Startup and shutdown
 │   │   ├── library.ts    Index lifecycle, rebuilds, and change detection
-│   │   ├── playback.ts   Album/track-to-Audio-Station handoff
+│   │   ├── playback.ts   Native stream proxy and Audio Station handoff
 │   │   ├── regions.ts    Country/region tag detection
 │   │   ├── search.ts     Folding, album keys, and title normalisation
 │   │   ├── searchQuery.ts  Fielded search expression parser
@@ -1102,7 +1219,8 @@ happy-trails/
 │   │   ├── format.ts     Duration/date formatting
 │   │   ├── linkify.ts    Plain-text comment URL linkification
 │   │   ├── main.ts       State, rendering, and events
-│   │   └── map.ts        Lazy-loaded Leaflet map, cover pins, and full-screen
+│   │   ├── map.ts        Lazy-loaded Leaflet map, cover pins, and full-screen
+│   │   └── player.ts     Footer player, preload/advance, queue, and persistence
 │   └── shared/
 │       ├── equalEarth.ts    Equal Earth projection formulas
 │       ├── placeCatalog.ts  Manual cities/regions/overrides and non-place denylist
@@ -1122,6 +1240,8 @@ happy-trails/
 │   ├── ui/               Playwright browser tests
 │   ├── fixtures/         Synthetic album/track data and UI fixture server
 │   └── helpers/          Test server and HTTP helpers
+├── Caddyfile            Optional LAN reverse proxy with streaming support
+├── docs/native-playback.md  Native playback design, API findings, and stages
 ├── .github/workflows/    CI: lint, typecheck, backend and UI tests
 ├── eslint.config.js      ESLint flat config
 ├── playwright.config.ts  Fixture-server-backed browser tests
@@ -1165,7 +1285,8 @@ license and third-party notices to `public/third-party-notices.txt`.
   access to the music share. Playback requires the `track` table, a `DSM_URL`,
   and each user's own DSM sign-in. If the NAS is unreachable, cover requests
   fail (the UI keeps its generated placeholders), the Artwork button stays
-  hidden, and Play shows an HTML error page; the rest of the app is unaffected.
+  hidden, the native player shows an error in the footer, and the Audio Station
+  fallback shows an HTML error page; the rest of the app is unaffected.
 - Sign-in sessions live in server memory with an 8-hour TTL; restarting the
   server signs everyone out. Passwords are kept in memory (inside the user's
   DSM client) so expired tokens can be renewed, but are never written to disk,
@@ -1174,10 +1295,15 @@ license and third-party notices to `public/third-party-notices.txt`.
 - The sign-in form sends credentials to this Node server. It binds to
   `127.0.0.1` by default; if you expose it on a LAN, put it behind HTTPS (for
   example a reverse proxy) and do not send DSM passwords over plain HTTP.
-- Playback replaces Audio Station's web-player queue under the signed-in user
-  and supports up to 8192 songs. The browser opening Audio Station must also be
-  signed into DSM as that same user to see the queue. Browsers may require one
-  press of Audio Station's Play button because they block autoplay.
+- Native playback depends on the browser's codecs. The library is almost
+  entirely FLAC and MP3, which play in current Chromium and Firefox. WMA files
+  (about 0.08% of the library) are not playable natively; use the Audio Station
+  fallback for them. No server-side transcoding is performed.
+- The Audio Station fallback replaces Audio Station's web-player queue under
+  the signed-in user and supports up to 8192 songs. The browser opening Audio
+  Station must also be signed into DSM as that same user to see the queue.
+  Browsers may require one press of Audio Station's Play button because they
+  block autoplay.
 - `GET /play/:key` changes playback state. Do not expose it to untrusted users
   without adding authentication.
 - TLS certificate verification for the NAS is disabled by default because DSM

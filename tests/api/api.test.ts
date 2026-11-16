@@ -124,6 +124,8 @@ test('GET /api/status exposes library and playback state', async () => {
   assert.ok(body.checkIntervalMs > 0);
   assert.equal(body.error, null);
   assert.equal(body.playbackEnabled, true);
+  assert.equal(body.nativePlaybackEnabled, true);
+  assert.equal(body.audioStationFallbackEnabled, true);
 });
 
 test('GET /api/session starts signed out', async () => {
@@ -218,11 +220,14 @@ test('session login is unavailable when DSM is not configured', async () => {
     );
     assert.equal(response.status, 503);
     assert.match(body.error, /not configured/i);
-    const status = await json<{ playbackEnabled: boolean }>(
-      fixture.server.baseUrl,
-      '/api/status',
-    );
+    const status = await json<{
+      playbackEnabled: boolean;
+      nativePlaybackEnabled: boolean;
+      audioStationFallbackEnabled: boolean;
+    }>(fixture.server.baseUrl, '/api/status');
     assert.equal(status.body.playbackEnabled, false);
+    assert.equal(status.body.nativePlaybackEnabled, false);
+    assert.equal(status.body.audioStationFallbackEnabled, false);
   } finally {
     await closeFixture(fixture);
   }
@@ -346,9 +351,17 @@ test('GET /api/tracks lists, searches, sorts, and paginates', async () => {
   assert.equal(track.sourceAlbum, 'Kind of Blue');
   assert.equal(track.albumArtist, 'Miles Davis');
   assert.equal(track.duration, 200);
+  assert.equal(track.playable, true);
   assert.deepEqual(track.genres, ['Jazz']);
   assert.deepEqual(track.regions, []);
   assert.ok(track.albumKey.length > 0);
+
+  const unsupported = await trackSearch(
+    main.server.baseUrl,
+    `/api/tracks?q=${encodeURIComponent('track:"maxwell\'s silver hammer"')}`,
+  );
+  assert.equal(unsupported.total, 1);
+  assert.equal(unsupported.tracks[0]?.playable, false);
 });
 
 test('GET /api/tracks uses album-level genre filters', async () => {
@@ -617,6 +630,16 @@ test('GET /api/albums/:key/tracks returns merged tracks and composer metadata', 
       ?.sourceAlbum,
     'Abbey Road // Bonus Tracks',
   );
+  assert.equal(
+    body.tracks.find((track) => track.title === "Maxwell's Silver Hammer")
+      ?.playable,
+    false,
+  );
+  assert.ok(
+    body.tracks
+      .filter((track) => track.title !== "Maxwell's Silver Hammer")
+      .every((track) => track.playable),
+  );
   assert.ok(body.tracks.every((track) => track.matches === true));
 
   const filtered = await json<TracksResponse>(
@@ -755,6 +778,28 @@ test('GET /play/track/:id queues a single track', async () => {
     'https://audio.example/?launchApp=SYNO.SDS.AudioStation.Application',
   );
   assert.ok(main.context.trackPlaybackCalls.includes(1));
+});
+
+test('the Audio Station fallback can be disabled independently', async () => {
+  const fixture = await runFixture({ audioStationFallbackEnabled: false });
+  try {
+    const status = await json<{
+      nativePlaybackEnabled: boolean;
+      audioStationFallbackEnabled: boolean;
+    }>(fixture.server.baseUrl, '/api/status');
+    assert.equal(status.body.nativePlaybackEnabled, true);
+    assert.equal(status.body.audioStationFallbackEnabled, false);
+
+    const abbey = await findAlbum(fixture.server.baseUrl, 'Abbey Road');
+    const response = await fetch(
+      `${fixture.server.baseUrl}/play/${encodeURIComponent(abbey.key)}`,
+      { redirect: 'manual' },
+    );
+    assert.equal(response.status, 503);
+    assert.match(await response.text(), /Playback unavailable/);
+  } finally {
+    await closeFixture(fixture);
+  }
 });
 
 test('GET /play/:key reports playback failures and unavailable playback', async () => {

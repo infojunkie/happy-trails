@@ -1,8 +1,10 @@
 import '@northstarxyzz/coverflow/style.css';
 import 'leaflet/dist/leaflet.css';
 import { Coverflow, type CoverflowItem } from '@northstarxyzz/coverflow';
+import { unsupportedFormatBadge } from './badges.js';
 import { createCover, hashString } from './cover.js';
 import type { AlbumMapHandle, AlbumMapPlacement } from './map.js';
+import { player, type PlayerTrack } from './player.js';
 import {
   isFilterMode,
   isSortKey,
@@ -97,8 +99,12 @@ interface State {
   tracks: TrackSummary[];
   trackTotal: number;
   playbackEnabled: boolean;
+  nativePlaybackEnabled: boolean;
+  audioStationFallbackEnabled: boolean;
   session: SessionResponse;
   pendingPlayUrl: string | null;
+  pendingPlayAction: (() => void | Promise<void>) | null;
+  pendingPlayerResume: boolean;
   loginRequestedFromUrl: boolean;
   dialogShowAllTracks: boolean;
   loadedVersion: number | null;
@@ -136,8 +142,12 @@ const state: State = {
   tracks: [],
   trackTotal: 0,
   playbackEnabled: false,
+  nativePlaybackEnabled: false,
+  audioStationFallbackEnabled: false,
   session: { authenticated: false, account: null },
   pendingPlayUrl: null,
+  pendingPlayAction: null,
+  pendingPlayerResume: false,
   loginRequestedFromUrl: false,
   dialogShowAllTracks: true,
   loadedVersion: null,
@@ -228,6 +238,7 @@ let searchTimer: number | undefined;
 let searchSessionActive = false;
 let albumAbort: AbortController | null = null;
 let trackAbort: AbortController | null = null;
+let playerRestored = false;
 let retryTimer: number | undefined;
 let statusPollTimer: number | undefined;
 let suppressDialogCloseHistory = false;
@@ -659,6 +670,10 @@ async function pollStatus(): Promise<void> {
     state.libraryReady = status.ready;
     state.serverVersion = status.libraryVersion;
     state.libraryRefreshing = status.refreshing;
+    state.nativePlaybackEnabled = status.nativePlaybackEnabled === true;
+    state.audioStationFallbackEnabled =
+      status.audioStationFallbackEnabled === true;
+    syncPlayerConfig();
     if (status.ready) renderStats(status);
     updateRefreshControl();
   } catch {
@@ -801,6 +816,7 @@ async function loadSession(): Promise<void> {
   } catch {
     state.session = { authenticated: false, account: null };
   }
+  syncPlayerConfig();
   renderSession();
   refreshAlbumCards();
 }
@@ -811,6 +827,190 @@ function refreshAlbumCards(): void {
   } else if (state.albums.length > 0) {
     renderAlbums();
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Native playback                                                     */
+/* ------------------------------------------------------------------ */
+
+interface AlbumTrackContext {
+  albumKey: string;
+  album: string;
+  artist: string;
+  tracks: Track[];
+}
+
+function syncPlayerConfig(): void {
+  player.configure({
+    nativeEnabled: state.nativePlaybackEnabled,
+    fallbackEnabled: state.audioStationFallbackEnabled,
+    signedIn: state.session.authenticated,
+    ensureAuthenticated: ensurePlayerAuthenticated,
+  });
+  if (!playerRestored && state.nativePlaybackEnabled) {
+    playerRestored = true;
+    player.restore();
+  }
+}
+
+function ensurePlayerAuthenticated(): boolean {
+  if (state.session.authenticated) return true;
+  state.pendingPlayerResume = true;
+  openLoginDialog();
+  return false;
+}
+
+function playbackActionsAvailable(): boolean {
+  return (
+    state.playbackEnabled &&
+    state.session.authenticated &&
+    (state.nativePlaybackEnabled || state.audioStationFallbackEnabled)
+  );
+}
+
+function playLinkTitle(what: string): string {
+  if (state.nativePlaybackEnabled && state.audioStationFallbackEnabled) {
+    return `Play ${what} (Ctrl/Cmd-click for Audio Station)`;
+  }
+  return state.nativePlaybackEnabled
+    ? `Play ${what}`
+    : `Play ${what} in Audio Station`;
+}
+
+function playLinkLabel(): string {
+  return state.nativePlaybackEnabled ? 'Play' : 'Play in Audio Station';
+}
+
+function playerTrackFromTrack(
+  track: Track,
+  albumKey: string,
+  album: string,
+  artist: string,
+): PlayerTrack {
+  return {
+    musicId: track.id,
+    title: track.title,
+    artist: track.artist?.trim() || track.albumArtist?.trim() || artist,
+    album,
+    albumKey,
+    duration: track.duration,
+    playable: track.playable,
+  };
+}
+
+function playerTrackFromSummary(track: TrackSummary): PlayerTrack {
+  return {
+    musicId: track.id,
+    title: track.title,
+    artist: track.artist?.trim() || track.albumArtist,
+    album: track.album,
+    albumKey: track.albumKey,
+    duration: track.duration,
+    playable: track.playable,
+  };
+}
+
+async function loadAlbumTracks(
+  albumKey: string,
+  query = '',
+): Promise<TracksResponse> {
+  const cacheKey = `${albumKey}\u0000${query}`;
+  const cached = trackCache.get(cacheKey);
+  if (cached) return cached;
+  const response = await api.tracks(albumKey, query);
+  trackCache.set(cacheKey, response);
+  return response;
+}
+
+async function playAlbumNatively(
+  album: AlbumSummary,
+  query: string | null = null,
+): Promise<void> {
+  try {
+    const response = await loadAlbumTracks(album.key, query ?? '');
+    const tracks = query
+      ? response.tracks.filter((track) => track.matches)
+      : response.tracks;
+    if (tracks.length === 0) {
+      showError('No tracks in this album match the current search.');
+      return;
+    }
+    player.playTracks(
+      tracks.map((track) =>
+        playerTrackFromTrack(
+          track,
+          album.key,
+          response.album,
+          response.artist,
+        ),
+      ),
+      0,
+    );
+  } catch (error) {
+    showError(describe(error));
+  }
+}
+
+function playTrackFromAlbumContext(
+  context: AlbumTrackContext,
+  musicId: number,
+): void {
+  const index = context.tracks.findIndex((track) => track.id === musicId);
+  if (index < 0) return;
+  const items = context.tracks
+    .slice(index)
+    .map((track) =>
+      playerTrackFromTrack(
+        track,
+        context.albumKey,
+        context.album,
+        context.artist,
+      ),
+    );
+  player.playTracks(items, 0);
+}
+
+async function playTrackFromSearch(track: TrackSummary): Promise<void> {
+  try {
+    const response = await loadAlbumTracks(track.albumKey);
+    const index = response.tracks.findIndex((entry) => entry.id === track.id);
+    if (index >= 0) {
+      playTrackFromAlbumContext(
+        {
+          albumKey: track.albumKey,
+          album: track.album,
+          artist: track.albumArtist,
+          tracks: response.tracks,
+        },
+        track.id,
+      );
+      return;
+    }
+    player.playTracks([playerTrackFromSummary(track)], 0);
+  } catch (error) {
+    player.playTracks([playerTrackFromSummary(track)], 0);
+    showError(describe(error));
+  }
+}
+
+function handlePlayLink(
+  event: MouseEvent,
+  action: () => void | Promise<void>,
+): void {
+  if (event.defaultPrevented) return;
+  if (event.button !== 0) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (!state.nativePlaybackEnabled) return;
+
+  event.preventDefault();
+  if (!state.session.authenticated) {
+    state.pendingPlayAction = action;
+    openLoginDialog();
+    return;
+  }
+  Promise.resolve(action()).catch((error: unknown) => {
+    showError(describe(error));
+  });
 }
 
 function setLoginError(message: string | null): void {
@@ -864,6 +1064,7 @@ async function submitLogin(): Promise<void> {
   try {
     const response = await api.login(username, password);
     state.session = response;
+    syncPlayerConfig();
     renderSession();
     loginPassword.value = '';
     try {
@@ -872,10 +1073,28 @@ async function submitLogin(): Promise<void> {
       // Ignore storage failures.
     }
 
+    const pendingAction = state.pendingPlayAction;
+    const resumePlayer = state.pendingPlayerResume;
     const target = state.pendingPlayUrl;
+    state.pendingPlayAction = null;
+    state.pendingPlayerResume = false;
     state.pendingPlayUrl = null;
     state.loginRequestedFromUrl = false;
     if (loginDialog.open) loginDialog.close();
+    if (pendingAction) {
+      Promise.resolve(pendingAction()).catch((pendingError: unknown) => {
+        showError(describe(pendingError));
+      });
+      refreshAlbumCards();
+      syncUrl();
+      return;
+    }
+    if (resumePlayer) {
+      player.play();
+      refreshAlbumCards();
+      syncUrl();
+      return;
+    }
     if (target) {
       window.location.assign(target);
       return;
@@ -894,6 +1113,10 @@ async function submitLogin(): Promise<void> {
 async function signOut(): Promise<void> {
   try {
     state.session = await api.logout();
+    player.clear();
+    syncPlayerConfig();
+    state.pendingPlayAction = null;
+    state.pendingPlayerResume = false;
     renderSession();
     refreshAlbumCards();
     hideError();
@@ -1078,6 +1301,10 @@ async function loadLibrary(): Promise<void> {
     const status = await api.status();
     renderStats(status);
     state.playbackEnabled = status.playbackEnabled;
+    state.nativePlaybackEnabled = status.nativePlaybackEnabled === true;
+    state.audioStationFallbackEnabled =
+      status.audioStationFallbackEnabled === true;
+    syncPlayerConfig();
     state.serverVersion = status.libraryVersion;
     state.libraryReady = status.ready;
     state.libraryRefreshing = status.refreshing;
@@ -1658,22 +1885,24 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
 
   const tags = el('div', { class: 'album-genres tag-list' });
 
-  if (state.playbackEnabled && state.session.authenticated) {
-    tags.append(
-      el(
-        'a',
-        {
-          class: 'chip album-play',
-          href: `/play/${encodeURIComponent(album.key)}`,
-          target: '_blank',
-          rel: 'noopener',
-          title: 'Play in Synology Audio Station',
-          'aria-label': `Play ${album.album} in Synology Audio Station`,
-        },
-        el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
-        el('span', { text: 'Play' }),
-      ),
+  if (playbackActionsAvailable()) {
+    const playLink = el(
+      'a',
+      {
+        class: 'chip album-play',
+        href: `/play/${encodeURIComponent(album.key)}`,
+        target: '_blank',
+        rel: 'noopener',
+        title: playLinkTitle(album.album),
+        'aria-label': playLinkTitle(album.album),
+      },
+      el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
+      el('span', { text: playLinkLabel() }),
     );
+    playLink.addEventListener('click', (event) => {
+      handlePlayLink(event, () => playAlbumNatively(album));
+    });
+    tags.append(playLink);
   }
 
   appendTagChips(tags, album.genres, album.regions, {
@@ -1833,27 +2062,36 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
   });
   albumButton.addEventListener('click', () => void openAlbumFromTrack(track));
 
+  const titleLine = el(
+    'span',
+    { class: 'track-result-title-line' },
+    titleButton,
+    ...(track.playable ? [] : [unsupportedFormatBadge()]),
+  );
+
   const tags = el('div', { class: 'track-result-tags tag-list' });
   appendTagChips(tags, track.genres, track.regions, {
     genres: 2,
     regions: 2,
   });
 
-  const play =
-    state.playbackEnabled && state.session.authenticated
-      ? el(
-          'a',
-          {
-            class: 'track-play',
-            href: `/play/track/${track.id}`,
-            target: '_blank',
-            rel: 'noopener',
-            title: `Play ${track.title} in Audio Station`,
-            'aria-label': `Play ${track.title} in Audio Station`,
-          },
-          el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
-        )
-      : null;
+  const play = playbackActionsAvailable()
+    ? el(
+        'a',
+        {
+          class: 'track-play',
+          href: `/play/track/${track.id}`,
+          target: '_blank',
+          rel: 'noopener',
+          title: playLinkTitle(track.title),
+          'aria-label': playLinkTitle(track.title),
+        },
+        el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
+      )
+    : null;
+  play?.addEventListener('click', (event) => {
+    handlePlayLink(event, () => playTrackFromSearch(track));
+  });
 
   return el(
     'li',
@@ -1862,7 +2100,7 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
     el(
       'div',
       { class: 'track-result-main' },
-      titleButton,
+      titleLine,
       el(
         'span',
         { class: 'track-result-artist' },
@@ -2460,29 +2698,48 @@ function renderDialog(
 
   const actions: HTMLElement[] = [];
   const playQuery = query && !showAllTracks ? query : null;
-  if (
-    state.playbackEnabled &&
-    state.session.authenticated &&
-    (!playQuery || matchedCount > 0)
-  ) {
+  if (playbackActionsAvailable() && (!playQuery || matchedCount > 0)) {
     const playUrl = `/play/${encodeURIComponent(album.key)}${
       playQuery ? `?q=${encodeURIComponent(playQuery)}` : ''
     }`;
-    actions.push(
-      el(
-        'a',
-        {
-          class: 'dialog-play',
-          href: playUrl,
-          target: '_blank',
-          rel: 'noopener',
-        },
-        el('span', { 'aria-hidden': 'true', text: '▶' }),
-        el('span', {
-          text: 'Play in Audio Station',
-        }),
-      ),
+    const playLink = el(
+      'a',
+      {
+        class: 'dialog-play',
+        href: playUrl,
+        target: '_blank',
+        rel: 'noopener',
+        title: playLinkTitle(album.album),
+      },
+      el('span', { 'aria-hidden': 'true', text: '▶' }),
+      el('span', {
+        text: playLinkLabel(),
+      }),
     );
+    playLink.addEventListener('click', (event) => {
+      handlePlayLink(event, () => {
+        dialog.close();
+        return playAlbumNatively(album, playQuery);
+      });
+    });
+    actions.push(playLink);
+
+    if (state.nativePlaybackEnabled && state.audioStationFallbackEnabled) {
+      actions.push(
+        el(
+          'a',
+          {
+            class: 'dialog-fallback',
+            href: playUrl,
+            target: '_blank',
+            rel: 'noopener',
+            title: 'Play in Synology Audio Station',
+          },
+          el('span', { 'aria-hidden': 'true', text: '↗' }),
+          el('span', { text: 'Audio Station' }),
+        ),
+      );
+    }
   }
 
   if (artworkAvailable) {
@@ -2534,6 +2791,12 @@ function renderDialog(
     body.append(
       renderTrackGroups(
         { ...tracks, tracks: visibleTracks },
+        {
+          albumKey: album.key,
+          album: album.album,
+          artist: album.artist,
+          tracks: tracks.tracks,
+        },
         query && !showAllTracks
           ? 'No tracks in this album match this search.'
           : undefined,
@@ -2570,7 +2833,11 @@ function groupByDisc(tracks: Track[]): Map<number | null, Track[]> {
 function appendDiscSections(
   parent: HTMLElement,
   tracks: Track[],
-  options: { showDiscHeadings: boolean; headingTag: 'h3' | 'h4' },
+  options: {
+    showDiscHeadings: boolean;
+    headingTag: 'h3' | 'h4';
+    context: AlbumTrackContext;
+  },
 ): void {
   const groups = groupByDisc(tracks);
   const discs = [...groups.keys()].sort((a, b) => (a ?? 1) - (b ?? 1));
@@ -2588,13 +2855,16 @@ function appendDiscSections(
       );
     }
     const list = el('ol', { class: 'track-list' });
-    for (const track of discTracks) list.append(renderTrackRow(track));
+    for (const track of discTracks) {
+      list.append(renderTrackRow(track, options.context));
+    }
     parent.append(list);
   }
 }
 
 function renderTrackGroups(
   response: TracksResponse,
+  context: AlbumTrackContext,
   emptyMessage = 'No tracks found for this album.',
 ): HTMLElement {
   const { album, sourceAlbums, tracks } = response;
@@ -2632,6 +2902,7 @@ function renderTrackGroups(
       appendDiscSections(section, sourceTracks, {
         showDiscHeadings: groupByDisc(sourceTracks).size > 1,
         headingTag: 'h4',
+        context,
       });
       container.append(section);
     }
@@ -2643,6 +2914,7 @@ function renderTrackGroups(
   appendDiscSections(section, tracks, {
     showDiscHeadings: groupByDisc(tracks).size > 1,
     headingTag: 'h3',
+    context,
   });
   container.append(section);
   return container;
@@ -2652,27 +2924,36 @@ function normalizedMetadata(value: string | null | undefined): string {
   return (value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function renderTrackRow(track: Track): HTMLElement {
+function renderTrackRow(
+  track: Track,
+  context: AlbumTrackContext,
+): HTMLElement {
   const titleRow: Array<Node | string> = [];
-  if (state.playbackEnabled && state.session.authenticated) {
-    titleRow.push(
-      el(
-        'a',
-        {
-          class: 'track-play',
-          href: `/play/track/${track.id}`,
-          target: '_blank',
-          rel: 'noopener',
-          title: `Play ${track.title} in Audio Station`,
-          'aria-label': `Play ${track.title} in Audio Station`,
-        },
-        el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
-      ),
+  if (playbackActionsAvailable()) {
+    const playLink = el(
+      'a',
+      {
+        class: 'track-play',
+        href: `/play/track/${track.id}`,
+        target: '_blank',
+        rel: 'noopener',
+        title: playLinkTitle(track.title),
+        'aria-label': playLinkTitle(track.title),
+      },
+      el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
     );
+    playLink.addEventListener('click', (event) => {
+      handlePlayLink(event, () => {
+        dialog.close();
+        playTrackFromAlbumContext(context, track.id);
+      });
+    });
+    titleRow.push(playLink);
   }
   titleRow.push(
     el('span', { class: 'track-title', text: track.title }),
   );
+  if (!track.playable) titleRow.push(unsupportedFormatBadge());
 
   const main = el(
     'div',
@@ -3052,6 +3333,8 @@ function bindEvents(): void {
   loginDialog.addEventListener('close', () => {
     loginPassword.value = '';
     setLoginError(null);
+    state.pendingPlayAction = null;
+    state.pendingPlayerResume = false;
     if (state.pendingPlayUrl) {
       state.pendingPlayUrl = null;
       state.loginRequestedFromUrl = false;
@@ -3077,19 +3360,6 @@ function bindEvents(): void {
     navigateToSearch(query);
   });
 
-  document.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const link = target.closest<HTMLAnchorElement>(
-      'a.album-play, a.dialog-play',
-    );
-    if (!link) return;
-    if (state.session.authenticated) return;
-    event.preventDefault();
-    state.pendingPlayUrl = link.getAttribute('href');
-    openLoginDialog();
-  });
-
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) dialog.close();
   });
@@ -3107,17 +3377,24 @@ function bindEvents(): void {
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     const target = event.target;
-    if (
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
-      target instanceof HTMLSelectElement
-    ) {
+    if (target instanceof HTMLElement) {
+      if (target.isContentEditable) return;
+      if (target.closest('input, textarea, select')) return;
+    }
+    // A modal dialog owns the keyboard while it is open.
+    if (document.querySelector('dialog[open]')) return;
+
+    if (event.key === '/') {
+      event.preventDefault();
+      searchInput.focus();
       return;
     }
-    event.preventDefault();
-    searchInput.focus();
+    if (event.key === '?') {
+      event.preventDefault();
+      if (!searchHelpDialog.open) searchHelpDialog.showModal();
+    }
   });
 }
 

@@ -1,0 +1,51 @@
+# Serve happy-trails on the local LAN.
+#
+# This file is a standalone development proxy. Disabling the admin endpoint
+# lets it run alongside a Caddy system service (which normally owns
+# 127.0.0.1:2019). Remove this block if this is your only Caddy instance.
+{
+	admin off
+}
+
+# Keep the app bound to loopback (the defaults):
+#   HOST=127.0.0.1
+#   PORT=3000
+#
+# Start the app, then from this directory run:
+#   caddy run --config Caddyfile
+#
+# Browse from another device on the LAN:
+#   http://<laptop-lan-ip>:8080
+#
+# Note: sign-in sends DSM credentials to the app. This block is plain HTTP, so
+# use it only on a trusted LAN, or switch to the HTTPS example below.
+#
+# The reverse proxy must not buffer the Audio Station audio stream.
+
+:8080 {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:3000 {
+		# Forward audio ranges and the stream immediately instead of buffering.
+		flush_interval -1
+	}
+}
+
+# HTTPS option using Caddy's local CA.
+#
+# 1. Uncomment this block and set a hostname (or LAN IP) that resolves to this
+#    laptop.
+# 2. Install/trust Caddy's local root certificate on each client device.
+# 3. Browse to https://happy-trails.example.lan:8443
+#
+# With HTTPS, set TRUST_PROXY=loopback in the app's .env so Express trusts
+# Caddy's X-Forwarded-Proto and marks the session cookie Secure.
+#
+# https://happy-trails.example.lan:8443 {
+# 	tls internal
+# 	encode zstd gzip
+#
+# 	reverse_proxy 127.0.0.1:3000 {
+# 		flush_interval -1
+# 	}
+# }

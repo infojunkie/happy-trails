@@ -72,6 +72,8 @@ export interface TrackSummary {
   track: number | null;
   disc: number | null;
   duration: number | null;
+  /** False when the browser cannot play this track's format natively. */
+  playable: boolean;
   /** Display names of the album's genres, deduplicated. */
   genres: string[];
   /** Country/region tags from the album, deduplicated. */
@@ -108,6 +110,8 @@ export interface Track {
   duration: number | null;
   bitrate: number | null;
   frequency: number | null;
+  /** False when the browser cannot play this track's format natively. */
+  playable: boolean;
 }
 
 export interface TracksResponse {
@@ -132,6 +136,10 @@ export interface StatusResponse {
   error: string | null;
   /** True when a Synology DSM URL is configured, so users can sign in to play. */
   playbackEnabled: boolean;
+  /** True when the native HTML5 player can stream through this server. */
+  nativePlaybackEnabled: boolean;
+  /** True when the Audio Station handoff is available as a fallback. */
+  audioStationFallbackEnabled: boolean;
 }
 
 export interface SessionResponse {

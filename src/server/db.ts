@@ -57,6 +57,8 @@ export interface TrackRow {
   duration: number | null;
   bitrate: number | null;
   frequency: number | null;
+  /** Lowercase file extension, used only to decide native playability. */
+  format: string | null;
 }
 
 /** One `music` row as consumed by the in-memory track index. */
@@ -76,6 +78,8 @@ export interface TrackIndexRow {
   duration: number | null;
   /** Per-track upload date, ISO-like text. */
   date: string | null;
+  /** Lowercase file extension, used only to decide native playability. */
+  format: string | null;
 }
 
 const ALBUM_QUERY = `
@@ -116,7 +120,8 @@ const TRACK_INDEX_QUERY = `
     m.track,
     m.disc,
     m.duration,
-    to_char(m.date, 'YYYY-MM-DD"T"HH24:MI:SS') AS date
+    to_char(m.date, 'YYYY-MM-DD"T"HH24:MI:SS') AS date,
+    lower(substring(m.path from '\\.([^./]+)$')) AS format
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
   ORDER BY m.id
@@ -136,7 +141,8 @@ const TRACK_QUERY = `
     m.disc,
     m.duration,
     m.bitrate,
-    m.frequency
+    m.frequency,
+    lower(substring(m.path from '\\.([^./]+)$')) AS format
   FROM ${musicTable} m
   WHERE (m.album = ANY($1::text[]) OR (m.album IS NULL AND $2 = '(Unknown Album)'))
     AND ${ALBUM_ARTIST} = $3

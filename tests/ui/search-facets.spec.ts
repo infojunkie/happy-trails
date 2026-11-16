@@ -324,10 +324,38 @@ test('fielded, quoted, and boolean search expressions work', async ({
   await expectSummaryFor(page);
 });
 
-test('search help popup lists fields and runs examples', async ({ page }) => {
+test('help dialog lists shortcuts and search fields and runs examples', async ({
+  page,
+}) => {
   await page.locator('#search-help-button').click();
   await expect(page.locator('#search-help-dialog')).toBeVisible();
-  await expect(page.locator('#search-help-title')).toHaveText('Search syntax');
+  await expect(page.locator('#search-help-title')).toHaveText('Help');
+
+  const sections = page.locator('.help-section');
+  await expect(sections).toHaveCount(2);
+  await expect(sections.nth(0).locator('.help-section-title')).toHaveText(
+    'Keyboard shortcuts',
+  );
+  await expect(sections.nth(1).locator('.help-section-title')).toHaveText(
+    'Search syntax',
+  );
+  await expect(sections.nth(0)).not.toHaveAttribute('open');
+  await expect(sections.nth(1)).not.toHaveAttribute('open');
+
+  await sections.nth(0).locator('summary').click();
+  await expect(sections.nth(0)).toHaveAttribute('open');
+  await expect(page.locator('.search-help-shortcuts')).toContainText(
+    'Play or pause the player',
+  );
+  await expect(page.locator('.search-help-shortcuts')).toContainText(
+    'Mute or unmute',
+  );
+  await expect(page.locator('.search-help-shortcuts')).toContainText(
+    'Cover Flow',
+  );
+
+  await sections.nth(1).locator('summary').click();
+  await expect(sections.nth(1)).toHaveAttribute('open');
   await expect(page.locator('.search-help-fields')).toContainText('composer:');
   await expect(page.locator('.search-help-fields')).toContainText('serie:');
   await expect(page.locator('.search-help-fields')).toContainText('genre:');

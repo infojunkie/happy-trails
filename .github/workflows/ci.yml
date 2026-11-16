@@ -37,7 +37,7 @@ jobs:
         run: npm run test:backend
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium firefox
+        run: npx playwright install --with-deps chromium firefox webkit
 
       - name: UI tests
         run: npm run test:ui

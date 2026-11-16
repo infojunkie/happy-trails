@@ -33,6 +33,34 @@ export interface FileStream {
   headers: IncomingHttpHeaders;
 }
 
+/** An Audio Station audio stream, with the upstream status and headers. */
+export interface AudioStream {
+  stream: Readable;
+  status: number;
+  headers: IncomingHttpHeaders;
+}
+
+/**
+ * Browsers disagree about the canonical MIME type for some containers. The
+ * upstream type is forwarded by the stream proxy, so normalise the aliases
+ * that matter to `<audio>` codec selection.
+ */
+const AUDIO_CONTENT_TYPE_ALIASES: Record<string, string> = {
+  'audio/x-flac': 'audio/flac',
+  'audio/x-wav': 'audio/wav',
+  'audio/wave': 'audio/wav',
+  'audio/vnd.wave': 'audio/wav',
+};
+
+export function normalizeAudioContentType(
+  value: string | string[] | undefined,
+): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const type = (raw ?? '').toLowerCase().split(';', 1)[0]?.trim();
+  if (!type) return 'application/octet-stream';
+  return AUDIO_CONTENT_TYPE_ALIASES[type] ?? type;
+}
+
 export class DsmError extends Error {
   constructor(
     message: string,
@@ -55,6 +83,8 @@ interface Session {
   token: string;
   cookie: string;
   account: string;
+  /** DSM session id, used as an authentication fallback for stream URLs. */
+  sid?: string;
 }
 
 interface RawResponse {
@@ -81,9 +111,15 @@ type FileStreamResult =
   | { kind: 'auth' }
   | { kind: 'error'; message: string };
 
+type AudioStreamResult =
+  | { kind: 'stream'; audio: AudioStream }
+  | { kind: 'missing' }
+  | { kind: 'auth' }
+  | { kind: 'error'; message: string };
+
 interface LoginPayload {
   success?: unknown;
-  data?: { synotoken?: unknown; account?: unknown };
+  data?: { synotoken?: unknown; account?: unknown; sid?: unknown };
   error?: { code?: unknown };
 }
 
@@ -219,6 +255,39 @@ export class DsmClient {
   }
 
   /**
+   * Open a track's audio stream from Audio Station. The returned stream is
+   * piped directly to the browser; `range` and `ifRange` are forwarded so the
+   * browser can seek. Returns null when the track has no playable file.
+   */
+  async openAudioStream(
+    trackId: number,
+    options: {
+      range?: string;
+      ifRange?: string;
+      method?: 'GET' | 'HEAD';
+    } = {},
+  ): Promise<AudioStream | null> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await this.ensureSession();
+      const result = await this.requestAudioStream(session, trackId, options);
+
+      if (result.kind === 'stream') return result.audio;
+      if (result.kind === 'missing') return null;
+      if (result.kind === 'error') throw new DsmError(result.message);
+
+      // Expired/invalid sessions are retried once with a fresh login.
+      this.session = null;
+      if (attempt === 1) {
+        throw new DsmError(
+          'Audio Station rejected the stream request',
+          105,
+        );
+      }
+    }
+    return null;
+  }
+
+  /**
    * Replace the Audio Station web-player queue with these songs and start it.
    * The browser's Audio Station window picks up this shared queue when opened.
    * `updateplaylist` needs the token in an X-SYNO-TOKEN header (not the query).
@@ -307,8 +376,14 @@ export class DsmClient {
       typeof payload?.data?.account === 'string' && payload.data.account
         ? payload.data.account
         : this.settings.user;
+    const sid = payload?.data?.sid;
 
-    return { token, cookie, account };
+    return {
+      token,
+      cookie,
+      account,
+      ...(typeof sid === 'string' && sid ? { sid } : {}),
+    };
   }
 
   /** Verify credentials now (used by the interactive sign-in flow). */
@@ -493,15 +568,96 @@ export class DsmClient {
     };
   }
 
+  private async requestAudioStream(
+    session: Session,
+    trackId: number,
+    options: {
+      range?: string;
+      ifRange?: string;
+      method?: 'GET' | 'HEAD';
+    },
+  ): Promise<AudioStreamResult> {
+    const url = this.endpoint('/webapi/AudioStation/stream.cgi');
+    url.searchParams.set('api', 'SYNO.AudioStation.Stream');
+    url.searchParams.set('version', '2');
+    url.searchParams.set('method', 'stream');
+    url.searchParams.set('id', `music_${trackId}`);
+    url.searchParams.set('library', 'shared');
+    url.searchParams.set('SynoToken', session.token);
+    if (session.sid) url.searchParams.set('_sid', session.sid);
+
+    const headers: Record<string, string> = {
+      Accept: 'audio/*',
+      'X-SYNO-TOKEN': session.token,
+      ...(session.cookie ? { Cookie: session.cookie } : {}),
+      ...(options.range ? { Range: options.range } : {}),
+      ...(options.ifRange ? { 'If-Range': options.ifRange } : {}),
+    };
+
+    const response = await this.openResponse(
+      url,
+      headers,
+      options.method ?? 'GET',
+    );
+
+    const status = response.statusCode ?? 0;
+    const contentType =
+      String(response.headers['content-type'] ?? '')
+        .toLowerCase()
+        .split(';', 1)[0] ?? '';
+
+    if (
+      (status === 200 || status === 206) &&
+      (contentType.startsWith('audio/') ||
+        contentType === 'application/octet-stream')
+    ) {
+      return {
+        kind: 'stream',
+        audio: { stream: response, status, headers: response.headers },
+      };
+    }
+
+    // A range beyond the end of the file has no audio body to forward.
+    if (status === 416) {
+      response.resume();
+      return {
+        kind: 'stream',
+        audio: { stream: response, status, headers: response.headers },
+      };
+    }
+
+    if (status === 401 || status === 403) {
+      response.resume();
+      return { kind: 'auth' };
+    }
+    if (status === 404) {
+      response.resume();
+      return { kind: 'missing' };
+    }
+
+    // Synology answers some failures with HTTP 200 and a small JSON body.
+    const body = await readSmallResponse(response);
+    const code = errorCode(jsonBody(body));
+    if (code === 408 || code === 404) return { kind: 'missing' };
+    if (code !== undefined && AUTH_ERROR_CODES.has(code)) {
+      return { kind: 'auth' };
+    }
+    return {
+      kind: 'error',
+      message: `unexpected audio response (HTTP ${status}, ${contentType || 'unknown type'})`,
+    };
+  }
+
   private openResponse(
     url: URL,
     headers: Record<string, string>,
+    method: 'GET' | 'HEAD' = 'GET',
   ): Promise<IncomingMessage> {
     return new Promise((resolve, reject) => {
       const request = https.request(
         url,
         {
-          method: 'GET',
+          method,
           agent: this.agent,
           headers,
           timeout: this.settings.timeoutMs,

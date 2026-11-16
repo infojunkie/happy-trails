@@ -5,7 +5,11 @@ import {
   loadPlaybackTrackIdsForMusicIds,
   loadTracks,
 } from './db.js';
-import { audioStationUrl, type DsmClient } from './dsm.js';
+import {
+  audioStationUrl,
+  type AudioStream,
+  type DsmClient,
+} from './dsm.js';
 import { library } from './library.js';
 import { createTrackMatcher } from './trackSearch.js';
 
@@ -24,14 +28,38 @@ export class PlaybackUnavailableError extends Error {
 export class PlaybackService {
   constructor() {
     console.log(
+      config.nativePlaybackEnabled
+        ? '[playback] Native streaming enabled'
+        : '[playback] Native streaming disabled (NATIVE_PLAYBACK_ENABLED=false or DSM_URL is not configured)',
+    );
+    console.log(
       this.enabled
-        ? '[playback] Synology Audio Station handoff enabled'
-        : '[playback] Synology playback disabled (DSM_FRONTEND_URL is not configured)',
+        ? '[playback] Audio Station fallback enabled'
+        : '[playback] Audio Station fallback disabled',
     );
   }
 
+  /** Whether the Audio Station handoff is offered as a fallback. */
   get enabled(): boolean {
-    return config.dsmFrontendUrl !== null || config.dsmFrontendPort !== null;
+    return config.audioStationFallbackEnabled;
+  }
+
+  /**
+   * Open a track's audio stream for the native player. The music id is mapped
+   * to the Audio Station song id; the returned stream is piped to the browser.
+   */
+  async openStream(
+    client: DsmClient,
+    musicId: number,
+    options: {
+      range?: string;
+      ifRange?: string;
+      method?: 'GET' | 'HEAD';
+    } = {},
+  ): Promise<AudioStream | null> {
+    const audioStationId = await loadPlaybackTrackIdForMusicId(musicId);
+    if (audioStationId === null) return null;
+    return client.openAudioStream(audioStationId, options);
   }
 
   /**

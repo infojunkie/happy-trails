@@ -1,6 +1,6 @@
 {
   "name": "happy-trails",
-  "version": "3.6.0",
+  "version": "4.0.0",
   "private": true,
   "description": "Browse the Synology mediaserver music library.",
   "type": "module",
@@ -29,10 +29,17 @@
     "test:security": "node --import tsx --test tests/security/*.test.ts",
     "pretest:ui": "npm run build:client",
     "test:ui": "playwright test",
+    "pretest:ui:chromium": "npm run build:client",
     "test:ui:chromium": "playwright test --project=chromium",
+    "pretest:ui:firefox": "npm run build:client",
     "test:ui:firefox": "playwright test --project=firefox",
+    "pretest:ui:webkit": "npm run build:client",
+    "test:ui:webkit": "playwright test --project=webkit",
     "test:ui:headed": "playwright test --headed",
-    "test:install-browsers": "playwright install chromium firefox",
+    "test:chromium": "npm run test:backend && npm run test:ui:chromium",
+    "test:firefox": "npm run test:backend && npm run test:ui:firefox",
+    "test:webkit": "npm run test:backend && npm run test:ui:webkit",
+    "test:install-browsers": "playwright install chromium firefox webkit",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {

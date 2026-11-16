@@ -58,6 +58,7 @@
             autocomplete="off"
             spellcheck="false"
             aria-describedby="search-syntax"
+            aria-keyshortcuts="/"
             title='album:"exact phrase" artist:name track:title genre:name region:name serie:name composer:name source:label — supports AND, OR, and parentheses'
           />
           <kbd class="search-hint" aria-hidden="true">/</kbd>
@@ -66,10 +67,11 @@
           id="search-help-button"
           class="search-help-button"
           type="button"
-          aria-label="Search syntax help"
-          title="Search syntax help"
+          aria-label="Help"
+          title="Help"
           aria-haspopup="dialog"
           aria-controls="search-help-dialog"
+          aria-keyshortcuts="?"
         >
           ?
         </button>
@@ -408,9 +410,8 @@
       <form id="login-form" class="login-form">
         <h2 id="login-title">Sign in to Synology</h2>
         <p class="login-note">
-          Use your own DSM account. It is used to queue albums in Audio
-          Station and is never written to disk. Your browser must also be
-          signed into DSM as this user to see the queue.
+          Use your own DSM account. It is used to stream music and is never
+          written to disk.
         </p>
         <label class="login-field">
           Username
@@ -447,11 +448,75 @@
       id="search-help-dialog"
       class="search-help-dialog"
       aria-labelledby="search-help-title"
+      aria-describedby="help-intro"
     >
       <div class="search-help">
         <div class="search-help-header">
           <div>
-            <h2 id="search-help-title">Search syntax</h2>
+            <h2 id="search-help-title">Help</h2>
+            <p id="help-intro" class="search-help-intro">
+              Keyboard shortcuts, search syntax, and other reference material.
+            </p>
+          </div>
+          <button
+            id="search-help-close"
+            class="dialog-close"
+            type="button"
+            aria-label="Close help"
+            title="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <details class="help-section">
+          <summary class="help-section-toggle">
+            <span class="help-section-title">Keyboard shortcuts</span>
+            <span class="help-section-chevron" aria-hidden="true">▾</span>
+          </summary>
+          <div class="help-section-body">
+            <dl class="search-help-shortcuts">
+              <dt><kbd>/</kbd></dt>
+              <dd>Focus the search field.</dd>
+              <dt><kbd>?</kbd></dt>
+              <dd>Open this help dialog.</dd>
+              <dt><kbd>Enter</kbd></dt>
+              <dd>Run the search from the search field.</dd>
+              <dt><kbd>Esc</kbd></dt>
+              <dd>Close the open dialog, full-screen map, or play queue.</dd>
+              <dt><kbd>Space</kbd></dt>
+              <dd>Play or pause the player.</dd>
+              <dt><kbd>←</kbd> / <kbd>→</kbd></dt>
+              <dd>Seek back or forward 5 seconds.</dd>
+              <dt><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd></dt>
+              <dd>Previous or next track.</dd>
+              <dt><kbd>↑</kbd> / <kbd>↓</kbd></dt>
+              <dd>Volume up or down.</dd>
+              <dt><kbd>M</kbd></dt>
+              <dd>Mute or unmute.</dd>
+              <dt><kbd>R</kbd></dt>
+              <dd>Restart the current track.</dd>
+              <dt><kbd>←</kbd> / <kbd>→</kbd> in Cover Flow</dt>
+              <dd>Browse albums; <kbd>Enter</kbd> opens the selected album.</dd>
+              <dt>Map keys</dt>
+              <dd>
+                When the map has focus, arrow keys pan and <kbd>+</kbd> /
+                <kbd>−</kbd> zoom. <kbd>Esc</kbd> exits full-screen.
+              </dd>
+            </dl>
+            <p class="search-help-note">
+              Player shortcuts work when focus is not in a text field and no
+              dialog is open.
+            </p>
+          </div>
+        </details>
+
+        <details class="help-section">
+          <summary class="help-section-toggle">
+            <span class="help-section-title">Search syntax</span>
+            <span class="help-section-chevron" aria-hidden="true">▾</span>
+          </summary>
+          <div class="help-section-body">
             <p class="search-help-intro">
               A plain list of keywords searches every field as one contiguous
               phrase. Add a field prefix to narrow the search, quote field
@@ -460,139 +525,279 @@
               search whole albums or individual tracks. In Tracks mode, genre,
               region, and series terms still match the album's tags.
             </p>
+
+            <dl class="search-help-fields">
+              <dt><code>album:</code></dt>
+              <dd>Album title and raw source titles.</dd>
+              <dt><code>artist:</code></dt>
+              <dd>Album artist, parsed artists, and track artists.</dd>
+              <dt><code>track:</code></dt>
+              <dd>
+                Track titles. In Albums mode this finds albums containing a
+                matching track.
+              </dd>
+              <dt><code>genre:</code></dt>
+              <dd>Genre tags. Alias: <code>genres:</code>.</dd>
+              <dt><code>region:</code></dt>
+              <dd>
+                Country/region tags from the genre column. Alias:
+                <code>regions:</code>.
+              </dd>
+              <dt><code>serie:</code></dt>
+              <dd>
+                Series/label names from <code>{…}</code>, year-Edition brackets
+                such as <code>[2016 Rock Candy Edition]</code>, and recurring
+                album titles such as <code>Sem Limite</code>,
+                <code>A Arte de …</code>, and <code>The Wire Tapper</code>.
+                Alias: <code>label:</code>.
+              </dd>
+              <dt><code>composer:</code></dt>
+              <dd>
+                Composer tags from the tracks. Alias: <code>composers:</code>.
+              </dd>
+              <dt><code>source:</code></dt>
+              <dd>Raw source/disc titles only. Alias: <code>disc:</code>.</dd>
+              <dt><code>all:</code></dt>
+              <dd>Every indexed field. Aliases: <code>any:</code>.</dd>
+            </dl>
+
+            <h3>Operators</h3>
+            <ul class="search-help-list">
+              <li>
+                <code>AND</code> requires both sides; adjacent terms in a
+                fielded expression are implicitly ANDed.
+              </li>
+              <li><code>OR</code> matches either side.</li>
+              <li>
+                <code>abbey road</code> is a phrase; use
+                <code>abbey AND road</code> for independent words.
+              </li>
+              <li>
+                <code>AND</code> binds more tightly than <code>OR</code>;
+                parentheses group expressions.
+              </li>
+              <li>
+                Matching is case-, accent-, and ligature-insensitive, including
+                quoted phrases.
+              </li>
+            </ul>
+
+            <h3>Examples</h3>
+            <div class="search-help-examples">
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example='album:"abbey road"'
+              >
+                <code>album:"abbey road"</code>
+                <span>quoted phrase in the album field</span>
+              </button>
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example="artist:beatles OR artist:stones"
+              >
+                <code>artist:beatles OR artist:stones</code>
+                <span>either artist</span>
+              </button>
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example="(album:road OR album:street) artist:beatles"
+              >
+                <code>(album:road OR album:street) artist:beatles</code>
+                <span>parentheses and implicit AND</span>
+              </button>
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example='track:"Freddie Freeloader"'
+              >
+                <code>track:"Freddie Freeloader"</code>
+                <span>a track title</span>
+              </button>
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example='composer:"Antonio Carlos Jobim"'
+              >
+                <code>composer:"Antonio Carlos Jobim"</code>
+                <span>a composer tag</span>
+              </button>
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example='serie:"Rock Candy"'
+              >
+                <code>serie:"Rock Candy"</code>
+                <span>an edition series</span>
+              </button>
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example='genre:"Jazz" region:"Brazil"'
+              >
+                <code>genre:"Jazz" region:"Brazil"</code>
+                <span>genre and region tags</span>
+              </button>
+            </div>
+
+            <p class="search-help-note">
+              Unknown field names are treated as ordinary text. Incomplete or
+              malformed expressions fall back to the all-field token search.
+              <code>NOT</code> is not supported.
+            </p>
           </div>
+        </details>
+      </div>
+    </dialog>
+
+    <footer id="player" class="player" aria-label="Player" hidden>
+      <div class="player-inner">
+        <div class="player-track">
+          <div id="player-cover" class="player-cover" aria-hidden="true"></div>
+          <div class="player-meta" aria-live="polite" aria-atomic="true">
+            <p id="player-title" class="player-title">Nothing playing</p>
+            <p id="player-subtitle" class="player-subtitle"></p>
+          </div>
+        </div>
+
+        <div class="player-controls" role="group" aria-label="Playback controls">
           <button
-            id="search-help-close"
-            class="dialog-close"
+            id="player-restart"
+            class="player-control"
             type="button"
-            aria-label="Close search syntax help"
+            aria-label="Restart track"
+            aria-keyshortcuts="R"
+            title="Restart track"
+          >
+            ↺
+          </button>
+          <button
+            id="player-previous"
+            class="player-control"
+            type="button"
+            aria-label="Previous track"
+            aria-keyshortcuts="Shift+ArrowLeft"
+            title="Previous track"
+          >
+            ⏮
+          </button>
+          <button
+            id="player-toggle"
+            class="player-control player-toggle"
+            type="button"
+            aria-label="Play"
+            aria-keyshortcuts="Space"
+            title="Play"
+          >
+            ▶
+          </button>
+          <button
+            id="player-next"
+            class="player-control"
+            type="button"
+            aria-label="Next track"
+            aria-keyshortcuts="Shift+ArrowRight"
+            title="Next track"
+          >
+            ⏭
+          </button>
+        </div>
+
+        <div class="player-progress">
+          <span id="player-elapsed" class="player-time">0:00</span>
+          <input
+            id="player-seek"
+            class="player-seek"
+            type="range"
+            min="0"
+            max="1"
+            step="0.1"
+            value="0"
+            aria-label="Seek"
+            aria-keyshortcuts="ArrowLeft ArrowRight"
+          />
+          <span id="player-remaining" class="player-time">—</span>
+        </div>
+
+        <div class="player-volume">
+          <button
+            id="player-mute"
+            class="player-control player-mute"
+            type="button"
+            aria-label="Mute"
+            aria-keyshortcuts="M"
+            title="Mute"
+          >
+            🔊
+          </button>
+          <input
+            id="player-volume"
+            class="player-volume-slider"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value="1"
+            aria-label="Volume"
+            aria-keyshortcuts="ArrowUp ArrowDown"
+          />
+        </div>
+
+        <button
+          id="player-queue-toggle"
+          class="player-queue-button"
+          type="button"
+          aria-expanded="false"
+          aria-controls="player-queue-panel"
+          title="Play queue"
+        >
+          <span aria-hidden="true">☰</span>
+          <span id="player-queue-count" class="player-queue-count">0</span>
+          <span class="visually-hidden"> tracks in queue</span>
+        </button>
+      </div>
+
+      <p id="player-error" class="player-error" role="alert" hidden></p>
+
+      <div
+        id="player-queue-panel"
+        class="player-queue-panel"
+        role="region"
+        aria-label="Play queue"
+        tabindex="-1"
+        hidden
+      >
+        <div class="player-queue-header">
+          <h2 class="player-queue-heading">Play queue</h2>
+          <button
+            id="player-queue-close"
+            class="player-queue-close"
+            type="button"
+            aria-label="Close play queue"
             title="Close"
           >
             ×
           </button>
         </div>
-
-        <dl class="search-help-fields">
-          <dt><code>album:</code></dt>
-          <dd>Album title and raw source titles.</dd>
-          <dt><code>artist:</code></dt>
-          <dd>Album artist, parsed artists, and track artists.</dd>
-          <dt><code>track:</code></dt>
-          <dd>
-            Track titles. In Albums mode this finds albums containing a
-            matching track.
-          </dd>
-          <dt><code>genre:</code></dt>
-          <dd>Genre tags. Alias: <code>genres:</code>.</dd>
-          <dt><code>region:</code></dt>
-          <dd>
-            Country/region tags from the genre column. Alias:
-            <code>regions:</code>.
-          </dd>
-          <dt><code>serie:</code></dt>
-          <dd>
-            Series/label names from <code>{…}</code>, year-Edition brackets
-            such as <code>[2016 Rock Candy Edition]</code>, and recurring
-            album titles such as <code>Sem Limite</code>,
-            <code>A Arte de …</code>, and <code>The Wire Tapper</code>. Alias:
-            <code>label:</code>.
-          </dd>
-          <dt><code>composer:</code></dt>
-          <dd>Composer tags from the tracks. Alias: <code>composers:</code>.</dd>
-          <dt><code>source:</code></dt>
-          <dd>Raw source/disc titles only. Alias: <code>disc:</code>.</dd>
-          <dt><code>all:</code></dt>
-          <dd>Every indexed field. Aliases: <code>any:</code>.</dd>
-        </dl>
-
-        <h3>Operators</h3>
-        <ul class="search-help-list">
-          <li>
-            <code>AND</code> requires both sides; adjacent terms in a fielded
-            expression are implicitly ANDed.
-          </li>
-          <li><code>OR</code> matches either side.</li>
-          <li>
-            <code>abbey road</code> is a phrase; use
-            <code>abbey AND road</code> for independent words.
-          </li>
-          <li>
-            <code>AND</code> binds more tightly than <code>OR</code>;
-            parentheses group expressions.
-          </li>
-          <li>
-            Matching is case-, accent-, and ligature-insensitive, including
-            quoted phrases.
-          </li>
-        </ul>
-
-        <h3>Examples</h3>
-        <div class="search-help-examples">
-          <button
-            type="button"
-            class="syntax-example"
-            data-search-example='album:"abbey road"'
-          >
-            <code>album:"abbey road"</code>
-            <span>quoted phrase in the album field</span>
-          </button>
-          <button
-            type="button"
-            class="syntax-example"
-            data-search-example="artist:beatles OR artist:stones"
-          >
-            <code>artist:beatles OR artist:stones</code>
-            <span>either artist</span>
-          </button>
-          <button
-            type="button"
-            class="syntax-example"
-            data-search-example="(album:road OR album:street) artist:beatles"
-          >
-            <code>(album:road OR album:street) artist:beatles</code>
-            <span>parentheses and implicit AND</span>
-          </button>
-          <button
-            type="button"
-            class="syntax-example"
-            data-search-example='track:"Freddie Freeloader"'
-          >
-            <code>track:"Freddie Freeloader"</code>
-            <span>a track title</span>
-          </button>
-          <button
-            type="button"
-            class="syntax-example"
-            data-search-example='composer:"Antonio Carlos Jobim"'
-          >
-            <code>composer:"Antonio Carlos Jobim"</code>
-            <span>a composer tag</span>
-          </button>
-          <button
-            type="button"
-            class="syntax-example"
-            data-search-example='serie:"Rock Candy"'
-          >
-            <code>serie:"Rock Candy"</code>
-            <span>an edition series</span>
-          </button>
-          <button
-            type="button"
-            class="syntax-example"
-            data-search-example='genre:"Jazz" region:"Brazil"'
-          >
-            <code>genre:"Jazz" region:"Brazil"</code>
-            <span>genre and region tags</span>
+        <ol
+          id="player-queue-list"
+          class="player-queue-list"
+          aria-label="Queued tracks"
+        ></ol>
+        <p id="player-queue-empty" class="player-queue-empty" hidden>
+          Nothing queued.
+        </p>
+        <div class="player-queue-footer">
+          <button id="player-clear" class="player-clear" type="button">
+            Clear queue
           </button>
         </div>
-
-        <p class="search-help-note">
-          Unknown field names are treated as ordinary text. Incomplete or
-          malformed expressions fall back to the all-field token search.
-          <code>NOT</code> is not supported.
-        </p>
       </div>
-    </dialog>
+
+      <div id="player-audio" class="player-audio" aria-hidden="true"></div>
+    </footer>
 
     <noscript>
       <p class="noscript">This app requires JavaScript to browse the library.</p>

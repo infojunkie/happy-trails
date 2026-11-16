@@ -363,6 +363,19 @@ export const config = {
   seriesAllowlist: seriesAllowlist(),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
+  /**
+   * Stream audio through this server for the native HTML5 player. Requires a
+   * DSM URL; set NATIVE_PLAYBACK_ENABLED=false to fall back to Audio Station.
+   */
+  nativePlaybackEnabled:
+    dsmUrl.length > 0 && booleanFromEnv('NATIVE_PLAYBACK_ENABLED', true),
+  /**
+   * Offer the Audio Station handoff as a fallback. Requires a resolved
+   * frontend target; set AUDIO_STATION_FALLBACK_ENABLED=false to hide it.
+   */
+  audioStationFallbackEnabled:
+    (frontendTarget.url !== null || frontendTarget.originPort !== null) &&
+    booleanFromEnv('AUDIO_STATION_FALLBACK_ENABLED', true),
   dsmFrontendUrl: frontendTarget.url,
   dsmFrontendPort: frontendTarget.originPort,
   /** Exact app origins allowed to select an origin-based redirect target. */

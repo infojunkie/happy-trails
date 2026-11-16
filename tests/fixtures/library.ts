@@ -4,7 +4,11 @@ import type { Request } from 'express';
 import type { AppDependencies } from '../../src/server/app.js';
 import type { AlbumRow, TrackIndexRow, TrackRow } from '../../src/server/db.js';
 import { normalizeAlbumName } from '../../src/server/search.js';
-import type { DsmClient, CoverImage } from '../../src/server/dsm.js';
+import type {
+  AudioStream,
+  CoverImage,
+  DsmClient,
+} from '../../src/server/dsm.js';
 import { DsmError } from '../../src/server/dsm.js';
 import { LoginRateLimiter } from '../../src/server/loginRateLimit.js';
 import { SqliteIndex } from '../../src/server/sqlite.js';
@@ -270,6 +274,7 @@ function track(
     duration: 200,
     bitrate: 320000,
     frequency: 44100,
+    format: 'flac',
     ...overrides,
   };
 }
@@ -290,6 +295,7 @@ export const fixtureTracks = new Map<string, TrackRow[]>([
       }),
       track(4, "Maxwell's Silver Hammer", {
         composer: 'The Beatles',
+        format: 'wma',
       }),
       track(5, 'Come Together (Take 1)', {
         composer: 'John Lennon, Paul McCartney',
@@ -456,6 +462,7 @@ function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
               disc: source.disc,
               duration: source.duration,
               date: row.latest,
+              format: source.format,
             }
           : {
               id: generatedId++,
@@ -470,6 +477,7 @@ function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
               disc: 1,
               duration: 180,
               date: row.latest,
+              format: 'flac',
             },
       );
     }
@@ -483,6 +491,12 @@ export interface FixtureOptions {
   loginError?: Error | null;
   playbackUrl?: string | null;
   playbackError?: Error | null;
+  nativePlaybackEnabled?: boolean;
+  audioStationFallbackEnabled?: boolean;
+  /** Raw bytes returned by the fake native stream endpoint, or null for 404. */
+  audioStream?: Buffer | null;
+  audioStreamContentType?: string;
+  streamError?: Error | null;
   coverImages?: Map<string, CoverImage>;
   /** Representative track paths whose album folder contains Artwork.pdf. */
   artworkFiles?: Map<string, Buffer>;
@@ -505,6 +519,12 @@ export interface FixtureContext {
   playbackQueries: Array<string | null>;
   trackPlaybackCalls: number[];
   playbackOrigins: Array<string | null>;
+  streamCalls: Array<{
+    musicId: number;
+    range: string | undefined;
+    ifRange: string | undefined;
+    method: 'GET' | 'HEAD';
+  }>;
   coverCalls: string[];
   artworkCalls: string[];
   artworkRangeCalls: Array<string | undefined>;
@@ -553,6 +573,11 @@ export async function createFixtureContext(
     checkIntervalMs: 60_000,
     error: options.ready === false ? 'Fixture library is unavailable' : null,
     playbackEnabled: options.authEnabled ?? true,
+    nativePlaybackEnabled:
+      options.nativePlaybackEnabled ?? (options.authEnabled ?? true),
+    audioStationFallbackEnabled:
+      options.audioStationFallbackEnabled ??
+      (options.playbackUrl === undefined ? true : options.playbackUrl !== null),
   };
 
   const sessions = new Map<
@@ -605,6 +630,7 @@ export async function createFixtureContext(
   const playbackQueries: Array<string | null> = [];
   const trackPlaybackCalls: number[] = [];
   const playbackOrigins: Array<string | null> = [];
+  const streamCalls: FixtureContext['streamCalls'] = [];
   const coverCalls: string[] = [];
   const artworkCalls: string[] = [];
   const artworkRangeCalls: Array<string | undefined> = [];
@@ -658,7 +684,9 @@ export async function createFixtureContext(
     },
     userSessions,
     playback: {
-      enabled: playbackUrl !== null,
+      enabled:
+        (options.audioStationFallbackEnabled ?? true) &&
+        playbackUrl !== null,
       audioStationUrlFor: (origin) => {
         playbackOrigins.push(origin);
         return playbackUrl;
@@ -674,12 +702,68 @@ export async function createFixtureContext(
         trackPlaybackCalls.push(musicId);
         return 1;
       },
+      openStream: async (_client, musicId, streamOptions = {}) => {
+        streamCalls.push({
+          musicId,
+          range: streamOptions.range,
+          ifRange: streamOptions.ifRange,
+          method: streamOptions.method ?? 'GET',
+        });
+        if (options.streamError) throw options.streamError;
+        const audioStream = options.audioStream;
+        if (!audioStream) return null;
+
+        const total = audioStream.length;
+        const contentType =
+          options.audioStreamContentType ?? 'audio/x-flac';
+        const headers: Record<string, string> = {
+          'content-type': contentType,
+          'accept-ranges': 'bytes',
+        };
+        const method = streamOptions.method ?? 'GET';
+        let status = 200;
+        let body = audioStream;
+
+        if (streamOptions.range) {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(streamOptions.range.trim());
+          if (match) {
+            const startRaw = match[1] ?? '';
+            const endRaw = match[2] ?? '';
+            let start = startRaw ? Number(startRaw) : 0;
+            let end = endRaw ? Number(endRaw) : total - 1;
+            if (!startRaw && endRaw) {
+              start = Math.max(0, total - Number(endRaw));
+              end = total - 1;
+            }
+            if (start >= total || start < 0) {
+              return {
+                stream: Readable.from([]),
+                status: 416,
+                headers: { ...headers, 'content-range': `bytes */${total}` },
+              } satisfies AudioStream;
+            }
+            end = Math.min(end, total - 1);
+            body = audioStream.subarray(start, end + 1);
+            status = 206;
+            headers['content-range'] = `bytes ${start}-${end}/${total}`;
+          }
+        }
+
+        headers['content-length'] = String(body.length);
+        return {
+          stream: Readable.from(method === 'HEAD' ? [] : body),
+          status,
+          headers,
+        } satisfies AudioStream;
+      },
     },
     config: {
       defaultPageSize: 48,
       maxPageSize: 200,
       dsmUrl: authEnabled ? 'https://dsm.example' : null,
       dsmFrontendAllowedOrigins: options.allowedFrontendOrigins ?? [],
+      nativePlaybackEnabled:
+        options.nativePlaybackEnabled ?? (options.authEnabled ?? true),
       trustProxy: options.trustProxy ?? false,
     },
     loginRateLimiter:
@@ -698,6 +782,7 @@ export async function createFixtureContext(
     playbackQueries,
     trackPlaybackCalls,
     playbackOrigins,
+    streamCalls,
     coverCalls,
     artworkCalls,
     artworkRangeCalls,
