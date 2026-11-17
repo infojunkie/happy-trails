@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import type {
   AlbumSummary,
   GenreFacet,
@@ -8,6 +9,10 @@ import type {
 } from '../shared/types.js';
 import { config } from './config.js';
 import { loadLibraryFingerprint, loadLibraryRows } from './db.js';
+import type {
+  IndexWorkerData,
+  IndexWorkerMessage,
+} from './indexWorkerProtocol.js';
 import {
   SqliteIndex,
   type AlbumsQuery,
@@ -17,6 +22,12 @@ import {
 } from './sqlite.js';
 
 const INDEX_FILE_PREFIX = 'happy-trails-index-';
+const INDEX_WORKER_URL = new URL(
+  import.meta.url.endsWith('.ts') ? './indexWorker.ts' : './indexWorker.js',
+  import.meta.url,
+);
+/** A hung worker must not leave the library refreshing forever. */
+const INDEX_BUILD_TIMEOUT_MS = 10 * 60_000;
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -39,6 +50,7 @@ export class Library {
   private lastCheckedAt: Date | null = null;
   private rebuilding = false;
   private timer: NodeJS.Timeout | null = null;
+  private worker: Worker | null = null;
 
   async start(): Promise<void> {
     this.prepareIndexStorage();
@@ -49,6 +61,10 @@ export class Library {
 
   stop(): void {
     this.clearTimer();
+    if (this.worker) {
+      void this.worker.terminate();
+      this.worker = null;
+    }
     this.index?.close();
     this.index = null;
   }
@@ -149,22 +165,122 @@ export class Library {
     );
   }
 
+  /**
+   * Build a new index. In file-backed mode the work happens in a worker
+   * thread; `:memory:` databases cannot cross threads and stay in-process.
+   */
+  private async buildIndex(version: number): Promise<{
+    index: SqliteIndex;
+    fingerprint: string;
+    builtInWorker: boolean;
+  }> {
+    if (config.indexDbDir === null) {
+      const fingerprint = await loadLibraryFingerprint();
+      const { albums, tracks } = await loadLibraryRows();
+      const index = await SqliteIndex.build(albums, tracks, version);
+      return { index, fingerprint, builtInWorker: false };
+    }
+
+    const databasePath = this.indexDatabasePath(version);
+    try {
+      const result = await this.buildInWorker(databasePath, version);
+      const index = SqliteIndex.open(
+        databasePath,
+        version,
+        result.albumCount,
+        result.trackCount,
+        result.databaseBytes,
+      );
+      return {
+        index,
+        fingerprint: result.fingerprint,
+        builtInWorker: true,
+      };
+    } catch (error) {
+      try {
+        fs.rmSync(databasePath, { force: true });
+      } catch (cleanupError) {
+        console.warn(
+          `[library] could not remove incomplete index ${databasePath}:`,
+          cleanupError,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private buildInWorker(
+    databasePath: string,
+    version: number,
+  ): Promise<Extract<IndexWorkerMessage, { ok: true }>> {
+    const worker = new Worker(INDEX_WORKER_URL, {
+      workerData: { databasePath, version } satisfies IndexWorkerData,
+    });
+    this.worker = worker;
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (this.worker === worker) this.worker = null;
+      };
+
+      const timer = setTimeout(() => {
+        void worker.terminate();
+        finish();
+        reject(
+          new Error(
+            `Index build worker timed out after ${INDEX_BUILD_TIMEOUT_MS} ms`,
+          ),
+        );
+      }, INDEX_BUILD_TIMEOUT_MS);
+      timer.unref();
+
+      worker.once('message', (message: IndexWorkerMessage) => {
+        if (settled) return;
+        if (message.ok) {
+          finish();
+          resolve(message);
+        } else {
+          finish();
+          reject(new Error(message.error));
+        }
+      });
+      worker.once('error', (error) => {
+        if (settled) return;
+        finish();
+        reject(error);
+      });
+      worker.once('exit', (code) => {
+        if (settled) return;
+        finish();
+        reject(
+          new Error(
+            `Index build worker exited with code ${code} before returning a result`,
+          ),
+        );
+      });
+    });
+  }
+
   private async rebuild(): Promise<void> {
     if (this.rebuilding) return;
     this.rebuilding = true;
     const started = Date.now();
 
     try {
-      const fingerprint = await loadLibraryFingerprint();
-      const { albums, tracks } = await loadLibraryRows();
       const version = this.version + 1;
-      const databasePath = this.indexDatabasePath(version);
-      const index = await SqliteIndex.build(
-        albums,
-        tracks,
-        version,
-        databasePath,
-      );
+      if (config.indexDbDir !== null) {
+        console.log(
+          `[library] version ${version}: building index in a worker`,
+        );
+      }
+
+      const { index, fingerprint, builtInWorker } =
+        await this.buildIndex(version);
 
       const previous = this.index;
       this.index = index;
@@ -173,12 +289,15 @@ export class Library {
       this.lastError = null;
       previous?.close();
       const memory = process.memoryUsage();
+      const storage =
+        config.indexDbDir === null
+          ? 'in memory'
+          : `on disk${builtInWorker ? ', built in a worker' : ''}`;
       console.log(
         `[library] version ${version}: indexed ${index.albumCount} albums ` +
           `and ${index.trackCount} tracks in ${Date.now() - started} ms ` +
           `(SQLite ${Math.round(index.databaseBytes / 1024 / 1024)} MB ` +
-          `${config.indexDbDir === null ? 'in memory' : 'on disk'}, ` +
-          `RSS ${Math.round(memory.rss / 1024 / 1024)} MB)`,
+          `${storage}, RSS ${Math.round(memory.rss / 1024 / 1024)} MB)`,
       );
     } catch (error) {
       this.lastError = describeError(error);

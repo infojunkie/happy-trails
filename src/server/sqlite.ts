@@ -1091,10 +1091,42 @@ export class SqliteIndex {
     }
   }
 
-  close(): void {
+  /**
+   * Open an already-built index file. Used by the main thread after the index
+   * builder worker has finished writing the file.
+   */
+  static open(
+    databasePath: string,
+    version: number,
+    albumCount: number,
+    trackCount: number,
+    databaseBytes: number,
+  ): SqliteIndex {
+    const db = new DatabaseSync(databasePath);
+    return new SqliteIndex(
+      db,
+      databasePath,
+      albumCount,
+      trackCount,
+      version,
+      databaseBytes,
+    );
+  }
+
+  /**
+   * Close this connection but keep the file on disk. The builder worker uses
+   * this so the main thread can open the same file; the owner then deletes it
+   * through `close()`.
+   */
+  persist(): void {
     if (this.closed) return;
     this.closed = true;
     this.db.close();
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.persist();
     removeDatabaseFile(this.databasePath);
   }
 

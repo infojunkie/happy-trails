@@ -254,7 +254,9 @@ Notes:
   1000); mode `644` is sufficient. The same applies to a mounted `.pgpass` if
   the host user does not have UID 1000.
 - The image runs as the unprivileged `node` user and health-checks
-  `/api/status`. Its start period is 60s to allow for the initial index build.
+  `/api/status`. The HTTP server starts immediately; `/api/status` reports
+  `ready:false` while the first index builds, and data endpoints return `503`
+  until it is ready.
 - The index volume must be writable by UID 1000. A named volume mounted at
   `/data` inherits the image's ownership; a host bind mount needs its directory
   owned by UID 1000.
@@ -267,6 +269,12 @@ startup (and whenever the change fingerprint moves). It is written to
 `/tmp/happy-trails-index`). Each build gets a unique file; after a successful
 build the new file is published and the old file is deleted. A startup sweep
 removes files left behind by a crash.
+
+In file-backed mode the build runs in a **worker thread**: the main thread
+keeps serving the previous index (or `503` on the very first build) while the
+worker reads PostgreSQL and writes the new file. `:memory:` mode builds in the
+main thread because an in-memory SQLite database cannot be handed to another
+thread.
 
 `INDEX_DB_DIR=:memory:` keeps the index in the Node process instead. That uses
 more memory and needs no writable directory; it is useful for development,
@@ -362,11 +370,11 @@ Notes:
   stale `happy-trails-index-*` files and would delete another live instance's
   index.
 
-On a 410k-track library the on-disk index measures ~363 MB, with a ~28 s total
-build (~9 s PostgreSQL load + ~20 s build), ~520 MB peak build RSS, and ~75 MB
-steady process RSS; the OS page cache holds the file and is reclaimable.
-`:memory:` mode peaks around 920 MB RSS. Query latency is effectively the same
-once the file is in page cache.
+On a 410k-track library the on-disk index measures ~373 MB, with a ~43–46 s
+total worker build, ~560–600 MB peak build RSS, and ~75 MB steady process RSS;
+the OS page cache holds the file and is reclaimable. `:memory:` mode peaks
+around 920 MB RSS. Query latency is effectively the same once the file is in
+page cache.
 
 ## Configuration
 
@@ -395,7 +403,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `DSM_TIMEOUT_MS` | `10000` | Timeout for Synology requests. |
 | `COVER_CACHE_TTL_MS` | `86400000` | Server-side cover cache TTL. |
 | `COVER_CACHE_ENTRIES` | `500` | Maximum cached covers (LRU); `0` disables the cache. |
-| `LIBRARY_CHECK_MS` | `60000` | How often the `music` table is checked for changes; a detected change triggers a silent rebuild. `LIBRARY_REFRESH_MS` is accepted as a legacy fallback. |
+| `LIBRARY_CHECK_MS` | `60000` | Delay before checking the `music` table for changes; a detected change triggers a silent rebuild. The next check is scheduled after the previous check and any rebuild finish, so a rebuild longer than this interval delays the next check rather than overlapping it. `LIBRARY_REFRESH_MS` is accepted as a legacy fallback. |
 | `PAGE_SIZE` | `48` | Default albums per page. |
 | `MAX_PAGE_SIZE` | `200` | Upper bound accepted from clients. |
 | `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
@@ -525,7 +533,9 @@ display names and keys, plus a separate `track_search` FTS index. Track search
 uses the track's own tags for `genre:` and `region:` filters; album-title and
 `serie:` terms resolve through the album, and the sidebar facet counts remain
 album counts. `track:` searches track titles and, in Albums mode, finds albums
-that contain a matching track.
+that contain a matching track. In file-backed mode the aggregation and SQLite
+build run in a worker thread; the main thread keeps serving the previous index
+and the server listens from startup.
 See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
@@ -642,6 +652,14 @@ background, swaps the snapshot atomically, and increments `libraryVersion`.
 `checkIntervalMs`; `/api/albums` and `/api/genres` include the
 `libraryVersion` of the snapshot they served.
 
+Checks are serial: the next check is scheduled only after the previous check
+(including any worker rebuild) finishes. A rebuild longer than
+`LIBRARY_CHECK_MS` therefore delays the next check rather than overlapping it
+or queueing a second rebuild. Changes made during a rebuild are not lost; the
+next check compares the live fingerprint with the one stored at the start of
+the build and rebuilds again if it moved. The `rebuilding` guard is a second
+safety net against concurrent rebuilds.
+
 The frontend polls `/api/status` every 30s (paused while the tab is hidden).
 It compares the server's version with the version of the data it rendered.
 When they differ, the header Refresh button lights up with a dot; clicking it
@@ -653,8 +671,8 @@ snapshot, and the button stays disabled until a newer version exists.
 The fingerprint catches inserts/deletes (count/id), uploads (`date`), and most
 metadata/file changes (`mdate`/size). An update that changes none of those
 fields would not be seen; a DB trigger or `pg_stat_user_tables` counters can be
-added if that matters. The check is a cheap scan (sub-second); the rebuild
-remains the ~6–8s operation.
+added if that matters. The check is a cheap scan (sub-second); the rebuild is
+the expensive part (~43–46s on the reference library, in a worker thread).
 
 Track lists are **not** cached: opening an album issues a parameterized,
 index-backed query against `music` for every raw title merged into it, and
@@ -883,7 +901,7 @@ check.
 
 - API tests start the real Express app via `createApp()` with an injected fixture index.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
-- Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup.
+- Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
 - UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and album-from-track queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, and playback continuing while album dialogs open.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
@@ -1267,15 +1285,21 @@ license and third-party notices to `public/third-party-notices.txt`.
   disposable SQLite index.
 - The index contains every album and every track. The sum of the per-album
   track counts is checked against the inserted track rows at build time.
-  Measured on a 410k-track library: about **363 MB on disk**, **~28 s total**
-  (~9 s loading PostgreSQL rows, ~20 s building), **~520 MB peak build RSS**,
-  and **~75 MB steady process RSS**; the OS page cache holds the file and is
-  reclaimable. With `INDEX_DB_DIR=:memory:` the index uses ~363 MB of process
-  memory and peaks around **920 MB RSS**. A rebuild keeps the old snapshot
-  alive while building the new one; on disk that means two files (~720 MB) and
-  in memory two databases. Re-measure after schema or build-path changes. The
-  change check runs every `LIBRARY_CHECK_MS` (default 60s) but only performs
-  the full rebuild when the fingerprint changes.
+  Measured on a 410k-track library: about **373 MB on disk**, **~43–46 s total
+  worker build**, **~560–600 MB peak build RSS**, and **~75 MB steady process
+  RSS**; the OS page cache holds the file and is reclaimable. With
+  `INDEX_DB_DIR=:memory:` the index uses ~373 MB of process memory and peaks
+  around **920 MB RSS**. A rebuild keeps the old snapshot alive while building
+  the new one; on disk that means two files (~750 MB) and in memory two
+  databases. Re-measure after schema or build-path changes.
+- In file-backed mode the build runs in a worker thread, so the HTTP event loop
+  stays responsive. The server listens immediately at startup; `/api/status`
+  reports `ready:false` and data endpoints return `503` until the first worker
+  build finishes. A change-triggered rebuild serves the old snapshot
+  throughout. `:memory:` mode builds in the main thread.
+- Change checks are serial: the next check starts `LIBRARY_CHECK_MS` (default
+  60s) after the previous check and any rebuild finish, not on a fixed wall
+  clock, so a long rebuild delays the next check instead of overlapping it.
 - Open pages poll `/api/status` every 30s and reuse the old snapshot until the
   user clicks the enabled Refresh control. A rebuild failure leaves the old
   snapshot in place and is reported through `error`.

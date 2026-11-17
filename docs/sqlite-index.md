@@ -27,6 +27,14 @@ logs the storage mode, and removes stale `happy-trails-index-*` files from a
 previous process. The directory is treated as dedicated to one live server; do
 not point two running instances at the same directory.
 
+In file-backed mode the build runs in a Node worker thread
+([`src/server/indexWorker.ts`](../src/server/indexWorker.ts)); the main thread
+keeps serving the previous index throughout. The worker has its own PostgreSQL
+pool, writes a new SQLite file, closes its connection with `persist()`, and
+posts the fingerprint and counts back to `Library`. `Library` then opens the
+file with `SqliteIndex.open()` and swaps it in. `:memory:` mode cannot be
+handed between threads, so that mode builds in the main thread.
+
 The build writes to a new file while the old index keeps answering requests.
 When the build succeeds, `Library` swaps the connection and calls `close()` on
 the previous index, which closes and deletes its file. A failed build closes
@@ -40,10 +48,10 @@ single `.sqlite` file, because every rebuild creates a new file. See the
 [Docker and non-Docker storage guidance](../README.md#index-storage) in the
 README for volume layout, permissions, and disk sizing.
 
-Measured on a 410k-track library: ~363 MB on disk, ~28 s total build (~9 s
-loading PostgreSQL rows, ~20 s building), ~520 MB peak build RSS, and ~75 MB
-steady process RSS (the OS page cache holds the file and is reclaimable).
-`:memory:` mode peaks around 920 MB RSS.
+Measured on a 410k-track library: ~373 MB on disk, ~43–46 s total worker
+build, ~560–600 MB peak build RSS, and ~75 MB steady process RSS (the OS page
+cache holds the file and is reclaimable). `:memory:` mode peaks around 920 MB
+RSS.
 
 ## Schema
 
@@ -585,6 +593,8 @@ and detecting recurring plain-title series), then:
 
 1. `loadLibraryRows()` runs the album aggregate and the per-track query in one
    `REPEATABLE READ` transaction, so both views come from the same snapshot.
+   In file-backed mode the builder worker runs this step and the rest of the
+   sequence; `:memory:` runs it in the main thread.
 2. Creates a fresh database at the configured path (or `:memory:`) and the
    schema.
 3. Inserts genres, regions, series, albums, parsed artists, source titles,
@@ -599,12 +609,17 @@ and detecting recurring plain-title series), then:
 6. Creates the FTS triggers and rebuilds `album_search` and `track_search`.
    FTS5 `optimize` plus `VACUUM` was measured at ~15 MB saved for ~2 s of
    build time, so the build does not run them.
-7. Returns the database; `Library` swaps it in and closes the previous one
-   (deleting its file when file-backed).
+7. In file-backed mode the worker calls `persist()` (closing without deleting
+   the file) and posts `{fingerprint, albumCount, trackCount, databaseBytes}`.
+   `Library` opens the file with `SqliteIndex.open()`, swaps it in, and closes
+   the previous index (deleting its file). In `:memory:` mode the returned
+   index is used directly.
 
 The old database stays readable throughout the rebuild, so requests are served
-without a gap. A failed build leaves the previous index in place, deletes any
-partial file, and is reported through `/api/status`.
+without a gap. The HTTP server listens from startup; `/api/status` reports
+`ready:false` until the first build finishes, and data endpoints return `503`.
+A failed build leaves the previous index in place, deletes any partial file,
+and is reported through `/api/status`.
 
 ## Current boundaries
 
@@ -614,14 +629,14 @@ partial file, and is reported through `/api/status`.
 - The database is rebuilt in full. Incremental updates would need to consume
   the change stream or a tighter fingerprint and apply upserts; the FTS
   triggers are already in place for row-level updates.
-- The whole build runs in the main thread, and the ~400k track rows are held in
-  memory while the album aggregation runs. Measured on a 410k-track library:
-  363 MB on disk, ~28 s total build, ~520 MB peak build RSS, and ~75 MB steady
-  process RSS; `:memory:` mode peaks around 920 MB. The old snapshot stays
-  alive during a rebuild, so a change-triggered rebuild uses roughly twice the
-  storage (two files on disk or two databases in memory). Streaming and
-  inserting track rows in chunks would reduce the build peak; the FTS tables
-  dominate the steady database size.
+- In file-backed mode the build runs in a worker thread; `:memory:` builds in
+  the main thread. The worker holds the ~400k track rows while building.
+  Measured on a 410k-track library: ~373 MB on disk, ~43–46 s total worker
+  build, ~560–600 MB peak build RSS, and ~75 MB steady process RSS;
+  `:memory:` mode peaks around 920 MB. A change-triggered rebuild uses two
+  files (~750 MB) or two in-memory databases. Streaming and inserting track
+  rows in chunks would reduce the build peak; the FTS tables dominate the
+  steady database size.
 - Track sorting offers `recent`, `artist`, `album`, and `year`; there is no
   track-title sort and therefore no `title_rank`.
 - The expression parser supports `AND`, `OR`, implicit AND, parentheses, and
