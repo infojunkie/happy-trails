@@ -226,7 +226,7 @@ export const fixtureRows: AlbumRow[] = [
     title_track: false,
   },
   {
-    album: 'A Love Supreme [2016 Rock Candy Edition]',
+    album: 'A Love Supreme {Rock Candy}',
     artist: 'John Coltrane',
     year: 1965,
     track_count: 4,

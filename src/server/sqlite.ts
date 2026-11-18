@@ -14,14 +14,11 @@ import type { AlbumRow, TrackIndexRow } from './db.js';
 import { isRegionTag } from './regions.js';
 import {
   albumKey,
-  detectPlainSeries,
-  embeddedSeries,
+  detectSeries,
   foldSearch,
   genreKey,
   normalizeAlbumName,
-  normalizeSeriesVolumes,
   searchTokens,
-  type SeriesAlbum,
 } from './search.js';
 import {
   parseSearchQuery,
@@ -389,8 +386,6 @@ interface AlbumAccumulator {
   trackCount: number;
   duration: number;
   latest: string | null;
-  /** At least one track title prefixes the album title. */
-  titleTrack: boolean;
 }
 
 interface DbAlbumRow {
@@ -608,12 +603,10 @@ async function accumulateAlbums(
         trackCount: 0,
         duration: 0,
         latest: null,
-        titleTrack: false,
       };
       accumulators.set(key, acc);
     }
 
-    if (row.title_track) acc.titleTrack = true;
     if (rawAlbum !== null) acc.sourceAlbums.add(rawAlbum);
     acc.sourcePaths.set(rawAlbum ?? album, row.cover_path);
     for (const trackArtist of row.track_artists ?? []) {
@@ -793,51 +786,14 @@ export class SqliteIndex {
         insertRegion.run(key, name, regionRanks.get(name) ?? 0);
       }
 
-      const embeddedByKey = new Map<string, string[]>();
-      const seriesAlbums: SeriesAlbum[] = [];
-      for (const [key, acc] of accumulators) {
-        const embedded = embeddedSeries(acc.album, config.seriesExceptions);
-        embeddedByKey.set(key, embedded);
-        // An explicit {...}/[...] series is authoritative; do not feed the
-        // title to the less reliable plain-title detector.
-        if (embedded.length > 0) continue;
-        seriesAlbums.push({
-          key,
-          album: acc.album,
-          artist: acc.artist,
-          trackCount: acc.trackCount,
-          titleTrack: acc.titleTrack,
-        });
-      }
-      const embeddedValues = new Set<string>();
-      for (const values of embeddedByKey.values()) {
-        for (const value of values) embeddedValues.add(value);
-      }
-      const normalizedEmbedded = normalizeSeriesVolumes(embeddedValues);
-      for (const [key, values] of embeddedByKey) {
-        embeddedByKey.set(
-          key,
-          [
-            ...new Set(
-              values.map((value) => normalizedEmbedded.get(value) ?? value),
-            ),
-          ],
-        );
-      }
-
-      const plainSeries = detectPlainSeries(
-        seriesAlbums,
-        config.seriesExceptions,
-        config.seriesAllowlist,
-      );
-
       const seriesByKey = new Map<string, string[]>();
       const seriesDisplayNames = new Map<string, string>();
-      for (const key of accumulators.keys()) {
-        const values = embeddedByKey.get(key) ?? [];
-        const detectedSerie =
-          values.length === 0 ? plainSeries.get(key) : undefined;
-        if (detectedSerie) values.push(detectedSerie);
+      for (const [key, acc] of accumulators) {
+        const values = detectSeries(
+          acc.album,
+          config.seriesAllowlist,
+          config.seriesDenylist,
+        );
         if (values.length === 0) continue;
         seriesByKey.set(key, values);
         for (const value of values) {

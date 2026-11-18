@@ -125,22 +125,21 @@ function regionTags(): string[] {
     : [];
 }
 
-/** Series/label names that are too generic to be useful, such as "Legacy". */
-const DEFAULT_SERIES_EXCEPTIONS = ['Legacy', "Collector's"];
-
-/** Wrongly detected series to ignore; SERIES_EXCEPTIONS adds more. */
-function seriesExceptions(): string[] {
-  const raw = process.env.SERIES_EXCEPTIONS?.trim();
-  const extra = raw
+/**
+ * Series names that remove an album from all series when found anywhere in the
+ * album title. Replaces SERIES_EXCEPTIONS; no defaults.
+ */
+function seriesDenylist(): string[] {
+  const raw = process.env.SERIES_DENYLIST?.trim();
+  return raw
     ? raw
         .split('|')
         .map((value) => value.trim())
         .filter(Boolean)
     : [];
-  return [...DEFAULT_SERIES_EXCEPTIONS, ...extra];
 }
 
-/** One-word series names allowed without a dash/colon title suffix. */
+/** Additional series names matched anywhere in an album title without {...}. */
 function seriesAllowlist(): string[] {
   const raw = process.env.SERIES_ALLOWLIST?.trim();
   return raw
@@ -357,9 +356,9 @@ export const config = {
   artistExceptions: artistExceptions(),
   /** Additional genre tags to treat as countries/regions. */
   regionTags: regionTags(),
-  /** Series/label names to ignore even when detected. */
-  seriesExceptions: seriesExceptions(),
-  /** One-word series names allowed without a dash/colon title suffix. */
+  /** Series names that remove an album from all series when matched. */
+  seriesDenylist: seriesDenylist(),
+  /** Additional series names matched anywhere in a title without {...}. */
   seriesAllowlist: seriesAllowlist(),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,

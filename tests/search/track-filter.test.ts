@@ -91,7 +91,7 @@ test('serie and label match the album series exactly', () => {
   assert.equal(blueNote(track), true);
 
   const rockCandy = createTrackMatcher(
-    'A Love Supreme [2016 Rock Candy Edition]',
+    'A Love Supreme {Rock Candy}',
     'label:"rock candy"',
     '\u0000rock candy\u0000',
   );

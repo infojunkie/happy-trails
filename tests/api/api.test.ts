@@ -485,7 +485,7 @@ test('GET /api/albums applies the search expression and combines with tags', asy
   );
   assert.ok(
     label.albums.some((album) =>
-      album.album.startsWith('A Love Supreme [2016 Rock Candy Edition]'),
+      album.album.startsWith('A Love Supreme {Rock Candy}'),
     ),
   );
 

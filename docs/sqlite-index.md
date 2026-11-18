@@ -215,42 +215,22 @@ per-track filters. Series remains an album-level property.
 
 Series are stored in `album_series` rather than a folded text column.
 `serie:` (alias `label:`) matches `album_series.serie_key` exactly, so query
-totals agree with the series facet counts. Values are parsed from the album
-title: the contents of `{...}`, the label between a leading year and "Edition"
-in `[...]` (so `[2016 Rock Candy Edition]` yields `Rock Candy`), plus series
-detected from recurring normalized titles: repeated titles such as
-`Sem Limite`, a prefix completed by the artist (`A Arte de <artist>`), a prefix
-completed by a volume number (`The Wire Tapper 42`), or a label prefix followed
-by ` - ` / `:` (`Putumayo`, `Jazz Is Dead`). Numeric volume suffixes on embedded
-labels are folded into their stem when the stem recurs with different numbers
-(`{Network Medien / World Network 38}` → `Network Medien / World Network`); a
-lone numeric suffix such as `{Club Top 13}` or `{2 em 1}` is kept. Names
-containing any `SERIES_EXCEPTIONS` entry (defaults: `Legacy`, `Collector's`)
-are dropped, so `Japan` also removes `Live in Japan`. The field names are
-parsed in
-[`src/server/searchQuery.ts`](../src/server/searchQuery.ts).
+totals agree with the series facet counts. Values are assembled at build time:
 
-Plain-title detection is library-wide. Before the bulk load the builder
-normalizes each album title: it strips `[...]`, `{...}`, and `(...)` text, the
-` // …` suffix, a `<year> Vol./Volume <n>` marker (leaving the volume number),
-and any text after a standalone ` - ` or a `:` (`Mr Music Hits 1989 Vol. 4`
-becomes `Mr Music Hits 4`). It records 2–6 word prefixes plus the whole title
-when it is longer (and a one-word prefix when a dash/colon suffix was removed,
-to catch labels such as `Putumayo`, or when the name is listed in
-`SERIES_ALLOWLIST`, to catch repeated one-word titles such as `Millennium` or
-an allowlisted first word before a volume number such as `Éthiopiques 1`). It
-qualifies one when it appears in at least five albums and is either an exact
-repeated title, a prefix completed by the album artist, or a prefix completed
-by a 1–3 digit volume number; a volume may carry a leading apostrophe
-(`NOW Yearbook '83`). Albums whose title is also a track title, one-track
-extracts, and generic prefixes are excluded, as are
-names in `SERIES_EXCEPTIONS`. A prefix is generic only when all of its
-meaningful words are generic, so `Greatest Hits` and `Live` are rejected while
-`Mr Music Hits` is kept. Albums that already carry an explicit `{...}` or `[...]`
-series are excluded from plain-title detection entirely, so a title such as
-`Cuba : Les danses des dieux {Ocora}` yields only `Ocora`. The shortest
-qualifying prefix is stored, so variable artist/volume text does not enter the
-series values.
+- every `{...}` group is split on `/` (spaces optional) and each token is a
+  distinct series; multiple groups each contribute. No other tokenizing is
+  applied, so commas, separator words, and punctuation stay in the name.
+- albums with no braced series may match `SERIES_ALLOWLIST`: entries are
+  checked in configured order as substrings anywhere in the album title, and
+  only the first match is retained.
+- `SERIES_DENYLIST` is applied
+  last: if any entry is a substring of the album title, the album is removed
+  from all series.
+
+Matching for the allowlist and denylist folds case, accents, and apostrophes.
+The field name is parsed in
+[`src/server/searchQuery.ts`](../src/server/searchQuery.ts); `detectSeries()`
+is in [`src/server/search.ts`](../src/server/search.ts).
 
 ## Why trigram?
 
@@ -588,8 +568,8 @@ and the single-album lookup return each album's series names.
 
 `SqliteIndex.build()` performs the same row parsing as before (merging
 ` // …` titles, splitting tags, classifying country/region tags, parsing
-artists, collecting composer tags, extracting bracketed/braced series labels,
-and detecting recurring plain-title series), then:
+artists, collecting composer tags, and assembling braced/allowlisted series),
+then:
 
 1. `loadLibraryRows()` runs the album aggregate and the per-track query in one
    `REPEATABLE READ` transaction, so both views come from the same snapshot.

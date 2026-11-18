@@ -1,12 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
-import type { AlbumRow } from '../../src/server/db.js';
-import {
-  detectPlainSeries,
-  embeddedSeries,
-  normalizeSeriesVolumes,
-  type SeriesAlbum,
-} from '../../src/server/search.js';
+import { bracedSeries, detectSeries } from '../../src/server/search.js';
 import { parseSearchQuery } from '../../src/server/searchQuery.js';
 import type { AlbumsQuery } from '../../src/server/sqlite.js';
 import type { AlbumSummary } from '../../src/shared/types.js';
@@ -350,505 +344,88 @@ test('genre and region facets exclude and separate location tags', () => {
   assert.ok(regions.every((region) => region.albumCount > 0));
 });
 
-test('embedded series parsing extracts braces and year-Edition brackets', () => {
-  assert.deepEqual(embeddedSeries('Dark Magus {Legacy}'), ['Legacy']);
-  assert.deepEqual(embeddedSeries('A Love Supreme [2016 Rock Candy Edition]'), [
-    'Rock Candy',
+test('braced series parsing splits on / only', () => {
+  assert.deepEqual(bracedSeries('Dark Magus {Legacy}'), ['Legacy']);
+  assert.deepEqual(bracedSeries('A Love Supreme [2016 Rock Candy Edition]'), []);
+  assert.deepEqual(bracedSeries('X { A   B }'), ['A B']);
+  assert.deepEqual(bracedSeries('X {A} {A}'), ['A']);
+  assert.deepEqual(bracedSeries('X {A} {B}'), ['A', 'B']);
+  // Only "/" splits; spaces are optional, other punctuation stays.
+  assert.deepEqual(bracedSeries('X {Blue Note / Verve}'), [
+    'Blue Note',
+    'Verve',
   ]);
-  assert.deepEqual(embeddedSeries('X [2016 rock candy EDITION]'), [
-    'rock candy',
+  assert.deepEqual(bracedSeries('X {UNESCO/Auvidis}'), ['UNESCO', 'Auvidis']);
+  assert.deepEqual(bracedSeries('X {A feat. B}'), ['A feat. B']);
+  assert.deepEqual(bracedSeries('X {A, B}'), ['A, B']);
+  assert.deepEqual(bracedSeries('X {Earth, Wind & Fire}'), [
+    'Earth, Wind & Fire',
   ]);
-  assert.deepEqual(embeddedSeries('X [Japan Edition] [2015 Remastered]'), []);
-  assert.deepEqual(embeddedSeries('X [2016 Edition]'), []);
-  assert.deepEqual(embeddedSeries('X [2016 Rock Candy Editions]'), []);
-  assert.deepEqual(embeddedSeries('X { A   B }'), ['A B']);
-  assert.deepEqual(embeddedSeries('X {A} {A}'), ['A']);
-  // A bracket group does not consume text from a different group.
-  assert.deepEqual(
-    embeddedSeries('X [2016 Remaster] [2017 Deluxe Edition]'),
-    ['Deluxe'],
-  );
-  // Values appear in title order, across both forms.
-  assert.deepEqual(
-    embeddedSeries('X {A} [2017 30th Anniversary Deluxe Edition] {B}'),
-    ['A', '30th Anniversary Deluxe', 'B'],
-  );
 });
 
-function seriesAlbum(
-  album: string,
-  artist: string,
-  overrides: Partial<SeriesAlbum> = {},
-): SeriesAlbum {
-  return {
-    key: `${album}\u0000${artist}`,
-    album,
-    artist,
-    trackCount: 12,
-    titleTrack: false,
-    ...overrides,
-  };
-}
-
-test('embedded series volume suffixes fold only for recurring stems', () => {
-  const normalized = normalizeSeriesVolumes([
-    'Network Medien / World Network 1',
-    'Network Medien / World Network 38',
-    'Club Top 13',
-    '2 em 1',
-    'Ocora',
+test('detectSeries allowlist matches anywhere, first in order, only without braces', () => {
+  assert.deepEqual(detectSeries('The Millennium Edition', ['Millennium']), [
+    'Millennium',
   ]);
-
-  assert.equal(
-    normalized.get('Network Medien / World Network 38'),
-    'Network Medien / World Network',
-  );
-  assert.equal(normalized.get('Club Top 13'), 'Club Top 13');
-  assert.equal(normalized.get('2 em 1'), '2 em 1');
-  assert.equal(normalized.get('Ocora'), 'Ocora');
-});
-
-test('plain-title series detection uses recurring titles and prefixes', () => {
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-  const volumes = ['01', '02', '03', '04', '05'];
-  const detected = detectPlainSeries([
-    ...artists.map((artist) => seriesAlbum('Sem Limite', artist)),
-    ...artists.map((artist) => seriesAlbum(`A Arte de ${artist}`, artist)),
-    ...volumes.map((volume) =>
-      seriesAlbum(`The Wire Tapper ${volume}`, 'Various Artists'),
-    ),
-    ...artists.map((artist) => seriesAlbum('Série Bis', artist)),
-    ...artists.map((artist) =>
-      seriesAlbum('Une Autre Série [2008 Edition]', artist),
-    ),
+  assert.deepEqual(detectSeries('Nova Millennium', ['Millennium']), [
+    'Millennium',
   ]);
-
-  assert.equal(detected.get('Sem Limite\u0000A'), 'Sem Limite');
-  assert.equal(detected.get('A Arte de A\u0000A'), 'A Arte de');
-  assert.equal(
-    detected.get('The Wire Tapper 01\u0000Various Artists'),
-    'The Wire Tapper',
-  );
-  assert.equal(detected.get('Série Bis\u0000A'), 'Série Bis');
-  assert.equal(
-    detected.get('Une Autre Série [2008 Edition]\u0000A'),
-    'Une Autre Série',
-  );
-
-  // Four albums are below the recurrence threshold.
-  assert.equal(
-    detectPlainSeries(
-      artists
-        .slice(0, 4)
-        .map((artist) => seriesAlbum('Sem Limite', artist)),
-    ).size,
-    0,
-  );
-});
-
-test('embedded series honors the exception list', () => {
-  assert.deepEqual(embeddedSeries('X [2016 Legacy Edition]', ['Legacy']), []);
+  assert.deepEqual(detectSeries('MillenniumX', ['Millennium']), ['Millennium']);
+  // First matching entry in configured order wins.
   assert.deepEqual(
-    embeddedSeries('X [2016 Collectors Edition]', ["Collector's"]),
+    detectSeries('The Millennium Edition', ['Edition', 'Millennium']),
+    ['Edition'],
+  );
+  assert.deepEqual(
+    detectSeries('The Millennium Edition', ['Millennium', 'Edition']),
+    ['Millennium'],
+  );
+  // Only one allowlist entry is retained.
+  assert.deepEqual(detectSeries('Millennium Edition', ['Millennium', 'Edition']), [
+    'Millennium',
+  ]);
+  // Braced albums are not considered for the allowlist.
+  assert.deepEqual(
+    detectSeries('The Millennium Edition {Rock Candy}', ['Millennium']),
+    ['Rock Candy'],
+  );
+  assert.deepEqual(detectSeries('Something Else', ['Millennium']), []);
+});
+
+test('detectSeries denylist matches the album name anywhere and removes all series', () => {
+  assert.deepEqual(detectSeries('X {Blue Note}', [], []), ['Blue Note']);
+  assert.deepEqual(detectSeries('Live in Japan {Blue Note}', [], ['Japan']), []);
+  assert.deepEqual(detectSeries('X {Blue Note}', [], ['Blue']), []);
+  assert.deepEqual(
+    detectSeries('The Millennium Edition', ['Millennium'], ['Edition']),
     [],
   );
-  assert.deepEqual(
-    embeddedSeries('X [2016 Legacy Edition] {ACT}', ['Legacy']),
-    ['ACT'],
-  );
-  // Exceptions match any part of the series name, not only the whole value.
-  assert.deepEqual(
-    embeddedSeries('X {Sony Legacy Recordings}', ['Legacy']),
-    [],
-  );
-  assert.deepEqual(embeddedSeries('X {Live in Japan}', ['Japan']), []);
+  assert.deepEqual(detectSeries('X {Blue Note}', [], ['Legacy']), ['Blue Note']);
 });
 
-test('plain-title detection normalizes dashes, colons, and parentheses', () => {
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-  const detected = detectPlainSeries([
-    ...artists.map((name) =>
-      seriesAlbum(`Putumayo - ${name}`, 'Various Artists'),
-    ),
-    ...['1', '2', '3', '4', '5'].map((volume, index) =>
-      seriesAlbum(`Jazz Is Dead ${volume}: ${artists[index]}`, 'Various Artists'),
-    ),
-    ...artists.map((name) =>
-      seriesAlbum(`Une Série (Live) - ${name}`, name),
-    ),
-  ]);
-
-  assert.equal(
-    detected.get('Putumayo - A\u0000Various Artists'),
-    'Putumayo',
-  );
-  assert.equal(
-    detected.get('Jazz Is Dead 1: A\u0000Various Artists'),
-    'Jazz Is Dead',
-  );
-  assert.equal(detected.get('Une Série (Live) - A\u0000A'), 'Une Série');
-
-  // A one-word title without a dash/colon suffix cannot become a series.
-  assert.equal(
-    detectPlainSeries(
-      artists.map((artist) => seriesAlbum('Putumayo', artist)),
-    ).size,
-    0,
-  );
-});
-
-test('series allowlist admits named one-word titles with the usual safeguards', () => {
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-  const albums = artists.map((artist) => seriesAlbum('Millennium', artist));
-
-  assert.equal(detectPlainSeries(albums).size, 0);
-
-  const detected = detectPlainSeries(albums, [], ['millennium']);
-  for (const artist of artists) {
-    assert.equal(detected.get(`Millennium\u0000${artist}`), 'Millennium');
-  }
-
-  // The regular safeguards still apply.
-  assert.equal(
-    detectPlainSeries(albums.slice(0, 4), [], ['Millennium']).size,
-    0,
-  );
-  assert.equal(
-    detectPlainSeries(
-      artists.map((artist) => seriesAlbum('Live', artist)),
-      [],
-      ['Live'],
-    ).size,
-    0,
-  );
-  assert.equal(
-    detectPlainSeries(
-      artists.map((artist) =>
-        seriesAlbum('Millennium', artist, { titleTrack: true }),
-      ),
-      [],
-      ['Millennium'],
-    ).size,
-    0,
-  );
-});
-
-test('plain-title detection accepts apostrophe-prefixed volume numbers', () => {
-  const years = ['71', '72', '73', '74', '75'];
-  const detected = detectPlainSeries(
-    years.map((year) =>
-      seriesAlbum(`NOW Yearbook '${year}`, 'Various Artists'),
-    ),
-  );
-
-  for (const year of years) {
-    assert.equal(
-      detected.get(`NOW Yearbook '${year}\u0000Various Artists`),
-      'NOW Yearbook',
-    );
-  }
-});
-
-test('plain-title detection compares whole titles longer than six words', () => {
-  const title = "Now That's What I Call An Era";
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-  const detected = detectPlainSeries(
-    artists.map((artist) => seriesAlbum(`${title} (${artist})`, artist)),
-  );
-
-  for (const artist of artists) {
-    assert.equal(detected.get(`${title} (${artist})\u0000${artist}`), title);
-  }
-});
-
-test('series allowlist admits a named first-word prefix before volumes', () => {
-  const volumes = ['1', '2', '3', '4', '5'];
-  const albums = volumes.map((volume, index) =>
-    seriesAlbum(`Éthiopiques ${volume}: Volume ${index + 1}`, 'Various Artists'),
-  );
-
-  assert.equal(detectPlainSeries(albums).size, 0);
-
-  const detected = detectPlainSeries(albums, [], ['ethiopiques']);
-  for (const [index, volume] of volumes.entries()) {
-    assert.equal(
-      detected.get(
-        `Éthiopiques ${volume}: Volume ${index + 1}\u0000Various Artists`,
-      ),
-      'Éthiopiques',
-    );
-  }
-});
-
-test('plain-title detection handles year/volume suffixes and non-generic titles', () => {
-  const detected = detectPlainSeries(
-    ['1', '2', '3', '4', '5'].map((volume) =>
-      seriesAlbum(
-        `Mr Music Hits 1989 Vol. ${volume}`,
-        'Various Artists',
-        { trackCount: 14 },
-      ),
-    ),
-  );
-  assert.equal(
-    detected.get('Mr Music Hits 1989 Vol. 1\u0000Various Artists'),
-    'Mr Music Hits',
-  );
-});
-
-test('plain-title detection ignores exact titles that are artist names', () => {
-  const albums = [
-    seriesAlbum('The Beatles', 'The Beatles'),
-    ...['A', 'B', 'C', 'D'].map((artist) =>
-      seriesAlbum('The Beatles', artist),
-    ),
-  ];
-  assert.equal(detectPlainSeries(albums).size, 0);
-});
-
-test('plain-title detection honors the exception list', () => {
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-
-  const legacy = artists.map((artist) =>
-    seriesAlbum(`Legacy - ${artist}`, 'Various Artists'),
-  );
-  assert.equal(detectPlainSeries(legacy, ['Legacy']).size, 0);
-
-  // Exceptions ignore apostrophes: "Collector's" covers "Collectors".
-  const collectors = artists.map((artist) =>
-    seriesAlbum(`Collectors - ${artist}`, 'Various Artists'),
-  );
-  assert.equal(detectPlainSeries(collectors, ["Collector's"]).size, 0);
-
-  // Exceptions also match inside a detected series name.
-  const japan = artists.map((artist) =>
-    seriesAlbum(`Live in Japan - ${artist}`, 'Various Artists'),
-  );
-  assert.ok(detectPlainSeries(japan).size > 0);
-  assert.equal(detectPlainSeries(japan, ['Japan']).size, 0);
-});
-
-test('plain-title detection skips covers, generic titles, and extracts', () => {
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-  const detected = detectPlainSeries([
-    // Cover/single titled after one of its tracks.
-    ...artists.map((artist) =>
-      seriesAlbum('Let It Be', artist, { titleTrack: true }),
-    ),
-    // Generic repeated titles.
-    ...artists.map((artist) => seriesAlbum('Greatest Hits', artist)),
-    // One-track extracts are not albums in the series sense.
-    ...artists.map((artist) =>
-      seriesAlbum('All The Shapes You Are', artist, { trackCount: 1 }),
-    ),
-  ]);
-
-  assert.equal(detected.size, 0);
-});
-
-test('serie and label search the embedded album series', () => {
+test('serie and label search braced album series', () => {
   const blueNote = query({ q: 'serie:"blue note"' });
   assert.ok(names(blueNote.albums).includes('Blue Train {Blue Note}'));
 
   const rockCandy = query({ q: 'label:"rock candy"' });
-  assert.ok(
-    names(rockCandy.albums).includes(
-      'A Love Supreme [2016 Rock Candy Edition]',
-    ),
-  );
+  assert.ok(names(rockCandy.albums).includes('A Love Supreme {Rock Candy}'));
 
   // Series are matched exactly, not as substrings.
   assert.equal(query({ q: 'serie:blue' }).total, 0);
 
-  // Only the label is indexed: the year and the word "Edition" are stripped.
-  assert.equal(query({ q: 'serie:2016' }).total, 0);
-  assert.equal(query({ q: 'serie:"rock candy edition"' }).total, 0);
+  // A plain title without braces or an allowlist match is not a series.
+  assert.equal(query({ q: 'serie:"family gathering"' }).total, 0);
 });
 
-test('detected plain-title series are searchable through the index', async () => {
-  const artists = ['Ana', 'Bia', 'Caio', 'Duda', 'Eva'];
-  const volumes = ['1', '2', '3', '4', '5'];
-  const row = (album: string, artist: string): AlbumRow => ({
-    album,
-    artist,
-    year: 2000,
-    track_count: 10,
-    duration: 2400,
-    latest: '2020-01-01T10:00:00',
-    genres: 'MPB',
-    track_artists: [artist],
-    composers: null,
-    comments: null,
-    title_track: false,
-    cover_path: '',
-  });
-  const extraRows: AlbumRow[] = [
-    ...artists.map((artist) => row('Sem Limite', artist)),
-    ...artists.map((artist) => row(`Putumayo - ${artist}`, artist)),
-    ...volumes.map((volume, index) =>
-      row(
-        `Jazz Is Dead ${volume}: ${artists[index] ?? ''}`,
-        'Various Artists',
-      ),
-    ),
-    row('Excepted [2016 Legacy Edition]', 'Legacy Test'),
-  ];
-  const local = await createFixtureContext({ extraRows });
-  try {
-    const search = (q: string) =>
-      local.index.queryAlbums({
-        q,
-        sort: 'album',
-        offset: 0,
-        limit: 50,
-      });
-
-    const result = search('serie:"sem limite"');
-    assert.equal(result.total, artists.length);
-    const first = result.albums[0];
-    assert.ok(first);
-    assert.equal(
-      local.index.serieKeysFor(first.album, first.artist),
-      '\u0000sem limite\u0000',
-    );
-
-    // The base fixture also has Putumayo - Family Gathering.
-    assert.equal(search('serie:putumayo').total, artists.length + 1);
-    assert.equal(search('serie:"jazz is dead"').total, volumes.length);
-    // Default SERIES_EXCEPTIONS drops "Legacy" from "[2016 Legacy Edition]".
-    assert.equal(search('serie:legacy').total, 0);
-
-    const series = local.index.series();
-    assert.ok(
-      series.some(
-        (serie) =>
-          serie.name === 'Sem Limite' &&
-          serie.albumCount === artists.length,
-      ),
-    );
-    assert.ok(
-      series.some(
-        (serie) =>
-          serie.name === 'Putumayo' &&
-          serie.albumCount === artists.length + 1,
-      ),
-    );
-    assert.ok(
-      series.some(
-        (serie) =>
-          serie.name === 'Jazz Is Dead' &&
-          serie.albumCount === volumes.length,
-      ),
-    );
-    assert.ok(!series.some((serie) => serie.name === 'Legacy'));
-  } finally {
-    local.close();
-  }
-});
-
-test('albums with an embedded series are not plain-title detected', async () => {
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-  const extraRows: AlbumRow[] = artists.map((artist, index) => ({
-    album: `Cuba : Track ${index} {Ocora}`,
-    artist,
-    year: 2000,
-    track_count: 10,
-    duration: 2400,
-    latest: '2020-01-01T10:00:00',
-    genres: 'World',
-    track_artists: [artist],
-    composers: null,
-    comments: null,
-    title_track: false,
-    cover_path: '',
-  }));
-  const local = await createFixtureContext({ extraRows });
-  try {
-    const search = (q: string) =>
-      local.index.queryAlbums({
-        q,
-        sort: 'album',
-        offset: 0,
-        limit: 50,
-      });
-
-    // "Cuba" would qualify from the titles, but {} already names the series.
-    assert.equal(search('serie:cuba').total, 0);
-    assert.equal(search('serie:ocora').total, artists.length);
-
-    const series = local.index.series();
-    assert.ok(!series.some((serie) => serie.name === 'Cuba'));
-    assert.ok(
-      series.some(
-        (serie) =>
-          serie.name === 'Ocora' && serie.albumCount === artists.length,
-      ),
-    );
-  } finally {
-    local.close();
-  }
-});
-
-test('embedded series volume numbers fold into the indexed stem', async () => {
-  const artists = ['A', 'B', 'C', 'D', 'E'];
-  const row = (album: string, artist: string): AlbumRow => ({
-    album,
-    artist,
-    year: 2000,
-    track_count: 10,
-    duration: 2400,
-    latest: '2020-01-01T10:00:00',
-    genres: 'World',
-    track_artists: [artist],
-    composers: null,
-    comments: null,
-    title_track: false,
-    cover_path: '',
-  });
-  const extraRows: AlbumRow[] = [
-    ...artists.map((artist, index) =>
-      row(
-        `Album ${index} {Network Medien / World Network ${index + 1}}`,
-        artist,
-      ),
-    ),
-    row('Single {Club Top 13}', 'Club'),
-    row('Single {2 em 1}', 'Em'),
-  ];
-  const local = await createFixtureContext({ extraRows });
-  try {
-    const search = (q: string) =>
-      local.index.queryAlbums({
-        q,
-        sort: 'album',
-        offset: 0,
-        limit: 50,
-      });
-
-    assert.equal(
-      search('serie:"network medien / world network"').total,
-      artists.length,
-    );
-    assert.equal(
-      search('serie:"network medien / world network 1"').total,
-      0,
-    );
-    assert.equal(search('serie:"club top 13"').total, 1);
-    assert.equal(search('serie:"2 em 1"').total, 1);
-
-    const series = local.index.series();
-    assert.ok(
-      series.some(
-        (serie) =>
-          serie.name === 'Network Medien / World Network' &&
-          serie.albumCount === artists.length,
-      ),
-    );
-    assert.ok(series.some((serie) => serie.name === 'Club Top 13'));
-    assert.ok(series.some((serie) => serie.name === '2 em 1'));
-  } finally {
-    local.close();
-  }
+test('only braced series are indexed for the base fixture', () => {
+  const series = context.index.series();
+  assert.ok(
+    series.some((serie) => serie.name === 'Blue Note' && serie.albumCount === 1),
+  );
+  assert.ok(
+    series.some((serie) => serie.name === 'Rock Candy' && serie.albumCount === 1),
+  );
+  assert.ok(!series.some((serie) => serie.name === 'Putumayo'));
 });
 
 test('album comments are aggregated, deduplicated, and sorted', () => {

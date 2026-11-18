@@ -76,10 +76,10 @@ design and current status.
   Catalonia, …) are detected and exposed as a separate **Regions** facet, with
   their own filter. Selections add `region:"<name>"` terms. The genre facet
   contains only non-location tags.
-- A **Series** facet lists the detected and bracketed/braced series with album
-  counts, ordered by occurrence. It is a checkbox list: each selection adds
-  `serie:"<name>"` to the search bar joined with `OR` (a match-any selection),
-  and Clear removes them.
+- A **Series** facet lists braced series names and `SERIES_ALLOWLIST` matches
+  with album counts, ordered by occurrence. It is a checkbox list: each
+  selection adds `serie:"<name>"` to the search bar joined with `OR` (a
+  match-any selection), and Clear removes them.
 - Genre and region facets each have **Match any** / **Match all** modes. Any
   joins the selected terms with `OR` in the search bar; All joins them with
   `AND`. The two facet groups are combined with `AND`.
@@ -409,8 +409,8 @@ All variables are optional; see [`.env.example`](.env.example).
 | `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
-| `SERIES_EXCEPTIONS` | `Legacy`, `Collector's` | Additional series/label names to ignore, separated by a vertical-bar character. A detected name is dropped when it contains any entry, so `Japan` also removes `Live in Japan`. Appended to the defaults; matching ignores case, accents, and apostrophes. |
-| `SERIES_ALLOWLIST` | — | Additional series names allowed to be detected as one-word titles (`Millennium`) or as the first word of volume-numbered titles (`Éthiopiques 1: …`), even when the album title has no ` - ` or `:` suffix. Separated by a vertical-bar character; matching ignores case, accents, and apostrophes. The regular safeguards (five-album minimum, title-track and generic-name exclusions) still apply. |
+| `SERIES_DENYLIST` | — | Series names that remove an album from all series when found anywhere in its title. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
+| `SERIES_ALLOWLIST` | — | Additional series names matched anywhere in an album title that has no `{...}` series. Entries are checked in configured order and only the first match is retained for the album. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
 ### Behind DSM's reverse proxy
@@ -566,46 +566,25 @@ materialized CTE so `OR` expressions do not rescan the FTS index per album.
 Composer values come from the track-level `composer` column populated from
 FLAC/ID3 tags.
 
-Series/label values are parsed from the album title. Bracketed/braced labels
-are extracted directly. Titles that are themselves series are detected at
-index build time from recurring normalized titles. Normalization removes
-bracketed/braced and parenthesized text, the multi-CD ` // …` suffix, and any
-text after a standalone ` - ` or a `:`:
+Series/label values are extracted from `{...}` groups in the album title. Each
+group is split on `/` (spaces are optional), and every resulting token is a
+distinct series; no other tokenizing is applied, so `{A, B}`, `{A feat. B}`,
+and `{Earth, Wind & Fire}` stay one name each. Every group in a title
+contributes its tokens.
 
-- a title repeated by at least five albums (e.g. `Sem Limite`, `Série Bis`,
-  `Now That's What I Call An Era`), excluding albums named after one of their
-  tracks and one-track extracts; whole titles longer than six words are still
-  compared exactly;
-- a recurring prefix completed by the album artist (`A Arte de <artist>`);
-- a recurring prefix completed by a volume number (`The Wire Tapper 42`,
-  `NOW Yearbook '83`); the volume may carry a leading apostrophe;
-- a one-word label prefix followed by ` - ` or `:`
-  (`Putumayo - Acoustic Africa`, `Jazz Is Dead 5: Doug Carn`).
+`SERIES_ALLOWLIST` adds series names for album titles that have no `{...}`
+tokens. Each allowlist entry is matched as a substring anywhere in the title
+(case, accents, and apostrophes are ignored); entries are checked in configured
+order, and only the first match is retained for the album. Albums with braced
+series are not considered for the allowlist.
 
-A one-word exact title without a ` - ` or `:` suffix, such as `Millennium`, is
-only considered when listed in `SERIES_ALLOWLIST`; repeated one-word titles are
-usually ordinary albums rather than series. An allowlisted name also works as
-the first word of a longer title, so `Éthiopiques` captures
-`Éthiopiques 1: …` volumes. The five-album minimum and the other safeguards
-still apply.
+`SERIES_DENYLIST` replaces `SERIES_EXCEPTIONS` and is applied last. If any
+denylist entry occurs anywhere in the album title, the album is removed from
+**all** series, whether the series came from braces or the allowlist. There are
+no default entries.
 
-An album whose title already carries an explicit `{...}` or `[...]` series is
-not run through the plain-title detector, so `Cuba : Les danses des dieux
-{Ocora}` yields only `Ocora`. Numeric volume suffixes on embedded labels are
-folded into their stem when the stem recurs with different numbers, so
-`{Network Medien / World Network 38}` yields `Network Medien / World Network`;
-a label with only one numeric suffix, such as `{Club Top 13}` or `{2 em 1}`,
-is kept intact. Plain titles also discard a `<year> Vol./Volume <n>` marker
-before matching, so `Mr Music Hits 1989 Vol. 4` belongs to `Mr Music Hits`.
-A prefix is rejected as generic only when all of its meaningful words are
-generic, so `Greatest Hits` and `Live` are ignored while `Mr Music Hits` is
-kept. Variable artist or volume text is not part of the series value.
-`SERIES_EXCEPTIONS` drops misleading labels such as `Legacy` or `Collector's`;
-a detected name is dropped when it contains any entry, so `Japan` also removes
-`Live in Japan`. It defaults to `Legacy` and `Collector's` and appends any
-configured additions. Values are
-stored in `album_series`, matched exactly with `serie:` (alias `label:`), and
-are also part of the all-field text.
+Values are stored in `album_series`, matched exactly with `serie:` (alias
+`label:`), and are also part of the all-field text.
 
 Artist parsing applies to the effective album artist and to each track artist.
 A punctuation run is a separator only when whitespace surrounds it, so
@@ -1019,7 +998,7 @@ quoted value is matched as a contiguous phrase rather than as separate words.
 | `track` | Track titles. In Albums mode, returns albums that contain a matching track. |
 | `genre` | Genre tags, excluding country/region tags, matched exactly (`genres` is an alias). |
 | `region` | Country/region tags from the genre column, matched exactly (`regions` is an alias). |
-| `serie` | Series/label names parsed from the album title: the contents of `{...}`, the label between a leading year and "Edition" in `[...]` (`[2016 Rock Candy Edition]` matches `Rock Candy`), and series detected from recurring normalized titles such as `Sem Limite`, `Série Bis`, `A Arte de <artist>`, `The Wire Tapper <volume>`, `Putumayo - <album>`, and `Jazz Is Dead <volume>: <album>`. Matched exactly. `label` is an alias. |
+| `serie` | Series/label names from `{...}` groups split on `/`, plus the first matching `SERIES_ALLOWLIST` entry found anywhere in a title without braces. Matched exactly. Albums whose title contains a `SERIES_DENYLIST` entry are omitted entirely. `label` is an alias. |
 | `composer` | Composer tag values from the FLAC/ID3 metadata (`composers` is an alias). |
 | `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). In Tracks mode, this track's raw source title. |
 | `all` / `any` | All indexed fields, equivalent to a bare term. |
