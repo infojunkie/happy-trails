@@ -3,6 +3,7 @@ import 'leaflet/dist/leaflet.css';
 import { Coverflow, type CoverflowItem } from '@northstarxyzz/coverflow';
 import { unsupportedFormatBadge } from './badges.js';
 import { createCover, hashString } from './cover.js';
+import { openCoverLightbox } from './lightbox.js';
 import type { AlbumMapHandle, AlbumMapPlacement } from './map.js';
 import {
   player,
@@ -2906,10 +2907,24 @@ function renderDialog(
     heading.append(el('div', { class: 'dialog-actions' }, ...actions));
   }
 
+  const dialogCover = el(
+    'button',
+    {
+      class: 'dialog-cover-button',
+      type: 'button',
+      'aria-label': `View cover for ${album.album} by ${album.artist}`,
+      title: 'View cover',
+    },
+    createCover(album, 'cover-large'),
+  );
+  dialogCover.addEventListener('click', () => {
+    openCoverLightbox(album.key, album.album, album.artist);
+  });
+
   const header = el(
     'div',
     { class: 'dialog-header' },
-    createCover(album, 'cover-large'),
+    dialogCover,
     heading,
     closeButton,
   );

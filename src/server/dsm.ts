@@ -33,6 +33,13 @@ export interface FileStream {
   headers: IncomingHttpHeaders;
 }
 
+export interface FileStreamOptions {
+  /** Value for the upstream Accept header. */
+  accept?: string;
+  /** Accepted upstream content types (lowercase, without parameters). */
+  contentTypes?: readonly string[];
+}
+
 /** An Audio Station audio stream, with the upstream status and headers. */
 export interface AudioStream {
   stream: Readable;
@@ -237,10 +244,19 @@ export class DsmClient {
    * Open a FileStation download as a stream. Returns null when the file is not
    * found. `range` is forwarded so the browser can seek inside large PDFs.
    */
-  async openFile(path: string, range?: string): Promise<FileStream | null> {
+  async openFile(
+    path: string,
+    range?: string,
+    options: FileStreamOptions = {},
+  ): Promise<FileStream | null> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const session = await this.ensureSession();
-      const result = await this.requestFileStream(session, path, range);
+      const result = await this.requestFileStream(
+        session,
+        path,
+        range,
+        options,
+      );
 
       if (result.kind === 'file') return result.file;
       if (result.kind === 'missing') return null;
@@ -514,7 +530,8 @@ export class DsmClient {
   private async requestFileStream(
     session: Session,
     path: string,
-    range?: string,
+    range: string | undefined,
+    options: FileStreamOptions,
   ): Promise<FileStreamResult> {
     const url = this.endpoint('/webapi/entry.cgi');
     url.searchParams.set('api', 'SYNO.FileStation.Download');
@@ -524,20 +541,24 @@ export class DsmClient {
     url.searchParams.set('mode', 'open');
     url.searchParams.set('SynoToken', session.token);
 
+    const accept = options.accept ?? 'application/pdf';
+    const contentTypes = options.contentTypes ?? ['application/pdf'];
     const response = await this.openResponse(url, {
-      Accept: 'application/pdf',
+      Accept: accept,
       ...(range ? { Range: range } : {}),
       ...(session.cookie ? { Cookie: session.cookie } : {}),
     });
 
     const status = response.statusCode ?? 0;
-    const contentType = String(
-      response.headers['content-type'] ?? '',
-    )
-      .toLowerCase()
-      .split(';', 1)[0];
+    const contentType =
+      String(response.headers['content-type'] ?? '')
+        .toLowerCase()
+        .split(';', 1)[0] ?? '';
 
-    if ((status === 200 || status === 206) && contentType === 'application/pdf') {
+    if (
+      (status === 200 || status === 206) &&
+      contentTypes.includes(contentType)
+    ) {
       return {
         kind: 'file',
         file: { stream: response, status, headers: response.headers },

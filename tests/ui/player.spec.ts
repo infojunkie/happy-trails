@@ -92,6 +92,21 @@ async function routeAudio(page: Page, seconds = WAV_SECONDS): Promise<void> {
   });
 }
 
+async function routeCover(page: Page): Promise<void> {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600">' +
+    '<rect width="600" height="600" fill="#3b5bdb"/></svg>';
+  await page.route(
+    /\/api\/albums\/[^/]+\/cover(?:\/original)?$/,
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/svg+xml',
+        body: svg,
+      }),
+  );
+}
+
 async function signIn(page: Page): Promise<void> {
   const response = await page.request.post('/api/session/login', {
     data: { username: 'alice', password: 'secret' },
@@ -424,6 +439,117 @@ test('queue items can be reordered and removed; deleting the current item advanc
   await expect(page.locator('#player-title')).toHaveText(
     'While My Guitar Gently Weeps',
   );
+});
+
+test('cover lightbox opens from album detail and dismisses via X, Escape, and backdrop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 600 });
+  await routeCover(page);
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  const card = albumCard(page, 'Abbey Road').first();
+  await expect(card).toBeVisible();
+  await card.locator('.album-title').click();
+  await expect(page.locator('#album-dialog')).toBeVisible();
+
+  const coverButton = page.locator('#album-dialog .dialog-cover-button');
+  const lightbox = page.locator('#cover-lightbox');
+  const image = page.locator('#cover-lightbox-image');
+  const coverBox = await coverButton.boundingBox();
+  expect(coverBox?.width).toBeCloseTo(112, 0);
+  expect(coverBox?.height).toBeCloseTo(112, 0);
+
+  await coverButton.click();
+  await expect(lightbox).toBeVisible();
+  await expect(lightbox).toHaveAttribute(
+    'aria-label',
+    'Cover of Abbey Road by The Beatles',
+  );
+  await expect(image).toHaveAttribute('src', /\/api\/albums\/.+\/cover\/original$/);
+  await expect(image).toBeVisible();
+  await expect(page.locator('#cover-lightbox-title')).toHaveText('Abbey Road');
+  await expect(page.locator('#cover-lightbox-close')).toBeVisible();
+
+  const viewport = page.viewportSize();
+  const imageBox = await image.boundingBox();
+  expect(viewport).not.toBeNull();
+  expect(imageBox).not.toBeNull();
+  if (viewport && imageBox) {
+    expect(imageBox.x).toBeGreaterThanOrEqual(0);
+    expect(imageBox.y).toBeGreaterThanOrEqual(0);
+    expect(imageBox.x + imageBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(imageBox.y + imageBox.height).toBeLessThanOrEqual(viewport.height);
+  }
+
+  await page.locator('#cover-lightbox-close').click();
+  await expect(lightbox).toBeHidden();
+  await expect(page.locator('#album-dialog')).toBeVisible();
+
+  await coverButton.click();
+  await expect(lightbox).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(lightbox).toBeHidden();
+
+  await coverButton.click();
+  await expect(lightbox).toBeVisible();
+  await page
+    .locator('#cover-lightbox-stage')
+    .click({ position: { x: 4, y: 4 } });
+  await expect(lightbox).toBeHidden();
+});
+
+test('cover lightbox falls back when the original cover is missing', async ({
+  page,
+}) => {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480">' +
+    '<rect width="480" height="480" fill="#6f6b63"/></svg>';
+  await page.route(
+    /\/api\/albums\/[^/]+\/cover\/original$/,
+    (route) => route.fulfill({ status: 404, body: '' }),
+  );
+  await page.route(
+    /\/api\/albums\/[^/]+\/cover$/,
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/svg+xml',
+        body: svg,
+      }),
+  );
+
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  await albumCard(page, 'Abbey Road').first().locator('.album-title').click();
+  await page.locator('#album-dialog .dialog-cover-button').click();
+
+  const image = page.locator('#cover-lightbox-image');
+  await expect(image).toHaveAttribute(
+    'src',
+    /\/api\/albums\/.+\/cover$/,
+  );
+  await expect(image).toBeVisible();
+  await expect(page.locator('#cover-lightbox-error')).toBeHidden();
+});
+
+test('cover lightbox opens from the player footer', async ({ page }) => {
+  await signIn(page);
+  await routeAudio(page);
+  await routeCover(page);
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  await albumCard(page, 'Abbey Road').first().locator('.album-play').click();
+  await expect(page.locator('#player-title')).toHaveText('Come Together');
+
+  const cover = page.locator('#player-cover');
+  await expect(cover).toHaveAttribute(
+    'aria-label',
+    'View cover for Abbey Road by The Beatles',
+  );
+  await cover.click();
+  await expect(page.locator('#cover-lightbox')).toBeVisible();
+  await expect(page.locator('#cover-lightbox-image')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#cover-lightbox')).toBeHidden();
+  await expect(page.locator('#player')).toBeVisible();
 });
 
 test('selecting a queued track keeps the play queue open', async ({ page }) => {

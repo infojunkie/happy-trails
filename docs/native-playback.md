@@ -216,6 +216,11 @@ Already included:
 - Media Session metadata, artwork, media-key handlers, and
   `setPositionState()` timeline sync for lock screens, notifications, and
   hardware/car media controls.
+- Full-size cover lightbox from the album dialog cover and player-footer cover.
+  It uses a native modal dialog with an X button, Escape, and backdrop-click
+  dismissal; other cover clicks keep their existing album-opening behavior.
+  The image comes from the album folder's original `Folder.jpg` (or similar)
+  through FileStation, falling back to the 480px AudioStation cover.
 - Responsive footer and queue panel; drag plus accessible move buttons.
 - README, `.env.example`, and this design document.
 

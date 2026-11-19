@@ -1,6 +1,7 @@
 import { unsupportedFormatBadge } from './badges.js';
 import { createCover } from './cover.js';
 import { $, el } from './dom.js';
+import { openCoverLightbox } from './lightbox.js';
 import {
   commitPage,
   isStoredQueueSource,
@@ -225,6 +226,10 @@ class Player {
     restartButton.addEventListener('click', () => this.restart());
     previousButton.addEventListener('click', () => this.previous());
     nextButton.addEventListener('click', () => this.next());
+    coverHost.addEventListener('click', () => {
+      const item = this.currentItem;
+      if (item) openCoverLightbox(item.albumKey, item.album, item.artist);
+    });
 
     muteButton.addEventListener('click', () => this.toggleMute());
     volumeInput.addEventListener('input', () => {
@@ -1174,6 +1179,7 @@ class Player {
     const item = this.currentItem;
     if (!item) {
       coverHost.replaceChildren();
+      coverHost.setAttribute('aria-label', 'View cover');
       titleEl.textContent = 'Nothing playing';
       subtitleEl.textContent = '';
       this.updateMediaSession();
@@ -1181,6 +1187,12 @@ class Player {
     }
     coverHost.replaceChildren(
       createCover({ key: item.albumKey, album: item.album }, 'cover-player'),
+    );
+    coverHost.setAttribute(
+      'aria-label',
+      item.artist
+        ? `View cover for ${item.album} by ${item.artist}`
+        : `View cover for ${item.album}`,
     );
     titleEl.textContent = item.title;
     titleEl.title = item.title;

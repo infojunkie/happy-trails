@@ -63,7 +63,10 @@ export interface AppDependencies {
   >;
   loadTracks: typeof loadTracks;
   covers: Pick<typeof covers, 'getCover'>;
-  artwork: Pick<typeof artwork, 'hasArtwork' | 'openArtwork'>;
+  artwork: Pick<
+    typeof artwork,
+    'hasArtwork' | 'openArtwork' | 'openOriginalCover'
+  >;
   userSessions: Pick<
     typeof userSessions,
     | 'enabled'
@@ -524,6 +527,67 @@ export function createApp(
     res.setHeader('Cache-Control', 'private, max-age=86400');
     res.type(image.contentType);
     res.send(image.body);
+  });
+
+  app.get('/api/albums/:key/cover/original', async (req, res) => {
+    const decoded = decodeAlbumKey(req.params.key);
+    if (!decoded) {
+      res.status(400).end();
+      return;
+    }
+
+    const coverPath = dependencies.library.coverPathFor(
+      decoded.album,
+      decoded.artist,
+    );
+    if (!coverPath) {
+      res.status(404).end();
+      return;
+    }
+
+    const range =
+      typeof req.headers.range === 'string' ? req.headers.range : undefined;
+    let file;
+    try {
+      file = await dependencies.artwork.openOriginalCover(coverPath, range);
+    } catch (error) {
+      console.error('[cover] could not open original cover:', error);
+      res.status(502).end();
+      return;
+    }
+
+    if (!file) {
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.status(404).end();
+      return;
+    }
+
+    res.status(file.status);
+    const contentType = file.headers['content-type'];
+    res.setHeader(
+      'Content-Type',
+      typeof contentType === 'string' ? contentType : 'image/jpeg',
+    );
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    const passthroughHeaders = [
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'last-modified',
+      'etag',
+    ] as const;
+    for (const name of passthroughHeaders) {
+      const value = file.headers[name];
+      if (typeof value === 'string') res.setHeader(name, value);
+    }
+
+    file.stream.on('error', (error) => {
+      console.error('[cover] original cover stream failed:', error);
+      if (!res.headersSent) res.status(502).end();
+      else res.destroy();
+    });
+    res.on('close', () => file.stream.destroy());
+    file.stream.pipe(res);
   });
 
   app.head('/api/albums/:key/artwork', async (req, res) => {

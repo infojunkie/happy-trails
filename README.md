@@ -44,7 +44,10 @@ design and current status.
   a preloaded next track, and survives a page reload paused (the restored queue
   appears after sign-in). Tracks whose format the browser cannot decode are
   marked with an unsupported-format warning and can use the Audio Station
-  fallback.
+  fallback. Clicking the album-dialog cover or the player-footer cover opens a
+  full-size lightbox; the X button, Escape, or the dark backdrop dismisses it.
+  The lightbox uses the album folder's original cover image when available and
+  falls back to Audio Station's 480px cover otherwise.
 - **Play all** beside the result count starts a lazily refilled queue from the
   current search results. In Albums mode it queues every track of every
   matching album; in Tracks mode it queues the matching tracks. The visible
@@ -408,7 +411,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `AUDIO_STATION_FALLBACK_ENABLED` | `true` | Keep the Audio Station handoff available as a fallback. Also requires a resolved `DSM_FRONTEND_URL` (or `DSM_URL`). |
 | `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise use `:port` to keep the host the browser used and change only the port (for example `:5001`); path rewriting is not supported. With `:port`, the host must match `DSM_FRONTEND_ALLOWED_ORIGINS`. |
 | `DSM_FRONTEND_ALLOWED_ORIGINS` | — | Comma-separated exact origins the app is served from (`scheme://host[:port]`, no path), for example `https://mediatheque.example:8443,https://nas-local:8443`. Required when `DSM_FRONTEND_URL` is `:port`. A request whose `Host` (or `X-Forwarded-Host`, for proxies that rewrite it) matches an entry uses that origin; any other host disables the redirect. The entry's scheme is also used for the redirect, so list the scheme DSM is served under (normally the same as the app). `Origin` and `Referer` are never trusted for this. |
-| `DSM_USER` / `DSM_PASS` | — | Optional service account used for album covers and artwork lookups. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
+| `DSM_USER` / `DSM_PASS` | — | Optional service account used for album covers, full-resolution original covers, and artwork lookups. It needs read access to the music share. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
 | `DSM_TLS_REJECT_UNAUTHORIZED` | `false` | Verify the NAS TLS certificate (the stock certificate is self-signed). |
 | `DSM_TIMEOUT_MS` | `10000` | Timeout for Synology requests. |
 | `COVER_CACHE_TTL_MS` | `86400000` | Server-side cover cache TTL. |
@@ -1158,6 +1161,19 @@ album has no artwork, covers are not configured, or the path cannot be resolved
 to an AudioStation song; `400` for an invalid album key. The client falls back
 to its generated cover on any failure.
 
+### `GET /api/albums/:key/cover/original`
+
+Streams the full-resolution cover image from the album folder through
+FileStation. Synology's AudioStation cover API only exposes a 480px JPEG, even
+for `view=original`; the original is normally `Folder.jpg` (or a similarly
+named image) beside the tracks. The server checks common names such as
+`Folder.jpg`, `cover.jpg`, `front.jpg`, and their PNG/JPEG variants, then
+streams the first match with `Range` support. Returns `404` when the album
+folder has no recognized cover file, covers are not configured, or the album
+has no representative path; `400` for an invalid key. The lightbox falls back
+to `/api/albums/:key/cover` when this endpoint returns an error. The configured
+DSM service account needs FileStation read access to the music share.
+
 ### `HEAD /api/albums/:key/artwork`
 
 Reports whether the album folder contains `Artwork.pdf`. Returns `200` with
@@ -1234,7 +1250,7 @@ happy-trails/
 │   ├── server/
 │   │   ├── app.ts        Express routes and static files
 │   │   ├── artists.ts    Configurable multi-artist parser
-│   │   ├── artwork.ts    FileStation Artwork.pdf lookup and streaming
+│   │   ├── artwork.ts    FileStation Artwork.pdf and original-cover lookup/streaming
 │   │   ├── config.ts     Environment configuration
 │   │   ├── covers.ts     Bounded cover cache and cover lookup
 │   │   ├── db.ts         Pool and SQL queries
@@ -1253,6 +1269,7 @@ happy-trails/
 │   │   ├── format.ts     Duration/date formatting
 │   │   ├── linkify.ts    Plain-text comment URL linkification
 │   │   ├── main.ts       State, rendering, and events
+│   │   ├── lightbox.ts   Shared full-size cover lightbox
 │   │   ├── map.ts        Lazy-loaded Leaflet map, cover pins, and full-screen
 │   │   ├── player.ts     Footer player, preload/advance, queue, and persistence
 │   │   └── queueSource.ts  Play all source cursor and sliding-window arithmetic

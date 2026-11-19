@@ -12,11 +12,11 @@ interface AvailabilityEntry {
 }
 
 /**
- * Translate a mediaserver path into the share path expected by FileStation.
- * Media files are recorded as `/volume1/music/...`; FileStation addresses the
- * same files as `/music/...`.
+ * Translate a mediaserver file path into its album folder in the share
+ * namespace expected by FileStation. Media files are recorded as
+ * `/volume1/music/...`; FileStation addresses the same files as `/music/...`.
  */
-export function artworkPathFor(filePath: string): string | null {
+export function albumFolderPathFor(filePath: string): string | null {
   const normalized = filePath.trim().replaceAll('\\', '/').replace(/\/+$/, '');
   if (!normalized.startsWith('/')) return null;
 
@@ -25,7 +25,33 @@ export function artworkPathFor(filePath: string): string | null {
 
   const separator = sharePath.lastIndexOf('/');
   if (separator < 1) return null;
-  return `${sharePath.slice(0, separator)}/Artwork.pdf`;
+  return sharePath.slice(0, separator);
+}
+
+/** Path to the album's `Artwork.pdf` in the FileStation namespace. */
+export function artworkPathFor(filePath: string): string | null {
+  const folder = albumFolderPathFor(filePath);
+  return folder ? `${folder}/Artwork.pdf` : null;
+}
+
+/** Common Synology album-art filenames, in preference order. */
+const ORIGINAL_COVER_NAMES = [
+  'Folder.jpg',
+  'folder.jpg',
+  'Cover.jpg',
+  'cover.jpg',
+  'front.jpg',
+  'Folder.jpeg',
+  'cover.jpeg',
+  'Folder.png',
+  'folder.png',
+  'Cover.png',
+  'cover.png',
+] as const;
+
+interface OriginalCoverEntry {
+  path: string | null;
+  expiresAt: number;
 }
 
 /**
@@ -37,6 +63,7 @@ export class ArtworkService {
   private readonly dsm: DsmClient | null;
   private readonly availability = new Map<string, AvailabilityEntry>();
   private readonly pending = new Map<string, Promise<boolean>>();
+  private readonly originalCovers = new Map<string, OriginalCoverEntry>();
   private lastErrorLog = 0;
 
   constructor() {
@@ -89,6 +116,82 @@ export class ArtworkService {
     } catch (error) {
       this.logError(error);
       throw error;
+    }
+  }
+
+  /**
+   * Open a full-resolution album cover from the album folder. Synology's
+   * AudioStation cover API only serves a 480px JPEG; the original is usually
+   * `Folder.jpg` (or a similarly named image) next to the tracks.
+   */
+  async openOriginalCover(
+    filePath: string,
+    range?: string,
+  ): Promise<FileStream | null> {
+    const dsm = this.dsm;
+    if (!dsm) return null;
+
+    const folder = albumFolderPathFor(filePath);
+    if (!folder) return null;
+
+    const path = await this.findOriginalCover(dsm, folder);
+    if (!path) return null;
+
+    try {
+      return await dsm.openFile(path, range, {
+        accept: 'image/*',
+        contentTypes: ['image/jpeg', 'image/png', 'image/webp'],
+      });
+    } catch (error) {
+      this.originalCovers.delete(folder);
+      this.logError(error);
+      throw error;
+    }
+  }
+
+  private async findOriginalCover(
+    dsm: DsmClient,
+    folder: string,
+  ): Promise<string | null> {
+    const now = Date.now();
+    const cached = this.originalCovers.get(folder);
+    if (cached && cached.expiresAt > now) {
+      this.originalCovers.delete(folder);
+      this.originalCovers.set(folder, cached);
+      return cached.path;
+    }
+    this.originalCovers.delete(folder);
+
+    for (const name of ORIGINAL_COVER_NAMES) {
+      const path = `${folder}/${name}`;
+      let exists: boolean;
+      try {
+        exists = await dsm.fileExists(path);
+      } catch (error) {
+        this.logError(error);
+        return null;
+      }
+      if (!exists) continue;
+
+      this.storeOriginalCover(folder, path);
+      return path;
+    }
+
+    this.storeOriginalCover(folder, null);
+    return null;
+  }
+
+  private storeOriginalCover(folder: string, path: string | null): void {
+    this.originalCovers.delete(folder);
+    this.originalCovers.set(folder, {
+      path,
+      expiresAt:
+        Date.now() + (path ? AVAILABLE_TTL_MS : MISSING_TTL_MS),
+    });
+    while (this.originalCovers.size > MAX_CACHE_ENTRIES) {
+      const oldest = this.originalCovers.keys().next().value;
+      if (oldest === undefined) break;
+      this.originalCovers.delete(oldest);
     }
   }
 

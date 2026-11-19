@@ -500,6 +500,8 @@ export interface FixtureOptions {
   coverImages?: Map<string, CoverImage>;
   /** Representative track paths whose album folder contains Artwork.pdf. */
   artworkFiles?: Map<string, Buffer>;
+  /** Full-resolution covers keyed by the representative track path. */
+  originalCoverImages?: Map<string, { body: Buffer; contentType: string }>;
   ready?: boolean;
   extraRows?: AlbumRow[];
   /** Origins allowed to select an origin-based playback redirect target. */
@@ -528,6 +530,8 @@ export interface FixtureContext {
   coverCalls: string[];
   artworkCalls: string[];
   artworkRangeCalls: Array<string | undefined>;
+  originalCoverCalls: string[];
+  originalCoverRangeCalls: Array<string | undefined>;
   close(): void;
 }
 
@@ -634,6 +638,8 @@ export async function createFixtureContext(
   const coverCalls: string[] = [];
   const artworkCalls: string[] = [];
   const artworkRangeCalls: Array<string | undefined> = [];
+  const originalCoverCalls: string[] = [];
+  const originalCoverRangeCalls: Array<string | undefined> = [];
   const playbackUrl =
     options.playbackUrl === undefined
       ? 'https://audio.example/?launchApp=SYNO.SDS.AudioStation.Application'
@@ -679,6 +685,20 @@ export async function createFixtureContext(
           headers: {
             'content-type': 'application/pdf',
             'content-length': String(body.length),
+          },
+        };
+      },
+      openOriginalCover: async (filePath, range) => {
+        originalCoverCalls.push(filePath);
+        originalCoverRangeCalls.push(range);
+        const image = options.originalCoverImages?.get(filePath);
+        if (!image) return null;
+        return {
+          stream: Readable.from(image.body),
+          status: 200,
+          headers: {
+            'content-type': image.contentType,
+            'content-length': String(image.body.length),
           },
         };
       },
@@ -787,6 +807,8 @@ export async function createFixtureContext(
     coverCalls,
     artworkCalls,
     artworkRangeCalls,
+    originalCoverCalls,
+    originalCoverRangeCalls,
     close: () => index.close(),
   };
 }

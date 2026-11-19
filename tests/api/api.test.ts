@@ -699,6 +699,34 @@ test('artwork endpoints report and stream Artwork.pdf', async () => {
   assert.equal(unavailable.status, 404);
 });
 
+test('original cover endpoint streams the full-resolution file', async () => {
+  const fixture = await runFixture({
+    originalCoverImages: new Map([
+      [
+        'covers/abbey.jpg',
+        { body: Buffer.from('full-cover-bytes'), contentType: 'image/jpeg' },
+      ],
+    ]),
+  });
+  try {
+    const abbey = await findAlbum(fixture.server.baseUrl, 'Abbey Road');
+    const url = `${fixture.server.baseUrl}/api/albums/${encodeURIComponent(abbey.key)}/cover/original`;
+    const response = await fetch(url);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'image/jpeg');
+    assert.equal(await response.text(), 'full-cover-bytes');
+    assert.deepEqual(fixture.context.originalCoverCalls, ['covers/abbey.jpg']);
+
+    const kindOfBlue = await findAlbum(fixture.server.baseUrl, 'Kind of Blue');
+    const missing = await fetch(
+      `${fixture.server.baseUrl}/api/albums/${encodeURIComponent(kindOfBlue.key)}/cover/original`,
+    );
+    assert.equal(missing.status, 404);
+  } finally {
+    await closeFixture(fixture);
+  }
+});
+
 test('GET /api/albums/:key/tracks returns merged tracks and composer metadata', async () => {
   const abbey = await findAlbum(main.server.baseUrl, 'Abbey Road');
   const { response, body } = await json<TracksResponse>(
