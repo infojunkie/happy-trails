@@ -171,6 +171,8 @@ test('unplaced albums are listed, collapsible, and open the dialog', async ({
   await expect(page.locator('.map-pin-group').first()).toBeVisible();
   await expect(page.locator('#album-unplaced-section')).toBeVisible();
   await expect(page.locator('#album-unplaced-count')).not.toHaveText('0');
+  await page.locator('#album-unplaced-toggle').first().click();
+  await expect(page.locator('.album-unplaced-item')).toBeVisible();
 
   const item = page.locator('.album-unplaced-item').first();
   const label = await item.getAttribute('aria-label');
@@ -260,6 +262,8 @@ test('opening an unplaced album is recorded and Back returns to the map', async 
   await page.goto('/');
   await page.locator('#view-switch button[data-view="map"]').click();
   await expect(page.locator('#album-unplaced-section')).toBeVisible();
+  await page.locator('#album-unplaced-toggle').first().click();
+  await expect(page.locator('.album-unplaced-item')).toBeVisible();
 
   await page.locator('.album-unplaced-item').first().click();
   await expect(page.locator('#album-dialog')).toBeVisible();
