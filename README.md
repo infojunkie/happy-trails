@@ -106,8 +106,9 @@ design and current status.
   implicit AND, and parentheses. Quoted values are matched as contiguous
   phrases. A query made only of plain keywords is treated as one phrase; use
   `AND` to combine independent words. The `?` button beside the search bar
-  opens a collapsible **Help** dialog with **Keyboard shortcuts** and **Search
-  syntax** sections, including clickable examples.
+  opens a collapsible **Help** dialog with **Keyboard shortcuts**, **Search
+  syntax**, and **About Happy Trails** sections, including clickable examples,
+  package author/contributor links, and a bug/feedback link.
 - Keyboard shortcuts: `/` focuses the search field and `?` opens the help
   dialog. With the player open, `Space` toggles playback, `←`/`→` seek,
   `Shift`+`←`/`→` skip tracks, `↑`/`↓` adjust volume, `M` mutes, and `R`
@@ -907,6 +908,28 @@ check.
 Most endpoints return JSON; cover and artwork endpoints return images or PDFs,
 and the `/play` endpoints redirect to DSM or render a small HTML error page.
 
+### `GET /api/about`
+
+Package metadata for Help → **About Happy Trails**, read from the repository's
+`package.json` and normalized for the browser: `name`, `version`, `description`,
+`author` and `contributors` (each with a name and an optional http(s) URL),
+`issuesUrl` from `bugs.url`, and `homepageUrl`. Only `http:`/`https:` links are
+accepted.
+
+```json
+{
+  "name": "happy-trails",
+  "version": "4.4.0",
+  "description": "Browse the Synology mediaserver music library.",
+  "author": { "name": "Karim Ratib", "url": "https://karimratib.me/" },
+  "contributors": [
+    { "name": "deepseek-v4-flash", "url": "https://platform.deepseek.com/" }
+  ],
+  "issuesUrl": "https://github.com/infojunkie/happy-trails/issues",
+  "homepageUrl": "https://github.com/infojunkie/happy-trails#happy-trails"
+}
+```
+
 ### `GET /api/status`
 
 Index state and library totals. `libraryVersion` identifies the current
@@ -1248,6 +1271,7 @@ returns `404`.
 happy-trails/
 ├── src/
 │   ├── server/
+│   │   ├── about.ts      package.json metadata for the Help dialog
 │   │   ├── app.ts        Express routes and static files
 │   │   ├── artists.ts    Configurable multi-artist parser
 │   │   ├── artwork.ts    FileStation Artwork.pdf and original-cover lookup/streaming

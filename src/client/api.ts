@@ -1,4 +1,5 @@
 import type {
+  AboutResponse,
   AlbumSummary,
   AlbumsResponse,
   GenresResponse,
@@ -65,6 +66,8 @@ export interface AlbumRequest {
 }
 
 export const api = {
+  about: (): Promise<AboutResponse> => getJson<AboutResponse>('/api/about'),
+
   status: (): Promise<StatusResponse> => getJson<StatusResponse>('/api/status'),
 
   session: (): Promise<SessionResponse> => getJson<SessionResponse>('/api/session'),

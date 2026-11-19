@@ -3,6 +3,7 @@ import test, { after, before } from 'node:test';
 import { createApp } from '../../src/server/app.js';
 import { DsmError } from '../../src/server/dsm.js';
 import type {
+  AboutResponse,
   AlbumSummary,
   AlbumsResponse,
   GenresResponse,
@@ -126,6 +127,34 @@ test('GET /api/status exposes library and playback state', async () => {
   assert.equal(body.playbackEnabled, true);
   assert.equal(body.nativePlaybackEnabled, true);
   assert.equal(body.audioStationFallbackEnabled, true);
+});
+
+test('GET /api/about exposes package metadata', async () => {
+  const response = await fetch(`${main.server.baseUrl}/api/about`);
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as AboutResponse;
+  assert.equal(body.name, 'happy-trails');
+  assert.match(body.version, /^\d+\.\d+\.\d+/);
+  assert.equal(
+    body.description,
+    'Browse the Synology mediaserver music library.',
+  );
+  assert.equal(body.author?.name, 'Karim Ratib');
+  assert.equal(body.author?.url, 'https://karimratib.me/');
+  assert.equal(body.contributors.length, 1);
+  assert.equal(body.contributors[0]?.name, 'deepseek-v4-flash');
+  assert.equal(
+    body.contributors[0]?.url,
+    'https://platform.deepseek.com/',
+  );
+  assert.equal(
+    body.issuesUrl,
+    'https://github.com/infojunkie/happy-trails/issues',
+  );
+  assert.equal(
+    body.homepageUrl,
+    'https://github.com/infojunkie/happy-trails#happy-trails',
+  );
 });
 
 test('GET /api/session starts signed out', async () => {

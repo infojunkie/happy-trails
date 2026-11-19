@@ -332,15 +332,19 @@ test('help dialog lists shortcuts and search fields and runs examples', async ({
   await expect(page.locator('#search-help-title')).toHaveText('Help');
 
   const sections = page.locator('.help-section');
-  await expect(sections).toHaveCount(2);
+  await expect(sections).toHaveCount(3);
   await expect(sections.nth(0).locator('.help-section-title')).toHaveText(
     'Keyboard shortcuts',
   );
   await expect(sections.nth(1).locator('.help-section-title')).toHaveText(
     'Search syntax',
   );
+  await expect(sections.nth(2).locator('.help-section-title')).toHaveText(
+    'About Happy Trails',
+  );
   await expect(sections.nth(0)).not.toHaveAttribute('open');
   await expect(sections.nth(1)).not.toHaveAttribute('open');
+  await expect(sections.nth(2)).not.toHaveAttribute('open');
 
   await sections.nth(0).locator('summary').click();
   await expect(sections.nth(0)).toHaveAttribute('open');
@@ -361,6 +365,38 @@ test('help dialog lists shortcuts and search fields and runs examples', async ({
   await expect(page.locator('.search-help-fields')).toContainText('genre:');
   await expect(page.locator('.search-help-fields')).toContainText('region:');
   await expect(page.locator('.syntax-example')).toHaveCount(7);
+
+  await sections.nth(2).locator('summary').click();
+  await expect(sections.nth(2)).toHaveAttribute('open');
+  await expect(page.locator('#about-name')).toHaveText('happy-trails');
+  await expect(page.locator('#about-version')).toHaveText(/\d+\.\d+\.\d+/);
+  await expect(page.locator('#about-description')).toContainText(
+    'Browse the Synology mediaserver music library.',
+  );
+  await expect(page.locator('#about-author a')).toHaveText('Karim Ratib');
+  await expect(page.locator('#about-author a')).toHaveAttribute(
+    'href',
+    'https://karimratib.me/',
+  );
+  await expect(page.locator('#about-contributors a')).toHaveText(
+    'deepseek-v4-flash',
+  );
+  await expect(page.locator('#about-contributors a')).toHaveAttribute(
+    'href',
+    'https://platform.deepseek.com/',
+  );
+  await expect(page.locator('#about-issues')).toHaveText(
+    'Bugs, feature requests, feedback welcome!',
+  );
+  await expect(page.locator('#about-issues')).toHaveAttribute(
+    'href',
+    'https://github.com/infojunkie/happy-trails/issues',
+  );
+  await expect(page.locator('#about-homepage')).toHaveText('Read more');
+  await expect(page.locator('#about-homepage')).toHaveAttribute(
+    'href',
+    'https://github.com/infojunkie/happy-trails#happy-trails',
+  );
 
   await page
     .locator('[data-search-example=\'album:"abbey road"\']')

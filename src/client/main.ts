@@ -17,6 +17,7 @@ import {
 import {
   isFilterMode,
   isSortKey,
+  type AboutResponse,
   type AlbumSummary,
   type FilterMode,
   type GenreFacet,
@@ -241,6 +242,15 @@ const loginCancel = $<HTMLButtonElement>('#login-cancel');
 const searchHelpButton = $<HTMLButtonElement>('#search-help-button');
 const searchHelpDialog = $<HTMLDialogElement>('#search-help-dialog');
 const searchHelpClose = $<HTMLButtonElement>('#search-help-close');
+const aboutContent = $<HTMLElement>('#about-content');
+const aboutName = $('#about-name');
+const aboutVersion = $('#about-version');
+const aboutDescription = $('#about-description');
+const aboutAuthor = $('#about-author');
+const aboutContributors = $('#about-contributors');
+const aboutIssues = $<HTMLAnchorElement>('#about-issues');
+const aboutHomepage = $<HTMLAnchorElement>('#about-homepage');
+const aboutError = $('#about-error');
 
 const trackCache = new Map<string, TracksResponse>();
 let requestSequence = 0;
@@ -635,6 +645,73 @@ function showError(message: string): void {
 
 function hideError(): void {
   errorBanner.hidden = true;
+}
+
+function externalLink(text: string, href: string): HTMLAnchorElement {
+  return el('a', {
+    href,
+    target: '_blank',
+    rel: 'noopener noreferrer',
+    text,
+  });
+}
+
+function aboutPersonNode(
+  person: NonNullable<AboutResponse['author']>,
+): Node {
+  return person.url
+    ? externalLink(person.name, person.url)
+    : document.createTextNode(person.name);
+}
+
+function renderAbout(info: AboutResponse): void {
+  aboutContent.hidden = false;
+  aboutError.hidden = true;
+  aboutName.textContent = info.name;
+  aboutVersion.textContent = info.version;
+  aboutDescription.textContent = info.description;
+
+  aboutAuthor.replaceChildren(
+    info.author
+      ? aboutPersonNode(info.author)
+      : document.createTextNode('—'),
+  );
+
+  if (info.contributors.length === 0) {
+    aboutContributors.textContent = '—';
+  } else {
+    const nodes: Node[] = [];
+    for (const [index, contributor] of info.contributors.entries()) {
+      if (index > 0) nodes.push(document.createTextNode(', '));
+      nodes.push(aboutPersonNode(contributor));
+    }
+    aboutContributors.replaceChildren(...nodes);
+  }
+
+  if (info.issuesUrl) {
+    aboutIssues.href = info.issuesUrl;
+    aboutIssues.hidden = false;
+  } else {
+    aboutIssues.removeAttribute('href');
+    aboutIssues.hidden = true;
+  }
+
+  if (info.homepageUrl) {
+    aboutHomepage.href = info.homepageUrl;
+    aboutHomepage.hidden = false;
+  } else {
+    aboutHomepage.removeAttribute('href');
+    aboutHomepage.hidden = true;
+  }
+}
+
+async function loadAbout(): Promise<void> {
+  try {
+    renderAbout(await api.about());
+  } catch {
+    aboutContent.hidden = true;
+    aboutError.hidden = false;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -3612,6 +3689,7 @@ function bindEvents(): void {
 /* ------------------------------------------------------------------ */
 
 async function boot(): Promise<void> {
+  void loadAbout();
   // Load the session first so cards render with the correct Play visibility.
   await loadSession();
   await loadLibrary();

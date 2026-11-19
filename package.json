@@ -7,6 +7,26 @@
   "engines": {
     "node": ">=24"
   },
+  "author": {
+    "name": "Karim Ratib",
+    "email": "karim.ratib@gmail.com",
+    "web": "https://karimratib.me/"
+  },
+  "contributors": [
+    {
+      "name": "deepseek-v4-flash",
+      "email": "noreply@deepseek.com",
+      "web": "https://platform.deepseek.com/"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/infojunkie/happy-trails.git"
+  },
+  "homepage": "https://github.com/infojunkie/happy-trails#happy-trails",
+  "bugs": {
+    "url": "https://github.com/infojunkie/happy-trails/issues"
+  },
   "scripts": {
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc -p tsconfig.server.json",

@@ -13,6 +13,7 @@ import {
   type TrackSearchResponse,
   type TracksResponse,
 } from '../shared/types.js';
+import { about } from './about.js';
 import { artwork } from './artwork.js';
 import { isPlayableAudioExtension } from './audio.js';
 import { parseArtists, parseComposers } from './artists.js';
@@ -290,6 +291,10 @@ export function createApp(
 
   app.get('/api/status', (_req, res) => {
     res.json(dependencies.library.status());
+  });
+
+  app.get('/api/about', (_req, res) => {
+    res.json(about);
   });
 
   app.get('/api/session', (req, res) => {

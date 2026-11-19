@@ -2098,6 +2098,63 @@ body.map-expanded {
   padding-bottom: 18px;
 }
 
+.about-product {
+  margin: 0;
+}
+
+.about-product strong {
+  font-size: 0.95rem;
+}
+
+.about-version {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-description {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.about-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 14px 0;
+  font-size: 0.84rem;
+}
+
+.about-meta dt {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.about-meta dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.about-meta a,
+.about-issues a,
+.about-read-more a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.about-issues,
+.about-read-more {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.about-issues {
+  margin-bottom: 6px;
+}
+
 .search-help h3 {
   margin: 20px 0 8px;
   color: var(--text-muted);

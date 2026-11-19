@@ -151,6 +151,22 @@ export interface SessionResponse {
   account: string | null;
 }
 
+export interface AboutPerson {
+  name: string;
+  /** http(s) URL, or null when the package entry has none. */
+  url: string | null;
+}
+
+export interface AboutResponse {
+  name: string;
+  version: string;
+  description: string;
+  author: AboutPerson | null;
+  contributors: AboutPerson[];
+  issuesUrl: string | null;
+  homepageUrl: string | null;
+}
+
 export const SORT_KEYS = ['recent', 'artist', 'album', 'year'] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 
