@@ -104,6 +104,10 @@ export interface Track {
   /** Raw album title this track came from, including a " // <disc label>" suffix. */
   sourceAlbum: string;
   genre: string | null;
+  /** Genre tags from this track's own genre column. */
+  genres: string[];
+  /** Country/region tags from this track's own genre column. */
+  regions: string[];
   year: number | null;
   track: number | null;
   disc: number | null;

@@ -205,6 +205,91 @@ test('album dialog genre and region chips activate filters', async ({ page }) =>
   await expectSummaryFor(page, { q: 'region:"Brazil"' });
 });
 
+test('album dialog shows only tags specific to each track', async ({ page }) => {
+  await page.goto(
+    `/?q=${encodeURIComponent('album:"Putumayo - Family Gathering"')}`,
+  );
+  await openAlbum(page, 'Putumayo - Family Gathering');
+
+  // The album header shows the union of all track tags. Series pills share the
+  // dialog-genres layout class, so scope to the tag row.
+  await expect(
+    page.locator(
+      '#album-dialog .dialog-heading > .dialog-genres:not(.dialog-series) .chip',
+    ),
+  ).toHaveText(['Folk', 'Iceland', 'Denmark']);
+
+  const icelandic = page.locator('#album-dialog .track-row', {
+    hasText: 'Icelandic Track',
+  });
+  // Tags are their own row cell, matching the global track listing.
+  const tags = icelandic.locator('.track-tags');
+  await expect(tags).toHaveCount(1);
+  const tagParentClass = await tags.evaluate(
+    (node) => node.parentElement?.className ?? '',
+  );
+  expect(tagParentClass).toContain('track-row');
+  expect(tagParentClass).not.toContain('track-main');
+  await expect(tags.locator('.chip')).toHaveText(['Iceland']);
+  await expect(icelandic.locator('.track-tags')).not.toContainText('Folk');
+
+  const nordic = page.locator('#album-dialog .track-row', {
+    hasText: 'Nordic Track',
+  });
+  await expect(nordic.locator('.track-tags .chip')).toHaveText(['Denmark']);
+  await expect(nordic.locator('.track-tags')).not.toContainText('Folk');
+
+  // A track with no tags beyond the album-wide set gets no tag row.
+  const other = page.locator('#album-dialog .track-row', {
+    hasText: 'Other Track',
+  });
+  await expect(other.locator('.track-tags')).toHaveCount(0);
+});
+
+test.describe('mobile album dialog track tags', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('tags stack under the title and duration stays right-aligned', async ({
+    page,
+  }) => {
+    await page.goto(
+      `/?q=${encodeURIComponent('album:"Putumayo - Family Gathering"')}`,
+    );
+    await openAlbum(page, 'Putumayo - Family Gathering');
+
+    const row = page.locator('#album-dialog .track-row', {
+      hasText: 'Icelandic Track',
+    });
+    const boxes = await row.evaluate((element) => {
+      const rowBox = element.getBoundingClientRect();
+      const title = element
+        .querySelector('.track-title-row')!
+        .getBoundingClientRect();
+      const tags = element.querySelector('.track-tags')!.getBoundingClientRect();
+      const duration = element
+        .querySelector('.track-duration')!
+        .getBoundingClientRect();
+      return {
+        contentRight: rowBox.right -
+          Number.parseFloat(getComputedStyle(element).paddingRight),
+        titleLeft: title.left,
+        titleBottom: title.bottom,
+        tagsLeft: tags.left,
+        tagsTop: tags.top,
+        durationTop: duration.top,
+        durationRight: duration.right,
+      };
+    });
+
+    expect(boxes.tagsTop).toBeGreaterThanOrEqual(boxes.titleBottom - 1);
+    expect(Math.abs(boxes.tagsLeft - boxes.titleLeft)).toBeLessThanOrEqual(1);
+    expect(boxes.durationTop).toBeLessThan(boxes.tagsTop);
+    expect(Math.abs(boxes.durationRight - boxes.contentRight)).toBeLessThanOrEqual(
+      1,
+    );
+  });
+});
+
 test('album dialog shows Artwork only when the folder has Artwork.pdf', async ({
   page,
 }) => {

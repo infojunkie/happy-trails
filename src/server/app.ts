@@ -16,7 +16,7 @@ import {
 import { artwork } from './artwork.js';
 import { isPlayableAudioExtension } from './audio.js';
 import { parseArtists, parseComposers } from './artists.js';
-import { createTrackMatcher } from './trackSearch.js';
+import { createTrackMatcher, splitTrackTags } from './trackSearch.js';
 import { config } from './config.js';
 import { covers } from './covers.js';
 import { loadTracks } from './db.js';
@@ -602,25 +602,30 @@ export function createApp(
       artist: decoded.artist,
       sourceAlbums:
         sourceAlbums.length > 0 ? sourceAlbums : [decoded.album],
-      tracks: rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        artist: row.artist,
-        artists: parseArtists(row.artist),
-        albumArtist: row.album_artist,
-        composer: row.composer,
-        composers: parseComposers(row.composer),
-        matches: matchesTrack(row),
-        sourceAlbum: row.source_album ?? '(Unknown Album)',
-        genre: row.genre,
-        year: row.year,
-        track: row.track,
-        disc: row.disc,
-        duration: row.duration,
-        bitrate: row.bitrate,
-        frequency: row.frequency,
-        playable: isPlayableAudioExtension(row.format),
-      })),
+      tracks: rows.map((row) => {
+        const tags = splitTrackTags(row.genre);
+        return {
+          id: row.id,
+          title: row.title,
+          artist: row.artist,
+          artists: parseArtists(row.artist),
+          albumArtist: row.album_artist,
+          composer: row.composer,
+          composers: parseComposers(row.composer),
+          matches: matchesTrack(row),
+          sourceAlbum: row.source_album ?? '(Unknown Album)',
+          genre: row.genre,
+          genres: [...new Set(tags.genres)],
+          regions: [...new Set(tags.regions)],
+          year: row.year,
+          track: row.track,
+          disc: row.disc,
+          duration: row.duration,
+          bitrate: row.bitrate,
+          frequency: row.frequency,
+          playable: isPlayableAudioExtension(row.format),
+        };
+      }),
     };
     res.json(body);
   });

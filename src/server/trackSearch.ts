@@ -30,7 +30,7 @@ function legacySearchNode(input: string): SearchNode | null {
   return node;
 }
 
-function splitTrackTags(genre: string | null): {
+export function splitTrackTags(genre: string | null): {
   genres: string[];
   regions: string[];
 } {

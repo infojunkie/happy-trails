@@ -119,11 +119,14 @@ design and current status.
 - Album dialog with the full track list and duration.
   Composer tags appear as a separate italic **Composer** line when they differ
   from the track and album artists; each composer name is a link that runs a
-  top-level search. When a search narrows the tracks, the dialog defaults to
-  matching tracks and offers a **Matching tracks / Show all** toggle; if every
-  track matches, the toggle is omitted. Album Play follows the current toggle
-  state. Merged multi-CD albums group tracks under their original disc labels,
-  since disc numbers frequently collide across the source titles.
+  top-level search. When a track has genre or region tags beyond the set shared
+  by every track in the album, those specific tags appear as clickable pills
+  under the track title, while the album header keeps the full union. When a
+  search narrows the tracks, the dialog defaults to matching tracks and offers
+  a **Matching tracks / Show all** toggle; if every track matches, the toggle
+  is omitted. Album Play follows the current toggle state. Merged multi-CD
+  albums group tracks under their original disc labels, since disc numbers
+  frequently collide across the source titles.
 - The album dialog header shows a pill for each series the album belongs to,
   directly below the genre/region tags. Clicking a pill runs the equivalent
   `serie:"<name>"` search.
@@ -1081,7 +1084,10 @@ disc, track number, and title. `sourceAlbums` lists the raw titles in display
 order, each track's `sourceAlbum` identifies the title it came from,
 `composer` is the nullable track-level composer tag, `composers` contains the
 individual names parsed from it, and `matches` says whether the track matches
-the optional `q` search expression. `key` is the value from the album listing.
+the optional `q` search expression. `genre` is the raw track genre tag;
+`genres` and `regions` split and deduplicate it into display names, using the
+same genre/region classification as the album listing. `key` is the value from
+the album listing.
 
 `q` uses the same syntax as `/api/albums`; filtering is evaluated per track, so
 `composer:beatles` flags only tracks with a matching composer and
@@ -1104,6 +1110,8 @@ the optional `q` search expression. `key` is the value from the album listing.
       "matches": true,
       "sourceAlbum": "Danama",
       "genre": "Jazz, Funk, Ethiopia, France",
+      "genres": ["Jazz", "Funk"],
+      "regions": ["Ethiopia", "France"],
       "year": 2025,
       "track": 1,
       "disc": 0,

@@ -2447,6 +2447,11 @@ h4.disc-heading {
   border-bottom: 1px solid var(--border);
 }
 
+/* Tags sit in their own column, like the global track listing. */
+.track-row.has-tags {
+  grid-template-columns: 2.2rem minmax(0, 1.5fr) minmax(0, 1fr) auto;
+}
+
 .track-group:last-child .track-row:last-child {
   border-bottom: 0;
 }
@@ -2515,6 +2520,13 @@ h4.disc-heading {
 
 .track-composer-name {
   overflow-wrap: anywhere;
+}
+
+.track-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
 }
 
 .track-duration {
@@ -2646,6 +2658,30 @@ h4.disc-heading {
   .track-row {
     grid-template-columns: 1.7rem minmax(0, 1fr) auto;
     gap: 8px;
+  }
+
+  .track-row.has-tags {
+    grid-template-columns: 1.7rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "number main duration"
+      "number tags tags";
+    row-gap: 4px;
+  }
+
+  .track-row.has-tags .track-number {
+    grid-area: number;
+  }
+
+  .track-row.has-tags .track-main {
+    grid-area: main;
+  }
+
+  .track-row.has-tags .track-tags {
+    grid-area: tags;
+  }
+
+  .track-row.has-tags .track-duration {
+    grid-area: duration;
   }
 
   .dialog-body {

@@ -833,11 +833,18 @@ function refreshAlbumCards(): void {
 /* Native playback                                                     */
 /* ------------------------------------------------------------------ */
 
-interface AlbumTrackContext {
+interface AlbumPlaybackContext {
   albumKey: string;
   album: string;
   artist: string;
   tracks: Track[];
+}
+
+interface AlbumTrackContext extends AlbumPlaybackContext {
+  albumGenres: string[];
+  albumRegions: string[];
+  commonGenres: Set<string>;
+  commonRegions: Set<string>;
 }
 
 function syncPlayerConfig(): void {
@@ -952,7 +959,7 @@ async function playAlbumNatively(
 }
 
 function playTrackFromAlbumContext(
-  context: AlbumTrackContext,
+  context: AlbumPlaybackContext,
   musicId: number,
 ): void {
   const index = context.tracks.findIndex((track) => track.id === musicId);
@@ -2797,6 +2804,8 @@ function renderDialog(
     const visibleTracks = showAllTracks
       ? tracks.tracks
       : tracks.tracks.filter((track) => track.matches);
+    const commonGenres = commonTagKeys(tracks.tracks, 'genres', genreKey);
+    const commonRegions = commonTagKeys(tracks.tracks, 'regions', regionKey);
     body.append(
       renderTrackGroups(
         { ...tracks, tracks: visibleTracks },
@@ -2805,6 +2814,10 @@ function renderDialog(
           album: album.album,
           artist: album.artist,
           tracks: tracks.tracks,
+          albumGenres: album.genres,
+          albumRegions: album.regions,
+          commonGenres,
+          commonRegions,
         },
         query && !showAllTracks
           ? 'No tracks in this album match this search.'
@@ -2933,6 +2946,26 @@ function normalizedMetadata(value: string | null | undefined): string {
   return (value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** Tag keys present on every track in the album. */
+function commonTagKeys(
+  tracks: readonly Track[],
+  field: 'genres' | 'regions',
+  keyFn: (name: string) => string,
+): Set<string> {
+  if (tracks.length === 0) return new Set();
+  const first = tracks[0];
+  if (!first) return new Set();
+
+  const common = new Set((first[field] ?? []).map(keyFn));
+  for (const track of tracks.slice(1)) {
+    const keys = new Set((track[field] ?? []).map(keyFn));
+    for (const key of [...common]) {
+      if (!keys.has(key)) common.delete(key);
+    }
+  }
+  return common;
+}
+
 function renderTrackRow(
   track: Track,
   context: AlbumTrackContext,
@@ -3022,14 +3055,38 @@ function renderTrackRow(
     );
   }
 
+  const albumGenreNames = new Map(
+    context.albumGenres.map((name): [string, string] => [genreKey(name), name]),
+  );
+  const albumRegionNames = new Map(
+    context.albumRegions.map((name): [string, string] => [regionKey(name), name]),
+  );
+  const specificGenres = (track.genres ?? [])
+    .filter((name) => !context.commonGenres.has(genreKey(name)))
+    .map((name) => albumGenreNames.get(genreKey(name)) ?? name);
+  const specificRegions = (track.regions ?? [])
+    .filter((name) => !context.commonRegions.has(regionKey(name)))
+    .map((name) => albumRegionNames.get(regionKey(name)) ?? name);
+
+  const tags =
+    specificGenres.length > 0 || specificRegions.length > 0
+      ? el(
+          'div',
+          { class: 'track-tags', title: 'Tags specific to this track' },
+          ...specificGenres.map((name) => createGenreChip(name)),
+          ...specificRegions.map((name) => createRegionChip(name)),
+        )
+      : null;
+
   return el(
     'li',
-    { class: 'track-row' },
+    { class: `track-row${tags ? ' has-tags' : ''}` },
     el('span', {
       class: 'track-number',
       text: track.track === null ? '—' : String(track.track),
     }),
     main,
+    ...(tags ? [tags] : []),
     el('span', { class: 'track-duration', text: formatDuration(track.duration) }),
   );
 }

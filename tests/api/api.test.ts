@@ -658,6 +658,30 @@ test('GET /api/albums/:key/tracks returns merged tracks and composer metadata', 
     matched.every((track) => track.composer?.includes('George Harrison')),
   );
 
+  const putumayo = await findAlbum(
+    main.server.baseUrl,
+    'Putumayo - Family Gathering',
+  );
+  const putumayoTracks = await json<TracksResponse>(
+    main.server.baseUrl,
+    `/api/albums/${encodeURIComponent(putumayo.key)}/tracks`,
+  );
+  const icelandic = putumayoTracks.body.tracks.find(
+    (track) => track.title === 'Icelandic Track',
+  );
+  assert.deepEqual(icelandic?.genres, ['Folk']);
+  assert.deepEqual(icelandic?.regions, ['Iceland']);
+  const nordic = putumayoTracks.body.tracks.find(
+    (track) => track.title === 'Nordic Track',
+  );
+  assert.deepEqual(nordic?.genres, ['Folk']);
+  assert.deepEqual(nordic?.regions, ['Denmark']);
+  const other = putumayoTracks.body.tracks.find(
+    (track) => track.title === 'Other Track',
+  );
+  assert.deepEqual(other?.genres, ['Folk']);
+  assert.deepEqual(other?.regions, []);
+
   const invalid = await json<{ error: string }>(
     main.server.baseUrl,
     '/api/albums/nope/tracks',
