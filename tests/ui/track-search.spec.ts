@@ -155,3 +155,73 @@ test('track: in album mode finds the album containing the track', async ({
   await expect(page.locator('#album-grid')).toBeVisible();
   await expect(page.locator('#track-list')).toBeHidden();
 });
+
+test.describe('mobile track rows', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('duration and play actions are right-aligned and share the play icon', async ({
+    page,
+  }) => {
+    await page.goto('/?view=tracks');
+    await expect(
+      page.locator('.track-result .track-result-title').first(),
+    ).toBeVisible();
+
+    await page.locator('#session-button').click();
+    await page.locator('#login-username').fill('alice');
+    await page.locator('#login-password').fill('secret');
+    await page.locator('#login-submit').click();
+    await expect(page.locator('#session-button')).toHaveText('alice');
+    await expect(page.locator('.track-result .track-play').first()).toBeVisible();
+
+    const rows = await page.$$eval('.track-result', (elements) =>
+      elements.slice(0, 8).map((row) => {
+        const actions = row.querySelector('.track-result-actions');
+        const play = row.querySelector('.track-play');
+        const icon = row.querySelector('.track-play .play-icon');
+        if (!actions || !play || !icon) return null;
+
+        const rowBox = row.getBoundingClientRect();
+        const paddingRight = Number.parseFloat(
+          getComputedStyle(row).paddingRight,
+        );
+        const actionsBox = actions.getBoundingClientRect();
+        const playBox = play.getBoundingClientRect();
+        const iconBox = icon.getBoundingClientRect();
+        return {
+          actionsRight: actionsBox.right,
+          expectedRight: rowBox.right - paddingRight,
+          playRight: playBox.right,
+          iconOffsetX:
+            iconBox.left +
+            iconBox.width / 2 -
+            (playBox.left + playBox.width / 2),
+          iconOffsetY:
+            iconBox.top +
+            iconBox.height / 2 -
+            (playBox.top + playBox.height / 2),
+        };
+      }),
+    );
+
+    const present = rows.filter((row) => row !== null);
+    expect(present.length).toBeGreaterThan(1);
+    const rights = present.map((row) => row.actionsRight);
+    expect(Math.max(...rights) - Math.min(...rights)).toBeLessThanOrEqual(1);
+
+    for (const row of present) {
+      expect(Math.abs(row.actionsRight - row.expectedRight)).toBeLessThanOrEqual(
+        1,
+      );
+      expect(Math.abs(row.playRight - row.expectedRight)).toBeLessThanOrEqual(1);
+      // Shared play icon: the optical nudge is horizontal only.
+      expect(row.iconOffsetX).toBeGreaterThan(0.5);
+      expect(Math.abs(row.iconOffsetY)).toBeLessThanOrEqual(0.5);
+    }
+
+    const playCount = await page.locator('.track-result .track-play').count();
+    await expect(page.locator('.track-result .play-icon')).toHaveCount(
+      playCount,
+    );
+  });
+});

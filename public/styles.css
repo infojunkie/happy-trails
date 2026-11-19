@@ -888,15 +888,19 @@ button.chip:hover {
   filter: brightness(1.08);
 }
 
-.album-play .play-icon {
-  width: 8px;
-  height: 9px;
-}
-
+/*
+ * Shared play triangle for every play button. The translateX compensates for
+ * the optical center of a right-pointing triangle so it looks centered inside
+ * circular and pill-shaped buttons.
+ */
 .play-icon {
   display: block;
+  flex: none;
+  width: 8px;
+  height: 9px;
   background: currentColor;
   clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform: translateX(1px);
 }
 
 .chip-x {
@@ -1570,7 +1574,7 @@ body.map-expanded {
   display: grid;
   grid-template-columns:
     44px minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr)
-    auto auto;
+    auto;
   gap: 14px;
   align-items: center;
   padding: 9px 14px;
@@ -1684,10 +1688,20 @@ body.map-expanded {
   min-width: 0;
 }
 
+.track-result-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  justify-self: end;
+}
+
 .track-result-duration {
   color: var(--text-muted);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   white-space: nowrap;
 }
 
@@ -2473,11 +2487,6 @@ h4.disc-heading {
   text-decoration: none;
 }
 
-.track-play .play-icon {
-  width: 7px;
-  height: 8px;
-}
-
 .track-play:hover {
   color: var(--on-accent);
   filter: brightness(1.08);
@@ -2553,7 +2562,7 @@ h4.disc-heading {
   .track-result:not(.skeleton-track) {
     grid-template-columns: 44px minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "cover main duration play"
+      "cover main actions actions"
       "cover album tags tags";
     row-gap: 3px;
   }
@@ -2574,12 +2583,9 @@ h4.disc-heading {
     grid-area: tags;
   }
 
-  .track-result-duration {
-    grid-area: duration;
-  }
-
-  .track-result .track-play {
-    grid-area: play;
+  .track-result-actions {
+    grid-area: actions;
+    align-self: start;
   }
 }
 
@@ -2666,7 +2672,7 @@ h4.disc-heading {
   .track-result:not(.skeleton-track) {
     grid-template-columns: 38px minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "cover main duration play"
+      "cover main actions actions"
       "cover album album album"
       "cover tags tags tags";
     gap: 4px 8px;

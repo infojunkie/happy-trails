@@ -1744,6 +1744,11 @@ function composerQueryFor(name: string): string {
   return `composer:"${name.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
+/** Shared play triangle; every play button should use this primitive. */
+function playIcon(): HTMLElement {
+  return el('span', { class: 'play-icon', 'aria-hidden': 'true' });
+}
+
 function artistNodes(
   artists: string[],
   original: string | null | undefined,
@@ -1896,7 +1901,7 @@ function renderAlbumCard(album: AlbumSummary): HTMLElement {
         title: playLinkTitle(album.album),
         'aria-label': playLinkTitle(album.album),
       },
-      el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
+      playIcon(),
       el('span', { text: playLinkLabel() }),
     );
     playLink.addEventListener('click', (event) => {
@@ -2086,7 +2091,7 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
           title: playLinkTitle(track.title),
           'aria-label': playLinkTitle(track.title),
         },
-        el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
+        playIcon(),
       )
     : null;
   play?.addEventListener('click', (event) => {
@@ -2109,11 +2114,15 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
     ),
     albumButton,
     tags,
-    el('span', {
-      class: 'track-result-duration',
-      text: formatDuration(track.duration),
-    }),
-    ...(play ? [play] : []),
+    el(
+      'div',
+      { class: 'track-result-actions' },
+      el('span', {
+        class: 'track-result-duration',
+        text: formatDuration(track.duration),
+      }),
+      ...(play ? [play] : []),
+    ),
   );
 }
 
@@ -2711,7 +2720,7 @@ function renderDialog(
         rel: 'noopener',
         title: playLinkTitle(album.album),
       },
-      el('span', { 'aria-hidden': 'true', text: '▶' }),
+      playIcon(),
       el('span', {
         text: playLinkLabel(),
       }),
@@ -2940,7 +2949,7 @@ function renderTrackRow(
         title: playLinkTitle(track.title),
         'aria-label': playLinkTitle(track.title),
       },
-      el('span', { class: 'play-icon', 'aria-hidden': 'true' }),
+      playIcon(),
     );
     playLink.addEventListener('click', (event) => {
       handlePlayLink(event, () => {
