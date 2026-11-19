@@ -2,6 +2,7 @@ import type {
   AlbumSummary,
   AlbumsResponse,
   GenresResponse,
+  PlaybackTrackMode,
   SessionResponse,
   SortKey,
   StatusResponse,
@@ -102,6 +103,22 @@ export const api = {
     params.set('limit', String(request.limit));
     return getJson<TrackSearchResponse>(
       `/api/tracks?${params.toString()}`,
+      signal ? { signal } : {},
+    );
+  },
+
+  playbackTracks: (
+    request: AlbumRequest & { mode: PlaybackTrackMode },
+    signal?: AbortSignal,
+  ): Promise<TrackSearchResponse> => {
+    const params = new URLSearchParams();
+    params.set('mode', request.mode);
+    if (request.q) params.set('q', request.q);
+    params.set('sort', request.sort);
+    params.set('offset', String(request.offset));
+    params.set('limit', String(request.limit));
+    return getJson<TrackSearchResponse>(
+      `/api/playback/tracks?${params.toString()}`,
       signal ? { signal } : {},
     );
   },

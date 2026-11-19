@@ -154,6 +154,9 @@ export interface SessionResponse {
 export const SORT_KEYS = ['recent', 'artist', 'album', 'year'] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 
+/** Scope of a Play all source: per-track matches or all tracks of matching albums. */
+export type PlaybackTrackMode = 'albums' | 'tracks';
+
 export function isSortKey(value: unknown): value is SortKey {
   return typeof value === 'string' && (SORT_KEYS as readonly string[]).includes(value);
 }

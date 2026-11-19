@@ -1,7 +1,7 @@
 # Native playback
 
-Status: **Stages 1–3 implemented** (stream proxy, footer player, album and queue
-playback). Stage 4 (polish and hardening) remains.
+Status: **Stages 1–3.5 implemented** (stream proxy, footer player, album/queue
+playback, and Play all result sources). Stage 4 (polish and hardening) remains.
 
 ## Goals
 
@@ -180,6 +180,24 @@ apply to the fallback redirect.
   the previous item paused.
 - Queue and position persist in `localStorage` and restore paused after a
   reload.
+
+### Stage 3.5 — Play all search results (done)
+
+- A **Play all** button sits beside the result summary. In Albums mode it
+  queues every track of every matching album (album order, then disc/track);
+  in Tracks mode it queues the matching tracks.
+- `GET /api/playback/tracks?mode=albums|tracks&q=&sort=&offset=&limit=` returns
+  flat, track-level pages for both modes. Albums mode flattens the album query
+  on the server instead of fetching each album separately.
+- The player keeps a 48-item visible window (the Load-more page size) and
+  refills when fewer than 12 tracks remain after the current one. It fetches
+  exactly enough to restore 48, trims items before the current track only after
+  a page commits, and persists the source cursor with the queue.
+- The source remembers the original `q`, `sort`, and `mode`; changing the
+  visible search does not change refills. Pressing Play all again, playing a
+  track/album, clearing the queue, or signing out replaces/clears it.
+- Refill failures leave the queue and cursor intact and retry on a later
+  trigger. Library version changes are handled best-effort.
 
 ### Stage 4 — Robustness and polish (partially done)
 

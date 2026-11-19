@@ -38,7 +38,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'node --import tsx tests/fixtures/ui-server.ts',
+    command:
+      'node --import tsx --import ./tests/helpers/test-env.ts tests/fixtures/ui-server.ts',
     url: `${baseURL}/api/status`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

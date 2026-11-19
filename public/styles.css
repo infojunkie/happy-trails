@@ -753,10 +753,41 @@ p {
   margin-bottom: 16px;
 }
 
+.results-summary-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
 .result-summary {
   color: var(--text-muted);
   font-size: 0.88rem;
   font-variant-numeric: tabular-nums;
+}
+
+.play-all {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 11px;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--on-accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.play-all:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.play-all:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .active-filters {

@@ -45,6 +45,13 @@ design and current status.
   appears after sign-in). Tracks whose format the browser cannot decode are
   marked with an unsupported-format warning and can use the Audio Station
   fallback.
+- **Play all** beside the result count starts a lazily refilled queue from the
+  current search results. In Albums mode it queues every track of every
+  matching album; in Tracks mode it queues the matching tracks. The visible
+  queue stays at 48 items, fetching more from the original query as playback
+  advances and dropping played history at each refill. The source keeps its own
+  query, sort, and mode even if the visible search changes, and survives a page
+  reload until another Play action replaces it.
 - A **view switch** at the right of the results header offers **Grid**,
   **Cover Flow**, and **World map** album layouts, one icon per mode. Cover
   Flow adds a 3D carousel with drag, wheel, and arrow-key navigation,
@@ -843,18 +850,19 @@ check keeps retrying in the background.
 
 ## Tests
 
-The suite is deterministic and does not require PostgreSQL, DSM, or network access. It uses synthetic album/track fixtures and fake cover, session, and playback services.
+The suite is deterministic and does not require PostgreSQL, DSM, or network access. It uses synthetic album/track fixtures and fake cover, session, and playback services. `tests/helpers/test-env.ts` is loaded with `node --import` before the app config, clearing the search-related overrides (`SERIES_ALLOWLIST`, `SERIES_EXCEPTIONS`, `ARTIST_SEPARATOR_WORDS`, `ARTIST_EXCEPTIONS`, `REGION_TAGS`) so a developer `.env` cannot change fixture results.
 
 ```bash
 npm run test:install-browsers  # once per machine/CI
 npm run lint                   # ESLint
 npm run typecheck              # server, client, and tests
-npm test                       # API + search + artwork + all UI browsers
+npm test                       # API + search + artwork + client + all UI browsers
 npm run test:chromium          # backend + Chromium UI
 npm run test:firefox           # backend + Firefox UI
 npm run test:webkit            # backend + WebKit UI
 npm run test:api               # Express endpoints
 npm run test:artwork           # media-path to FileStation path mapping
+npm run test:client            # pure client queue-source/window unit tests
 npm run test:config            # DSM frontend URL parsing
 npm run test:search            # parser + SQLite search/tag combinations
 npm run test:security          # proof-of-vulnerability audit suite
@@ -885,7 +893,8 @@ check.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and album-from-track queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, and playback continuing while album dialogs open.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and album-from-track queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including 48-item refills after the visible query changes.
+- Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts`; backend tests cover the album-mode flattening order and pagination.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.
 - `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.
@@ -1077,6 +1086,24 @@ counts. An empty `q` lists every track.
 }
 ```
 
+### `GET /api/playback/tracks`
+
+Flat, track-level pages for the Play all queue source.
+
+| Parameter | Description |
+| --- | --- |
+| `mode` | Required. `tracks` returns tracks matching the query per track; `albums` selects matching albums and returns **all** tracks of those albums. |
+| `q` | The same search syntax as `/api/albums` or `/api/tracks`. |
+| `sort` | `recent` (default), `artist`, `album`, or `year`. In Albums mode the album sort is applied first, then each album's disc/track order. |
+| `offset` | Default `0`. Track-level offset. |
+| `limit` | Default `48`, maximum `200`. |
+
+The response has the same shape as `/api/tracks`: `total`, `offset`, `limit`,
+`tracks`, and `libraryVersion`. `total` is always a track count, including in
+Albums mode. Unknown modes return `400`. The client uses this endpoint both for
+the first Play all page and for later lazy refills; it never materializes the
+full result set.
+
 ### `GET /api/albums/:key/tracks`
 
 Returns the tracks of every raw album title merged into the album, ordered by
@@ -1227,7 +1254,8 @@ happy-trails/
 │   │   ├── linkify.ts    Plain-text comment URL linkification
 │   │   ├── main.ts       State, rendering, and events
 │   │   ├── map.ts        Lazy-loaded Leaflet map, cover pins, and full-screen
-│   │   └── player.ts     Footer player, preload/advance, queue, and persistence
+│   │   ├── player.ts     Footer player, preload/advance, queue, and persistence
+│   │   └── queueSource.ts  Play all source cursor and sliding-window arithmetic
 │   └── shared/
 │       ├── equalEarth.ts    Equal Earth projection formulas
 │       ├── placeCatalog.ts  Manual cities/regions/overrides and non-place denylist
@@ -1242,11 +1270,12 @@ happy-trails/
 ├── tests/
 │   ├── api/              Express endpoint tests
 │   ├── artwork/          FileStation path-mapping tests
+│   ├── client/           Pure queue-source/window tests
 │   ├── config/           DSM frontend URL parsing tests
 │   ├── search/           Parser and SQLite search tests
 │   ├── ui/               Playwright browser tests
 │   ├── fixtures/         Synthetic album/track data and UI fixture server
-│   └── helpers/          Test server and HTTP helpers
+│   └── helpers/          Test server, HTTP helpers, and test env isolation
 ├── Caddyfile            Optional LAN reverse proxy with streaming support
 ├── docs/native-playback.md  Native playback design, API findings, and stages
 ├── .github/workflows/    CI: lint, typecheck, backend and UI tests

@@ -364,6 +364,99 @@ test('GET /api/tracks lists, searches, sorts, and paginates', async () => {
   assert.equal(unsupported.tracks[0]?.playable, false);
 });
 
+test('GET /api/playback/tracks flattens album results to tracks', async () => {
+  const query = encodeURIComponent('artist:"the beatles"');
+  const tracksMode = await trackSearch(
+    main.server.baseUrl,
+    `/api/playback/tracks?mode=tracks&q=${query}&limit=200`,
+  );
+  const directTracks = await trackSearch(
+    main.server.baseUrl,
+    `/api/tracks?q=${query}&limit=200`,
+  );
+  assert.equal(tracksMode.total, directTracks.total);
+  assert.deepEqual(
+    tracksMode.tracks.map((track) => track.id),
+    directTracks.tracks.map((track) => track.id),
+  );
+
+  const albumsMode = await trackSearch(
+    main.server.baseUrl,
+    `/api/playback/tracks?mode=albums&q=${query}&limit=200`,
+  );
+  assert.equal(albumsMode.total, 20);
+  assert.equal(albumsMode.tracks.length, 20);
+  assert.ok(
+    albumsMode.tracks.every((track) => track.album === 'Abbey Road'),
+  );
+  assert.equal(albumsMode.tracks[0]?.title, 'Come Together');
+  assert.equal(
+    new Set(albumsMode.tracks.map((track) => track.albumKey)).size,
+    1,
+  );
+
+  const firstPage = await trackSearch(
+    main.server.baseUrl,
+    `/api/playback/tracks?mode=albums&q=${query}&limit=5&offset=0`,
+  );
+  const secondPage = await trackSearch(
+    main.server.baseUrl,
+    `/api/playback/tracks?mode=albums&q=${query}&limit=5&offset=5`,
+  );
+  assert.equal(firstPage.tracks.length, 5);
+  assert.equal(secondPage.tracks.length, 5);
+  assert.equal(firstPage.total, 20);
+  assert.equal(secondPage.total, 20);
+  const ids = new Set(firstPage.tracks.map((track) => track.id));
+  assert.ok(secondPage.tracks.every((track) => !ids.has(track.id)));
+
+  const empty = await trackSearch(
+    main.server.baseUrl,
+    '/api/playback/tracks?mode=albums&limit=1',
+  );
+  assert.equal(empty.total, main.context.index.trackCount);
+
+  const invalid = await json<{ error: string }>(
+    main.server.baseUrl,
+    '/api/playback/tracks?mode=singles',
+  );
+  assert.equal(invalid.response.status, 400);
+
+  const clamped = await trackSearch(
+    main.server.baseUrl,
+    '/api/playback/tracks?mode=tracks&limit=0',
+  );
+  assert.equal(clamped.limit, 1);
+});
+
+test('album-mode playback preserves album order and flattens each album', async () => {
+  const query = encodeURIComponent('genre:jazz');
+  const albumResponse = await albums(
+    main.server.baseUrl,
+    `/api/albums?q=${query}&sort=album&limit=200`,
+  );
+  const playback = await trackSearch(
+    main.server.baseUrl,
+    `/api/playback/tracks?mode=albums&q=${query}&sort=album&limit=200`,
+  );
+
+  const seen: string[] = [];
+  for (const track of playback.tracks) {
+    if (seen.at(-1) !== track.albumKey) seen.push(track.albumKey);
+  }
+  assert.deepEqual(
+    seen,
+    albumResponse.albums.map((album) => album.key),
+  );
+
+  for (const album of albumResponse.albums) {
+    const tracks = playback.tracks.filter(
+      (track) => track.albumKey === album.key,
+    );
+    assert.equal(tracks.length, album.trackCount);
+  }
+});
+
 test('GET /api/tracks uses album-level genre filters', async () => {
   const jazzTracks = await trackSearch(
     main.server.baseUrl,

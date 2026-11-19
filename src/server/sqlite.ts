@@ -332,6 +332,20 @@ const TRACK_ORDER_BY: Readonly<Record<SortKey, string>> = {
     't.date DESC, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
 };
 
+/**
+ * Albums-mode playback flattens matching albums into their tracks. Albums keep
+ * the normal album sort order, and each album's tracks keep disc/track order.
+ */
+const ALBUM_TRACK_ORDER_BY: Readonly<Record<SortKey, string>> = {
+  artist:
+    'a.artist_rank ASC, a.album_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
+  album:
+    'a.album_rank ASC, a.artist_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
+  year: 'a.year DESC, a.album_rank ASC, a.artist_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
+  recent:
+    'a.latest DESC, a.album_rank ASC, a.artist_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
+};
+
 /** Album fields shared by the listing and the single-album lookup. */
 const ALBUM_SUMMARY_COLUMNS = `
   a.key, a.album, a.artist, a.year, a.track_count, a.duration,
@@ -440,6 +454,152 @@ function mapAlbumRow(row: DbAlbumRow): AlbumSummary {
     regions: parseStringArray(row.regions),
     series: parseStringArray(row.series),
     comments: parseStringArray(row.comments),
+  };
+}
+
+function mapTrackSummaryRow(row: DbTrackRow): TrackSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    artist: row.artist,
+    artists: parseArtists(row.artist),
+    albumArtist: row.album_artist,
+    albumKey: row.album_key,
+    album: row.album,
+    sourceAlbum: row.source_album,
+    year: row.year,
+    track: row.track,
+    disc: row.disc,
+    duration: row.duration,
+    playable: row.playable === 1,
+    genres: parseStringArray(row.genre_names),
+    regions: parseStringArray(row.region_names),
+  };
+}
+
+interface AlbumFilter {
+  withSql: string;
+  whereSql: string;
+  params: Array<string | number>;
+}
+
+/**
+ * Album-mode search filter shared by the album listing and album-mode
+ * playback flattening. Keeping one implementation makes Play all use exactly
+ * the same result set as the visible album results.
+ */
+function buildAlbumFilter(q: string): AlbumFilter {
+  const where: string[] = [];
+  const params: Array<string | number> = [];
+
+  const trimmedQuery = q.trim();
+  let searchAst = trimmedQuery ? parseSearchQuery(q) : null;
+  if (!searchAst && trimmedQuery) {
+    // Preserve the pre-syntax behavior for incomplete or malformed input.
+    searchAst = legacySearchNode(trimmedQuery);
+  }
+
+  const ctes: string[] = [];
+  const cteParams: string[] = [];
+
+  const termSql = (term: SearchTermNode): string => {
+    // Genre/region are categorical: match the tag table exactly rather than
+    // using the substring FTS columns, so facet counts and query totals agree.
+    if (term.field === 'genre' || term.field === 'region') {
+      const key =
+        term.field === 'genre'
+          ? genreKey(term.value)
+          : regionKey(term.value);
+      if (!key || CONTROL_CHARS.test(key)) return '0';
+
+      const table =
+        term.field === 'genre' ? 'album_genres' : 'album_regions';
+      const column =
+        term.field === 'genre' ? 'genre_key' : 'region_key';
+      params.push(key);
+      return `EXISTS (
+        SELECT 1 FROM ${table} tag
+         WHERE tag.album_id = a.id AND tag.${column} = ?
+      )`;
+    }
+
+    if (term.field === 'serie') {
+      const key = foldSearch(term.value).replace(/\s+/g, ' ').trim();
+      if (!key || CONTROL_CHARS.test(key)) return '0';
+      params.push(key);
+      return `EXISTS (
+        SELECT 1 FROM album_series ase
+         WHERE ase.album_id = a.id AND ase.serie_key = ?
+      )`;
+    }
+
+    // `track:` matches albums that contain a matching track title. The
+    // track index is separate, so this uses its own FTS materialization.
+    if (term.field === 'track') {
+      const phrase = foldSearch(term.value).trim();
+      if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
+      if ([...phrase].length >= 3) {
+        const name = `track_term_${ctes.length}`;
+        ctes.push(
+          `${name} AS MATERIALIZED (
+             SELECT rowid FROM track_search
+              WHERE track_search MATCH ?
+           )`,
+        );
+        cteParams.push(`search_title : ${ftsPhrase(phrase)}`);
+        return `EXISTS (
+          SELECT 1 FROM tracks tr
+            JOIN ${name} ON ${name}.rowid = tr.id
+           WHERE tr.album_id = a.id
+        )`;
+      }
+      params.push(phrase);
+      return `EXISTS (
+        SELECT 1 FROM tracks tr
+         WHERE tr.album_id = a.id AND instr(tr.search_title, ?) > 0
+      )`;
+    }
+
+    const phrase = foldSearch(term.value).trim();
+    if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
+
+    const column = SEARCH_FIELD_COLUMNS[term.field];
+    if (!column) return '0';
+    if ([...phrase].length >= 3) {
+      const name = `search_term_${ctes.length}`;
+      ctes.push(
+        `${name} AS MATERIALIZED (
+           SELECT rowid FROM album_search
+            WHERE album_search MATCH ?
+         )`,
+      );
+      cteParams.push(`${column} : ${ftsPhrase(phrase)}`);
+      return `EXISTS (SELECT 1 FROM ${name} WHERE ${name}.rowid = a.id)`;
+    }
+
+    // Trigram indexes only phrases of three or more characters; shorter
+    // phrases fall back to an exact substring scan of the folded column.
+    params.push(phrase);
+    return `instr(a.${column}, ?) > 0`;
+  };
+
+  const nodeSql = (node: SearchNode): string => {
+    switch (node.kind) {
+      case 'term':
+        return termSql(node);
+      case 'and':
+        return `(${nodeSql(node.left)} AND ${nodeSql(node.right)})`;
+      case 'or':
+        return `(${nodeSql(node.left)} OR ${nodeSql(node.right)})`;
+    }
+  };
+
+  if (searchAst) where.push(nodeSql(searchAst));
+
+  return {
+    withSql: ctes.length > 0 ? `WITH ${ctes.join(', ')} ` : '',
+    whereSql: where.length > 0 ? `WHERE ${where.join(' AND ')}` : '',
+    params: [...cteParams, ...params],
   };
 }
 
@@ -1144,116 +1304,11 @@ export class SqliteIndex {
   }
 
   queryAlbums(query: AlbumsQuery): AlbumsResult {
-    const where: string[] = [];
-    const params: Array<string | number> = [];
-
-    const trimmedQuery = query.q.trim();
-    let searchAst = trimmedQuery ? parseSearchQuery(query.q) : null;
-    if (!searchAst && trimmedQuery) {
-      // Preserve the pre-syntax behavior for incomplete or malformed input.
-      searchAst = legacySearchNode(trimmedQuery);
-    }
-
-    const ctes: string[] = [];
-    const cteParams: string[] = [];
-
-    const termSql = (term: SearchTermNode): string => {
-      // Genre/region are categorical: match the tag table exactly rather than
-      // using the substring FTS columns, so facet counts and query totals agree.
-      if (term.field === 'genre' || term.field === 'region') {
-        const key =
-          term.field === 'genre'
-            ? genreKey(term.value)
-            : regionKey(term.value);
-        if (!key || CONTROL_CHARS.test(key)) return '0';
-
-        const table =
-          term.field === 'genre' ? 'album_genres' : 'album_regions';
-        const column =
-          term.field === 'genre' ? 'genre_key' : 'region_key';
-        params.push(key);
-        return `EXISTS (
-          SELECT 1 FROM ${table} tag
-           WHERE tag.album_id = a.id AND tag.${column} = ?
-        )`;
-      }
-
-      if (term.field === 'serie') {
-        const key = foldSearch(term.value).replace(/\s+/g, ' ').trim();
-        if (!key || CONTROL_CHARS.test(key)) return '0';
-        params.push(key);
-        return `EXISTS (
-          SELECT 1 FROM album_series ase
-           WHERE ase.album_id = a.id AND ase.serie_key = ?
-        )`;
-      }
-
-      // `track:` matches albums that contain a matching track title. The
-      // track index is separate, so this uses its own FTS materialization.
-      if (term.field === 'track') {
-        const phrase = foldSearch(term.value).trim();
-        if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
-        if ([...phrase].length >= 3) {
-          const name = `track_term_${ctes.length}`;
-          ctes.push(
-            `${name} AS MATERIALIZED (
-               SELECT rowid FROM track_search
-                WHERE track_search MATCH ?
-             )`,
-          );
-          cteParams.push(`search_title : ${ftsPhrase(phrase)}`);
-          return `EXISTS (
-            SELECT 1 FROM tracks tr
-              JOIN ${name} ON ${name}.rowid = tr.id
-             WHERE tr.album_id = a.id
-          )`;
-        }
-        params.push(phrase);
-        return `EXISTS (
-          SELECT 1 FROM tracks tr
-           WHERE tr.album_id = a.id AND instr(tr.search_title, ?) > 0
-        )`;
-      }
-
-      const phrase = foldSearch(term.value).trim();
-      if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
-
-      const column = SEARCH_FIELD_COLUMNS[term.field];
-      if (!column) return '0';
-      if ([...phrase].length >= 3) {
-        const name = `search_term_${ctes.length}`;
-        ctes.push(
-          `${name} AS MATERIALIZED (
-             SELECT rowid FROM album_search
-              WHERE album_search MATCH ?
-           )`,
-        );
-        cteParams.push(`${column} : ${ftsPhrase(phrase)}`);
-        return `EXISTS (SELECT 1 FROM ${name} WHERE ${name}.rowid = a.id)`;
-      }
-
-      // Trigram indexes only phrases of three or more characters; shorter
-      // phrases fall back to an exact substring scan of the folded column.
-      params.push(phrase);
-      return `instr(a.${column}, ?) > 0`;
-    };
-
-    const nodeSql = (node: SearchNode): string => {
-      switch (node.kind) {
-        case 'term':
-          return termSql(node);
-        case 'and':
-          return `(${nodeSql(node.left)} AND ${nodeSql(node.right)})`;
-        case 'or':
-          return `(${nodeSql(node.left)} OR ${nodeSql(node.right)})`;
-      }
-    };
-
-    if (searchAst) where.push(nodeSql(searchAst));
-
-    const withSql = ctes.length > 0 ? `WITH ${ctes.join(', ')} ` : '';
-    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
-    const boundParams: Array<string | number> = [...cteParams, ...params];
+    const {
+      withSql,
+      whereSql,
+      params: boundParams,
+    } = buildAlbumFilter(query.q);
 
     const countRow = this.db
       .prepare(
@@ -1536,25 +1591,55 @@ export class SqliteIndex {
       )
       .all(...boundParams, query.limit, query.offset) as unknown as DbTrackRow[];
 
-    const tracks: TrackSummary[] = rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      artist: row.artist,
-      artists: parseArtists(row.artist),
-      albumArtist: row.album_artist,
-      albumKey: row.album_key,
-      album: row.album,
-      sourceAlbum: row.source_album,
-      year: row.year,
-      track: row.track,
-      disc: row.disc,
-      duration: row.duration,
-      playable: row.playable === 1,
-      genres: parseStringArray(row.genre_names),
-      regions: parseStringArray(row.region_names),
-    }));
+    const tracks: TrackSummary[] = rows.map(mapTrackSummaryRow);
 
     return { total, tracks, libraryVersion: this.version };
+  }
+
+  /**
+   * Tracks belonging to the albums matched by an album-mode search. Used by
+   * Play all so the client receives one flat, track-level page instead of
+   * fetching every album's track list.
+   */
+  queryAlbumTracks(query: TracksQuery): TracksResult {
+    const {
+      withSql,
+      whereSql,
+      params,
+    } = buildAlbumFilter(query.q);
+
+    const countRow = this.db
+      .prepare(
+        `${withSql}SELECT COUNT(*) AS total
+           FROM albums a
+           JOIN tracks t ON t.album_id = a.id
+           ${whereSql}`,
+      )
+      .get(...params);
+    const total = Number(countRow?.total ?? 0);
+
+    const rows = this.db
+      .prepare(
+        `${withSql}SELECT
+           t.id, t.title,
+           COALESCE(NULLIF(trim(t.artist), ''), a.artist) AS artist,
+           a.artist AS album_artist,
+           t.source_album, t.year, t.track, t.disc, t.duration, t.playable,
+           t.genre_names, t.region_names,
+           a.key AS album_key, a.album AS album
+         FROM albums a
+         JOIN tracks t ON t.album_id = a.id
+         ${whereSql}
+         ORDER BY ${ALBUM_TRACK_ORDER_BY[query.sort]}
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, query.limit, query.offset) as unknown as DbTrackRow[];
+
+    return {
+      total,
+      tracks: rows.map(mapTrackSummaryRow),
+      libraryVersion: this.version,
+    };
   }
 
   sourceAlbumsFor(album: string, artist: string): string[] {

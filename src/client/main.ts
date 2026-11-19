@@ -4,7 +4,15 @@ import { Coverflow, type CoverflowItem } from '@northstarxyzz/coverflow';
 import { unsupportedFormatBadge } from './badges.js';
 import { createCover, hashString } from './cover.js';
 import type { AlbumMapHandle, AlbumMapPlacement } from './map.js';
-import { player, type PlayerTrack } from './player.js';
+import {
+  player,
+  type PlayerTrack,
+  type QueuePageFetcher,
+} from './player.js';
+import {
+  createQueueSource,
+  QUEUE_REFILL_THRESHOLD,
+} from './queueSource.js';
 import {
   isFilterMode,
   isSortKey,
@@ -173,6 +181,8 @@ const modeAlbumsButton = $<HTMLButtonElement>('#mode-albums');
 const modeTracksButton = $<HTMLButtonElement>('#mode-tracks');
 const statsEl = $('#library-stats');
 const resultSummary = $('#result-summary');
+const playAllButton = $<HTMLButtonElement>('#play-all');
+const playAllLabel = $('#play-all-label');
 const albumGrid = $('#album-grid');
 const coverflowEl = $('#album-coverflow');
 const coverflowCaption = $('#coverflow-caption');
@@ -239,6 +249,9 @@ let searchSessionActive = false;
 let albumAbort: AbortController | null = null;
 let trackAbort: AbortController | null = null;
 let playerRestored = false;
+let resultsLoading = false;
+let playAllStarting = false;
+let playAllToken = 0;
 let retryTimer: number | undefined;
 let statusPollTimer: number | undefined;
 let suppressDialogCloseHistory = false;
@@ -808,6 +821,7 @@ function renderSession(): void {
     sessionButton.setAttribute('aria-label', 'Sign in to Synology');
     sessionButton.classList.remove('is-authenticated');
   }
+  updatePlayAllButton();
 }
 
 async function loadSession(): Promise<void> {
@@ -847,11 +861,32 @@ interface AlbumTrackContext extends AlbumPlaybackContext {
   commonRegions: Set<string>;
 }
 
+const fetchQueuePage: QueuePageFetcher = async (
+  descriptor,
+  offset,
+  limit,
+  signal,
+) => {
+  const response = await api.playbackTracks(
+    { ...descriptor, offset, limit },
+    signal,
+  );
+  return {
+    tracks: response.tracks.map(playerTrackFromSummary),
+    total: response.total,
+    libraryVersion: response.libraryVersion,
+  };
+};
+
 function syncPlayerConfig(): void {
   player.configure({
     nativeEnabled: state.nativePlaybackEnabled,
     fallbackEnabled: state.audioStationFallbackEnabled,
     signedIn: state.session.authenticated,
+    queueWindowSize: PAGE_SIZE,
+    queueRefillThreshold: QUEUE_REFILL_THRESHOLD,
+    fetchQueuePage,
+    onQueueCleared: cancelPendingPlayAll,
     ensureAuthenticated: ensurePlayerAuthenticated,
   });
   if (!playerRestored && state.nativePlaybackEnabled) {
@@ -917,6 +952,85 @@ function playerTrackFromSummary(track: TrackSummary): PlayerTrack {
   };
 }
 
+function cancelPendingPlayAll(): void {
+  playAllToken += 1;
+  playAllStarting = false;
+  updatePlayAllButton();
+}
+
+function updatePlayAllButton(): void {
+  const count =
+    state.searchMode === 'tracks' ? state.trackTotal : state.total;
+  const visible =
+    playbackActionsAvailable() &&
+    state.nativePlaybackEnabled &&
+    count > 0 &&
+    !resultsLoading;
+  playAllButton.hidden = !visible;
+  if (!visible) return;
+
+  playAllButton.disabled = playAllStarting;
+  playAllLabel.textContent = playAllStarting ? 'Starting…' : 'Play all';
+  const label =
+    state.searchMode === 'tracks'
+      ? 'Play all matching tracks'
+      : 'Play all tracks in the matching albums';
+  playAllButton.setAttribute('aria-label', label);
+  playAllButton.title = label;
+}
+
+async function playAllSearchResults(): Promise<void> {
+  if (playAllStarting) return;
+  if (!state.nativePlaybackEnabled) return;
+
+  if (!state.session.authenticated) {
+    state.pendingPlayAction = () => playAllSearchResults();
+    openLoginDialog();
+    return;
+  }
+
+  const count =
+    state.searchMode === 'tracks' ? state.trackTotal : state.total;
+  if (count <= 0) return;
+
+  const descriptor = {
+    mode: state.searchMode,
+    q: state.q,
+    sort: state.sort,
+  };
+  const token = ++playAllToken;
+  playAllStarting = true;
+  updatePlayAllButton();
+
+  try {
+    const response = await api.playbackTracks({
+      ...descriptor,
+      offset: 0,
+      limit: PAGE_SIZE,
+    });
+    if (token !== playAllToken) return;
+    if (response.tracks.length === 0) {
+      showError('No tracks were found for this search.');
+      return;
+    }
+    const tracks = response.tracks.map(playerTrackFromSummary);
+    const source = createQueueSource(descriptor, {
+      requested: PAGE_SIZE,
+      received: tracks.length,
+      total: response.total,
+      libraryVersion: response.libraryVersion,
+    });
+    player.playAll(source, tracks, 0);
+  } catch (error) {
+    if (token === playAllToken) showError(describe(error));
+  } finally {
+    if (token === playAllToken) {
+      playAllStarting = false;
+      updatePlayAllButton();
+    }
+  }
+}
+
 async function loadAlbumTracks(
   albumKey: string,
   query = '',
@@ -933,6 +1047,7 @@ async function playAlbumNatively(
   album: AlbumSummary,
   query: string | null = null,
 ): Promise<void> {
+  cancelPendingPlayAll();
   try {
     const response = await loadAlbumTracks(album.key, query ?? '');
     const tracks = query
@@ -962,6 +1077,7 @@ function playTrackFromAlbumContext(
   context: AlbumPlaybackContext,
   musicId: number,
 ): void {
+  cancelPendingPlayAll();
   const index = context.tracks.findIndex((track) => track.id === musicId);
   if (index < 0) return;
   const items = context.tracks
@@ -978,6 +1094,7 @@ function playTrackFromAlbumContext(
 }
 
 async function playTrackFromSearch(track: TrackSummary): Promise<void> {
+  cancelPendingPlayAll();
   try {
     const response = await loadAlbumTracks(track.albumKey);
     const index = response.tracks.findIndex((entry) => entry.id === track.id);
@@ -1120,6 +1237,7 @@ async function submitLogin(): Promise<void> {
 async function signOut(): Promise<void> {
   try {
     state.session = await api.logout();
+    cancelPendingPlayAll();
     player.clear();
     syncPlayerConfig();
     state.pendingPlayAction = null;
@@ -1381,6 +1499,8 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
   const sequence = ++requestSequence;
 
   albumsLoading = true;
+  resultsLoading = true;
+  updatePlayAllButton();
   if (reset) {
     state.albums = [];
     loadMoreButton.hidden = true;
@@ -1438,6 +1558,8 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
       albumsLoading = false;
     }
     if (sequence === requestSequence) {
+      resultsLoading = false;
+      updatePlayAllButton();
       albumGrid.removeAttribute('aria-busy');
       coverflowEl.removeAttribute('aria-busy');
       loadMoreButton.disabled = false;
@@ -1625,6 +1747,8 @@ async function loadTrackResults(reset: boolean): Promise<number | null> {
   const controller = new AbortController();
   trackAbort = controller;
   const sequence = ++requestSequence;
+  resultsLoading = true;
+  updatePlayAllButton();
 
   if (reset) {
     state.tracks = [];
@@ -1681,6 +1805,8 @@ async function loadTrackResults(reset: boolean): Promise<number | null> {
   } finally {
     if (trackAbort === controller) trackAbort = null;
     if (sequence === requestSequence) {
+      resultsLoading = false;
+      updatePlayAllButton();
       trackList.removeAttribute('aria-busy');
       loadMoreButton.disabled = false;
       updateRefreshControl();
@@ -1718,6 +1844,7 @@ function updateSummary(): void {
       ? `${formatCount(state.total)} of ${formatCount(state.totalAlbums)} albums`
       : `${formatCount(state.total)} albums`,
   );
+  updatePlayAllButton();
 }
 
 function albumMeta(album: AlbumSummary): string {
@@ -3219,6 +3346,7 @@ function bindEvents(): void {
 
   modeAlbumsButton.addEventListener('click', () => setSearchMode('albums'));
   modeTracksButton.addEventListener('click', () => setSearchMode('tracks'));
+  playAllButton.addEventListener('click', () => void playAllSearchResults());
 
   mapUnplacedToggle.addEventListener('click', () => {
     const expanded =

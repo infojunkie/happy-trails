@@ -1,6 +1,15 @@
 import { unsupportedFormatBadge } from './badges.js';
 import { createCover } from './cover.js';
 import { $, el } from './dom.js';
+import {
+  commitPage,
+  isStoredQueueSource,
+  planRefill,
+  QUEUE_REFILL_THRESHOLD,
+  QUEUE_WINDOW_SIZE,
+  type QueueSourceDescriptor,
+  type QueueSourceState,
+} from './queueSource.js';
 
 /** One queue entry. `musicId` is the id consumed by `/api/stream/:id`. */
 export interface PlayerTrack {
@@ -20,11 +29,30 @@ interface QueueItem extends PlayerTrack {
   uid: number;
 }
 
+/** One page fetched for a Play all source. */
+export interface QueuePage {
+  tracks: PlayerTrack[];
+  total: number;
+  libraryVersion: number;
+}
+
+export type QueuePageFetcher = (
+  descriptor: QueueSourceDescriptor,
+  offset: number,
+  limit: number,
+  signal: AbortSignal,
+) => Promise<QueuePage>;
+
 interface PlayerConfig {
   nativeEnabled: boolean;
   fallbackEnabled: boolean;
   /** The footer (including its transport controls) is only shown signed in. */
   signedIn: boolean;
+  queueWindowSize: number;
+  queueRefillThreshold: number;
+  fetchQueuePage: QueuePageFetcher | null;
+  /** Lets the app invalidate a pending Play all start when the queue clears. */
+  onQueueCleared: () => void;
   /**
    * Returns true when a stream request may be made. When it returns false the
    * caller is expected to open the sign-in dialog and resume later.
@@ -50,6 +78,8 @@ interface StoredPlayerState {
   queue: StoredPlayerTrack[];
   currentIndex: number;
   position: number;
+  /** Present when the queue came from a Play all source. */
+  source?: QueueSourceState;
 }
 
 const STORAGE_KEY = 'happy-trails.player';
@@ -78,6 +108,12 @@ function isStoredState(value: unknown): value is StoredPlayerState {
   if (!Array.isArray(record.queue) || record.queue.length === 0) return false;
   if (typeof record.currentIndex !== 'number') return false;
   if (typeof record.position !== 'number') return false;
+  if (
+    record.source !== undefined &&
+    !isStoredQueueSource(record.source)
+  ) {
+    return false;
+  }
 
   return record.queue.every((item) => {
     if (typeof item !== 'object' || item === null) return false;
@@ -159,11 +195,19 @@ class Player {
   private muted = false;
   private lastVolume = 1;
   private lastPositionSyncAt = 0;
+  private source: QueueSourceState | null = null;
+  private refilling = false;
+  private refillAbort: AbortController | null = null;
+  private refillToken = 0;
   private saveTimer: number | undefined;
   private config: PlayerConfig = {
     nativeEnabled: false,
     fallbackEnabled: false,
     signedIn: false,
+    queueWindowSize: QUEUE_WINDOW_SIZE,
+    queueRefillThreshold: QUEUE_REFILL_THRESHOLD,
+    fetchQueuePage: null,
+    onQueueCleared: () => {},
     ensureAuthenticated: () => true,
   };
 
@@ -198,7 +242,7 @@ class Player {
     });
 
     queueToggle.addEventListener('click', () => {
-      this.setQueueOpen(queuePanel.hidden);
+      this.setQueueOpen(queuePanel.hidden !== false);
     });
     queueClose.addEventListener('click', () => {
       this.setQueueOpen(false);
@@ -209,7 +253,10 @@ class Player {
     document.addEventListener('click', (event) => {
       if (queuePanel.hidden) return;
       if (!(event.target instanceof Node)) return;
-      if (footer.contains(event.target)) return;
+      // The queue row is rebuilt by selectItem/removeItem, so the target may be
+      // detached by the time the event bubbles here. The composed path still
+      // records that the click started inside this footer.
+      if (event.composedPath().includes(footer)) return;
       this.setQueueOpen(false);
     });
     document.addEventListener('keydown', (event) => {
@@ -257,6 +304,7 @@ class Player {
   configure(config: Partial<PlayerConfig>): void {
     this.config = { ...this.config, ...config };
     if (!this.config.nativeEnabled || !this.config.signedIn) {
+      this.cancelRefill();
       this.stopAudio();
       this.mode = 'paused';
       this.clearMediaSession();
@@ -293,6 +341,7 @@ class Player {
     this.restorePosition = Number.isFinite(stored.position)
       ? Math.max(0, stored.position)
       : 0;
+    this.source = stored.source ?? null;
     this.mode = 'paused';
     this.error = null;
     this.renderAll();
@@ -300,7 +349,28 @@ class Player {
 
   /** Replace the queue and start playing at `startIndex`. */
   playTracks(tracks: PlayerTrack[], startIndex = 0): void {
+    this.cancelRefill();
+    this.source = null;
     this.adoptQueue(tracks, startIndex);
+    this.save();
+    if (!this.currentItem) return;
+    if (!this.guardAuth()) return;
+    this.startCurrent(0, true);
+  }
+
+  /**
+   * Start a lazily refilled queue from a Play all source. `tracks` is the first
+   * fetched page and `source` carries the original query snapshot/cursor.
+   */
+  playAll(
+    source: QueueSourceState,
+    tracks: PlayerTrack[],
+    startIndex = 0,
+  ): void {
+    this.cancelRefill();
+    this.adoptQueue(tracks, startIndex);
+    this.source = this.queue.length > 0 ? source : null;
+    this.save();
     if (!this.currentItem) return;
     if (!this.guardAuth()) return;
     this.startCurrent(0, true);
@@ -392,6 +462,8 @@ class Player {
   }
 
   clear(): void {
+    this.cancelRefill();
+    this.source = null;
     this.stopAudio();
     this.queue = [];
     this.currentUid = null;
@@ -408,6 +480,85 @@ class Player {
       // Storage may be unavailable; the in-memory player still clears.
     }
     this.renderAll();
+    this.config.onQueueCleared();
+  }
+
+  private cancelRefill(): void {
+    this.refillToken += 1;
+    this.refillAbort?.abort();
+    this.refillAbort = null;
+    this.refilling = false;
+  }
+
+  /**
+   * Keep a Play all queue near its visible window. History is removed only
+   * after a page is successfully fetched, so a failed request cannot lose
+   * already-queued tracks.
+   */
+  private maybeRefill(): void {
+    if (this.refilling || !this.source || !this.config.fetchQueuePage) return;
+    if (!this.config.nativeEnabled || !this.config.signedIn) return;
+
+    const source = this.source;
+    const plan = planRefill(
+      this.queue.length,
+      this.currentIndex,
+      source,
+      this.config.queueWindowSize,
+      this.config.queueRefillThreshold,
+    );
+    if (!plan) return;
+
+    const token = ++this.refillToken;
+    const controller = new AbortController();
+    this.refilling = true;
+    this.refillAbort = controller;
+    const requested = plan.fetchLimit;
+
+    void this.config
+      .fetchQueuePage(
+        source.descriptor,
+        source.nextOffset,
+        requested,
+        controller.signal,
+      )
+      .then((page) => {
+        if (token !== this.refillToken || this.source !== source) return;
+
+        // Recompute the trim against the current item: the user may have
+        // skipped ahead while the page was in flight.
+        const trimCount = Math.min(
+          Math.max(this.currentIndex, 0),
+          this.queue.length,
+        );
+        if (trimCount > 0) this.queue.splice(0, trimCount);
+        this.queue.push(
+          ...page.tracks.map((track) => ({
+            ...track,
+            uid: ++this.uidSequence,
+          })),
+        );
+        this.source = commitPage(source, {
+          requested,
+          received: page.tracks.length,
+          total: page.total,
+          libraryVersion: page.libraryVersion,
+        });
+        this.renderQueue();
+        this.renderState();
+        this.preloadNext();
+        this.save();
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || token !== this.refillToken) return;
+        // Keep the queue and cursor intact; a later trigger retries.
+        console.error('[player] could not refill the play queue:', error);
+      })
+      .finally(() => {
+        if (token !== this.refillToken) return;
+        this.refilling = false;
+        this.refillAbort = null;
+      });
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
@@ -705,11 +856,13 @@ class Player {
       window.setTimeout(() => {
         if (generation === this.generation && audio.readyState < 1) begin();
       }, 5_000);
+      this.maybeRefill();
       return;
     }
 
     if (autoplay) this.playCurrent();
     else this.markPaused();
+    this.maybeRefill();
   }
 
   private playCurrent(): void {
@@ -749,6 +902,7 @@ class Player {
     this.preloadNext();
     this.renderProgress();
     this.updatePositionState(true);
+    this.maybeRefill();
     this.save();
   }
 
@@ -835,6 +989,7 @@ class Player {
       this.renderAll();
       if (autoplay) this.playCurrent();
       else this.markPaused();
+      this.maybeRefill();
       return;
     }
 
@@ -842,6 +997,7 @@ class Player {
     this.mode = 'loading';
     this.renderAll();
     this.startCurrent(0, autoplay);
+    this.maybeRefill();
   }
 
   private preloadNext(): void {
@@ -903,7 +1059,6 @@ class Player {
   private selectItem(uid: number): void {
     if (!this.guardAuth()) return;
     this.goToUid(uid, true);
-    this.setQueueOpen(false);
   }
 
   private moveBy(uid: number, delta: number): void {
@@ -933,6 +1088,7 @@ class Player {
     this.renderQueue();
     this.renderState();
     this.preloadNext();
+    this.maybeRefill();
     this.save();
   }
 
@@ -999,6 +1155,7 @@ class Player {
         })),
         currentIndex: Math.max(this.currentIndex, 0),
         position: Number.isFinite(position) ? position : 0,
+        ...(this.source ? { source: this.source } : {}),
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch {

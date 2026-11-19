@@ -647,6 +647,7 @@ export async function createFixtureContext(
       series: () => index.series(),
       queryAlbums: (query) => index.queryAlbums(query),
       queryTracks: (query) => index.queryTracks(query),
+      queryAlbumTracks: (query) => index.queryAlbumTracks(query),
       albumForKey: (key) => index.albumForKey(key),
       sourceAlbumsFor: (album, artist) =>
         index.sourceAlbumsFor(album, artist),

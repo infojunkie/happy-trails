@@ -337,9 +337,15 @@
 
       <main class="content">
         <div class="results-header">
-          <p id="result-summary" class="result-summary" aria-live="polite">
-            Loading library…
-          </p>
+          <div class="results-summary-group">
+            <p id="result-summary" class="result-summary" aria-live="polite">
+              Loading library…
+            </p>
+            <button id="play-all" class="play-all" type="button" hidden>
+              <span aria-hidden="true">▶</span>
+              <span id="play-all-label">Play all</span>
+            </button>
+          </div>
           <div class="results-tools">
             <div
               id="active-filters"

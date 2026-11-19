@@ -3,6 +3,11 @@ import { test, expect, type Page } from '@playwright/test';
 const WAV_SECONDS = 30;
 const WAV_RATE = 8_000;
 
+interface StoredSource {
+  descriptor?: { mode?: string; q?: string };
+  nextOffset?: number;
+}
+
 /**
  * A small, valid mono WAV so the browser has real audio to play. It is
  * intentionally silent (all-zero PCM): the tests assert the media clock and
@@ -142,6 +147,196 @@ async function blurActiveElement(page: Page): Promise<void> {
   });
 }
 
+function assertURL(value: unknown): asserts value is URL {
+  expect(value).toBeInstanceOf(URL);
+  if (!(value instanceof URL)) throw new Error('Expected a URL');
+}
+
+test('Play all in Tracks mode fills the window from the full result set', async ({
+  page,
+}) => {
+  await signIn(page);
+  await routeAudio(page);
+  const requests: URL[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/playback/tracks')) {
+      requests.push(new URL(request.url()));
+    }
+  });
+
+  await page.goto('/?view=tracks');
+  await expect(page.locator('.track-result').first()).toBeVisible();
+  const firstTitle = await page
+    .locator('.track-result-title')
+    .first()
+    .innerText();
+
+  const playAll = page.locator('#play-all');
+  await expect(playAll).toBeVisible();
+  await playAll.click();
+
+  await expect(page.locator('#player-title')).toHaveText(firstTitle);
+  await expect(page.locator('#player-queue-count')).toHaveText('48');
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (localStorage.getItem('happy-trails.player') ?? '').includes(
+          '"source"',
+        ),
+      ),
+    )
+    .toBe(true);
+
+  const storedSource = (await page.evaluate(() => {
+    const raw = localStorage.getItem('happy-trails.player');
+    if (!raw) return null;
+    return JSON.parse(raw).source ?? null;
+  })) as StoredSource | null;
+  expect(storedSource?.descriptor?.mode).toBe('tracks');
+  expect(storedSource?.descriptor?.q).toBe('');
+  expect(storedSource?.nextOffset).toBe(48);
+
+  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  const initial = requests[0];
+  assertURL(initial);
+  expect(initial?.searchParams.get('mode')).toBe('tracks');
+  expect(initial?.searchParams.get('offset')).toBe('0');
+  expect(initial?.searchParams.get('limit')).toBe('48');
+  expect(initial?.searchParams.get('q')).toBeNull();
+
+  await page.reload();
+  await expect(page.locator('#player')).toBeVisible();
+  await expect(page.locator('#player-title')).toHaveText(firstTitle);
+  await expect(page.locator('#player-queue-count')).toHaveText('48');
+  expect(
+    await page.evaluate(() => {
+      const raw = localStorage.getItem('happy-trails.player');
+      if (!raw) return null;
+      return JSON.parse(raw).source?.descriptor?.mode ?? null;
+    }),
+  ).toBe('tracks');
+});
+
+test('Play all in Albums mode queues every track of matching albums', async ({
+  page,
+}) => {
+  await signIn(page);
+  await routeAudio(page);
+  const requests: URL[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/playback/tracks')) {
+      requests.push(new URL(request.url()));
+    }
+  });
+
+  await page.goto(`/?q=${encodeURIComponent('artist:"the beatles"')}`);
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await page.locator('#play-all').click();
+
+  await expect(page.locator('#player-title')).toHaveText('Come Together');
+  await expect(page.locator('#player-queue-count')).toHaveText('20');
+  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  expect(requests[0]?.searchParams.get('mode')).toBe('albums');
+  expect(requests[0]?.searchParams.get('limit')).toBe('48');
+
+  await page.locator('#player-queue-toggle').click();
+  const queueTitles = page.locator(
+    '#player-queue-list .player-queue-title',
+  );
+  await expect(queueTitles).toHaveCount(20);
+  await expect(queueTitles.first()).toHaveText('Come Together');
+});
+
+test('Play all keeps refilling from the original query after the UI query changes', async ({
+  page,
+}) => {
+  await signIn(page);
+  await routeAudio(page);
+  const requests: URL[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/playback/tracks')) {
+      requests.push(new URL(request.url()));
+    }
+  });
+
+  await page.goto('/?view=tracks');
+  await expect(page.locator('.track-result').first()).toBeVisible();
+  await page.locator('#play-all').click();
+  await expect(page.locator('#player-queue-count')).toHaveText('48');
+
+  const before = await page
+    .locator('#player-queue-list .player-queue-title')
+    .allTextContents();
+  expect(before).toHaveLength(48);
+
+  // Change the visible result query. The playing source must keep its own q.
+  await page.locator('#search').fill('track:"so what"');
+  await page.locator('#search').press('Enter');
+  await expect(page.locator('#result-summary')).toContainText('tracks');
+  await blurActiveElement(page);
+
+  for (let index = 0; index < 36; index += 1) {
+    await page.keyboard.press('Shift+ArrowRight');
+  }
+
+  await expect
+    .poll(() =>
+      requests.some(
+        (request) => request.searchParams.get('offset') === '48',
+      ),
+    )
+    .toBe(true);
+  const refill = requests.find(
+    (request) => request.searchParams.get('offset') === '48',
+  );
+  assertURL(refill);
+  expect(refill?.searchParams.get('mode')).toBe('tracks');
+  expect(refill?.searchParams.get('q')).toBeNull();
+  expect(refill?.searchParams.get('sort')).toBe('recent');
+  expect(refill?.searchParams.get('limit')).toBe('36');
+
+  await expect(page.locator('#player-queue-count')).toHaveText('48');
+  await expect(
+    page.locator('#player-queue-list .player-queue-title').first(),
+  ).toHaveText(before[36] ?? '');
+  await expect(page.locator('#player-title')).toHaveText(before[36] ?? '');
+});
+
+test('manual track or album playback clears the Play all source', async ({
+  page,
+}) => {
+  await signIn(page);
+  await routeAudio(page);
+  await page.goto('/?view=tracks');
+  await expect(page.locator('.track-result').first()).toBeVisible();
+  await page.locator('#play-all').click();
+  await expect(page.locator('#player-queue-count')).toHaveText('48');
+
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  const card = albumCard(page, 'Abbey Road').first();
+  await expect(card).toBeVisible();
+  await card.locator('.album-play').click();
+  await expect(page.locator('#player-title')).toHaveText('Come Together');
+  await expect(page.locator('#player-queue-count')).toHaveText('5');
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = localStorage.getItem('happy-trails.player');
+        if (!raw) return false;
+        return Boolean(JSON.parse(raw).source);
+      }),
+    )
+    .toBe(false);
+});
+
+test('Play all is hidden while signed out', async ({ page }) => {
+  await page.goto('/?view=tracks');
+  await expect(page.locator('.track-result').first()).toBeVisible();
+  await expect(page.locator('#play-all')).toBeHidden();
+});
+
 test('album Play streams through the footer player', async ({ page }) => {
   await signIn(page);
   await routeAudio(page);
@@ -228,6 +423,33 @@ test('queue items can be reordered and removed; deleting the current item advanc
   await expect(page.locator('#player-queue-list .player-queue-item')).toHaveCount(4);
   await expect(page.locator('#player-title')).toHaveText(
     'While My Guitar Gently Weeps',
+  );
+});
+
+test('selecting a queued track keeps the play queue open', async ({ page }) => {
+  await signIn(page);
+  await routeAudio(page);
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  await albumCard(page, 'Abbey Road').first().locator('.album-play').click();
+  await expect(page.locator('#player-title')).toHaveText('Come Together');
+
+  await page.locator('#player-queue-toggle').click();
+  const queuePanel = page.locator('#player-queue-panel');
+  await expect(queuePanel).toBeVisible();
+
+  const something = page
+    .locator('#player-queue-list .player-queue-item')
+    .filter({
+      has: page.locator('.player-queue-title', { hasText: /^Something$/ }),
+    })
+    .first();
+  await something.locator('.player-queue-track').click();
+
+  await expect(page.locator('#player-title')).toHaveText('Something');
+  await expect(queuePanel).toBeVisible();
+  await expect(page.locator('#player-queue-toggle')).toHaveAttribute(
+    'aria-expanded',
+    'true',
   );
 });
 

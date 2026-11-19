@@ -55,6 +55,7 @@ export interface AppDependencies {
     | 'series'
     | 'queryAlbums'
     | 'queryTracks'
+    | 'queryAlbumTracks'
     | 'albumForKey'
     | 'sourceAlbumsFor'
     | 'coverPathFor'
@@ -435,6 +436,46 @@ export function createApp(
       offset,
       limit,
     });
+    const body: TrackSearchResponse = {
+      total: result.total,
+      offset,
+      limit,
+      tracks: result.tracks,
+      libraryVersion: result.libraryVersion,
+    };
+    res.json(body);
+  });
+
+  /**
+   * Flat, track-level pages for Play all. In albums mode the query selects
+   * albums and every track of each matching album is returned in album order.
+   */
+  app.get('/api/playback/tracks', (req, res) => {
+    if (!dependencies.library.status().ready) {
+      unavailable(res, dependencies);
+      return;
+    }
+
+    const mode = stringParam(req.query.mode);
+    if (mode !== 'albums' && mode !== 'tracks') {
+      res.status(400).json({ error: 'mode must be "albums" or "tracks"' });
+      return;
+    }
+    const q = (stringParam(req.query.q) ?? '').slice(0, MAX_SEARCH_LENGTH).trim();
+    const sortParam = stringParam(req.query.sort);
+    const sort = isSortKey(sortParam) ? sortParam : 'recent';
+    const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
+    const limit = integerParam(
+      req.query.limit,
+      dependencies.config.defaultPageSize,
+      1,
+      dependencies.config.maxPageSize,
+    );
+    const request = { q, sort, offset, limit };
+    const result =
+      mode === 'albums'
+        ? dependencies.library.queryAlbumTracks(request)
+        : dependencies.library.queryTracks(request);
     const body: TrackSearchResponse = {
       total: result.total,
       offset,

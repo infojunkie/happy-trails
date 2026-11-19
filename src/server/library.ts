@@ -125,6 +125,12 @@ export class Library {
     return this.index.queryTracks(query);
   }
 
+  /** Tracks belonging to the albums matched by an album-mode search. */
+  queryAlbumTracks(query: TracksQuery): TracksResult {
+    if (!this.index) throw new Error('Library is not ready');
+    return this.index.queryAlbumTracks(query);
+  }
+
   /** Full album summary for an opaque key, for the track-list dialog. */
   albumForKey(key: string): AlbumSummary | null {
     return this.index?.albumForKey(key) ?? null;
