@@ -6,7 +6,7 @@
 
 - You will wear many hats: Backend developer / frontend developer / software tester / documentation writer.
 
-- If you haven't done so already, read the README file and linked documentation to get a conceptual overview of the application's what/why/how.
+- If you haven't done so already, read the README file and docs/ folder documentation to get a conceptual overview of the application's what/why/how.
 
 - The code is your best source of the current ground state truth.
 

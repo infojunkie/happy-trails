@@ -84,6 +84,7 @@ export class Library {
       playbackEnabled: config.dsmUrl !== null,
       nativePlaybackEnabled: config.nativePlaybackEnabled,
       audioStationFallbackEnabled: config.audioStationFallbackEnabled,
+      screenWakeLockEnabled: config.screenWakeLockEnabled,
     };
   }
 

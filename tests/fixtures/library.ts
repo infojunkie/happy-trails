@@ -493,6 +493,7 @@ export interface FixtureOptions {
   playbackError?: Error | null;
   nativePlaybackEnabled?: boolean;
   audioStationFallbackEnabled?: boolean;
+  screenWakeLockEnabled?: boolean;
   /** Raw bytes returned by the fake native stream endpoint, or null for 404. */
   audioStream?: Buffer | null;
   audioStreamContentType?: string;
@@ -582,6 +583,7 @@ export async function createFixtureContext(
     audioStationFallbackEnabled:
       options.audioStationFallbackEnabled ??
       (options.playbackUrl === undefined ? true : options.playbackUrl !== null),
+    screenWakeLockEnabled: options.screenWakeLockEnabled ?? true,
   };
 
   const sessions = new Map<

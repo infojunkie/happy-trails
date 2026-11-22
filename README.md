@@ -37,8 +37,11 @@ design and current status.
 - **Native playback** in a fixed footer player with play/pause, restart,
   previous/next, an interactive seek bar, elapsed/remaining time, cover and
   metadata, volume/mute, keyboard shortcuts, OS media-session controls
-  (metadata, artwork, timeline, and media keys), and a play queue. Play controls
-  and the footer are only shown while signed in. Album Play queues the album; a
+  (metadata, artwork, timeline, and media keys), and a play queue. While
+  playing, the player holds a best-effort screen wake lock (when
+  `SCREEN_WAKE_LOCK_ENABLED` is on and the browser allows it), which keeps the
+  page from being hidden at a track boundary on Android. Play controls and the
+  footer are only shown while signed in. Album Play queues the album; a
   track Play queues the album from that track onward. The queue supports
   removing, reordering, clearing, and click-to-play, advances automatically with
   a preloaded next track, and survives a page reload paused (the restored queue
@@ -410,6 +413,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `DSM_URL` | — | Synology DSM base URL; required for user sign-in, native streaming, and album covers. Falls back to `DSADDR`. |
 | `NATIVE_PLAYBACK_ENABLED` | `true` | Expose `GET /api/stream/:id` for the native player. Requires `DSM_URL`. Set to `false` to use the Audio Station handoff only. |
 | `AUDIO_STATION_FALLBACK_ENABLED` | `true` | Keep the Audio Station handoff available as a fallback. Also requires a resolved `DSM_FRONTEND_URL` (or `DSM_URL`). |
+| `SCREEN_WAKE_LOCK_ENABLED` | `true` | Keep the screen awake while the native player is playing. Uses the browser Screen Wake Lock API; best-effort and only while the page is visible. Set to `false` to disable. |
 | `DSM_FRONTEND_URL` | value of `DSM_URL` | Synology DSM frontend URL for playback redirection. A full http(s) URL is used verbatim; empty falls back to `DSM_URL` / `DSADDR`. Otherwise use `:port` to keep the host the browser used and change only the port (for example `:5001`); path rewriting is not supported. With `:port`, the host must match `DSM_FRONTEND_ALLOWED_ORIGINS`. |
 | `DSM_FRONTEND_ALLOWED_ORIGINS` | — | Comma-separated exact origins the app is served from (`scheme://host[:port]`, no path), for example `https://mediatheque.example:8443,https://nas-local:8443`. Required when `DSM_FRONTEND_URL` is `:port`. A request whose `Host` (or `X-Forwarded-Host`, for proxies that rewrite it) matches an entry uses that origin; any other host disables the redirect. The entry's scheme is also used for the redirect, so list the scheme DSM is served under (normally the same as the app). `Origin` and `Referer` are never trusted for this. |
 | `DSM_USER` / `DSM_PASS` | — | Optional service account used for album covers, full-resolution original covers, and artwork lookups. It needs read access to the music share. Falls back to `DSUSER` / `DSPASSWD`; playback uses each user's own sign-in. |
@@ -937,6 +941,8 @@ snapshot; clients compare it with the version of the data they loaded to decide
 whether the Refresh control is enabled. `lastCheckedAt` and `refreshing`
 describe the change-detection loop. `playbackEnabled` is true when a DSM URL is
 configured, i.e. when users can sign in and use the Play links.
+`screenWakeLockEnabled` controls whether the native player may hold a screen
+wake lock while it is playing.
 
 ```json
 {
@@ -949,7 +955,10 @@ configured, i.e. when users can sign in and use the Play links.
   "refreshing": false,
   "checkIntervalMs": 60000,
   "error": null,
-  "playbackEnabled": true
+  "playbackEnabled": true,
+  "nativePlaybackEnabled": true,
+  "audioStationFallbackEnabled": true,
+  "screenWakeLockEnabled": true
 }
 ```
 

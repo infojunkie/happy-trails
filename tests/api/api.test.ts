@@ -127,6 +127,7 @@ test('GET /api/status exposes library and playback state', async () => {
   assert.equal(body.playbackEnabled, true);
   assert.equal(body.nativePlaybackEnabled, true);
   assert.equal(body.audioStationFallbackEnabled, true);
+  assert.equal(body.screenWakeLockEnabled, true);
 });
 
 test('GET /api/about exposes package metadata', async () => {

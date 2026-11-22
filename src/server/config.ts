@@ -375,6 +375,12 @@ export const config = {
   audioStationFallbackEnabled:
     (frontendTarget.url !== null || frontendTarget.originPort !== null) &&
     booleanFromEnv('AUDIO_STATION_FALLBACK_ENABLED', true),
+  /**
+   * Keep the screen awake while the native player is playing. Best-effort: the
+   * browser may deny or release the lock, and it is only held while the page is
+   * visible. Set SCREEN_WAKE_LOCK_ENABLED=false to disable.
+   */
+  screenWakeLockEnabled: booleanFromEnv('SCREEN_WAKE_LOCK_ENABLED', true),
   dsmFrontendUrl: frontendTarget.url,
   dsmFrontendPort: frontendTarget.originPort,
   /** Exact app origins allowed to select an origin-based redirect target. */

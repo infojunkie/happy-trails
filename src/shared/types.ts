@@ -144,6 +144,11 @@ export interface StatusResponse {
   nativePlaybackEnabled: boolean;
   /** True when the Audio Station handoff is available as a fallback. */
   audioStationFallbackEnabled: boolean;
+  /**
+   * True when the player may hold a screen wake lock while it is playing. The
+   * browser may still deny or release the lock (visible pages only).
+   */
+  screenWakeLockEnabled: boolean;
 }
 
 export interface SessionResponse {

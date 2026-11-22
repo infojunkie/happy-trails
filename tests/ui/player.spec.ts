@@ -162,6 +162,52 @@ async function blurActiveElement(page: Page): Promise<void> {
   });
 }
 
+interface WakeLockCalls {
+  requests: number;
+  releases: number;
+  lastType: string | null;
+}
+
+/** Install a fake Screen Wake Lock implementation before the app loads. */
+async function installWakeLockMock(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const calls: {
+      requests: number;
+      releases: number;
+      lastType: string | null;
+    } = { requests: 0, releases: 0, lastType: null };
+    (window as unknown as { __wakeLockCalls: typeof calls }).__wakeLockCalls =
+      calls;
+    Object.defineProperty(Navigator.prototype, 'wakeLock', {
+      configurable: true,
+      get() {
+        return {
+          request: async (type: string) => {
+            calls.requests += 1;
+            calls.lastType = type;
+            return new (class extends EventTarget {
+              released = false;
+              async release(): Promise<void> {
+                if (this.released) return;
+                this.released = true;
+                calls.releases += 1;
+                this.dispatchEvent(new Event('release'));
+              }
+            })();
+          },
+        };
+      },
+    });
+  });
+}
+
+async function wakeLockCalls(page: Page): Promise<WakeLockCalls> {
+  return page.evaluate(
+    () =>
+      (window as unknown as { __wakeLockCalls: WakeLockCalls }).__wakeLockCalls,
+  );
+}
+
 function assertURL(value: unknown): asserts value is URL {
   expect(value).toBeInstanceOf(URL);
   if (!(value instanceof URL)) throw new Error('Expected a URL');
@@ -379,6 +425,55 @@ test('album Play streams through the footer player', async ({ page }) => {
     'Play',
   );
   await expect.poll(() => audioPlaying(page)).toBe(false);
+});
+
+test('the player holds a screen wake lock while playing and releases it on pause', async ({
+  page,
+}) => {
+  await installWakeLockMock(page);
+  await signIn(page);
+  await routeAudio(page);
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+
+  const card = albumCard(page, 'Abbey Road').first();
+  await expect(card).toBeVisible();
+  await card.locator('.album-play').click();
+  await expect.poll(() => audioPlaying(page)).toBe(true);
+
+  await expect.poll(async () => (await wakeLockCalls(page)).requests).toBe(1);
+  expect((await wakeLockCalls(page)).lastType).toBe('screen');
+
+  await page.locator('#player-toggle').click();
+  await expect(page.locator('#player-toggle')).toHaveAttribute(
+    'aria-label',
+    'Play',
+  );
+  await expect.poll(async () => (await wakeLockCalls(page)).releases).toBe(1);
+
+  await page.locator('#player-toggle').click();
+  await expect.poll(() => audioPlaying(page)).toBe(true);
+  await expect.poll(async () => (await wakeLockCalls(page)).requests).toBe(2);
+});
+
+test('the screen wake lock feature flag disables the request', async ({
+  page,
+}) => {
+  await installWakeLockMock(page);
+  const statusResponse = await page.request.get('/api/status');
+  const status = (await statusResponse.json()) as Record<string, unknown>;
+  await page.route('**/api/status', (route) =>
+    route.fulfill({ json: { ...status, screenWakeLockEnabled: false } }),
+  );
+
+  await signIn(page);
+  await routeAudio(page);
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+
+  const card = albumCard(page, 'Abbey Road').first();
+  await expect(card).toBeVisible();
+  await card.locator('.album-play').click();
+  await expect.poll(() => audioPlaying(page)).toBe(true);
+  expect((await wakeLockCalls(page)).requests).toBe(0);
 });
 
 test('track Play queues the album from that track onward', async ({ page }) => {

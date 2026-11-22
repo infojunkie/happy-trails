@@ -111,6 +111,7 @@ interface State {
   playbackEnabled: boolean;
   nativePlaybackEnabled: boolean;
   audioStationFallbackEnabled: boolean;
+  screenWakeLockEnabled: boolean;
   session: SessionResponse;
   pendingPlayUrl: string | null;
   pendingPlayAction: (() => void | Promise<void>) | null;
@@ -154,6 +155,7 @@ const state: State = {
   playbackEnabled: false,
   nativePlaybackEnabled: false,
   audioStationFallbackEnabled: false,
+  screenWakeLockEnabled: false,
   session: { authenticated: false, account: null },
   pendingPlayUrl: null,
   pendingPlayAction: null,
@@ -764,6 +766,7 @@ async function pollStatus(): Promise<void> {
     state.nativePlaybackEnabled = status.nativePlaybackEnabled === true;
     state.audioStationFallbackEnabled =
       status.audioStationFallbackEnabled === true;
+    state.screenWakeLockEnabled = status.screenWakeLockEnabled === true;
     syncPlayerConfig();
     if (status.ready) renderStats(status);
     updateRefreshControl();
@@ -960,6 +963,7 @@ function syncPlayerConfig(): void {
   player.configure({
     nativeEnabled: state.nativePlaybackEnabled,
     fallbackEnabled: state.audioStationFallbackEnabled,
+    screenWakeLockEnabled: state.screenWakeLockEnabled,
     signedIn: state.session.authenticated,
     queueWindowSize: PAGE_SIZE,
     queueRefillThreshold: QUEUE_REFILL_THRESHOLD,
@@ -1507,6 +1511,7 @@ async function loadLibrary(): Promise<void> {
     state.nativePlaybackEnabled = status.nativePlaybackEnabled === true;
     state.audioStationFallbackEnabled =
       status.audioStationFallbackEnabled === true;
+    state.screenWakeLockEnabled = status.screenWakeLockEnabled === true;
     syncPlayerConfig();
     state.serverVersion = status.libraryVersion;
     state.libraryReady = status.ready;

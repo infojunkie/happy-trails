@@ -47,6 +47,8 @@ export type QueuePageFetcher = (
 interface PlayerConfig {
   nativeEnabled: boolean;
   fallbackEnabled: boolean;
+  /** Hold a screen wake lock while playing, when the browser allows it. */
+  screenWakeLockEnabled: boolean;
   /** The footer (including its transport controls) is only shown signed in. */
   signedIn: boolean;
   queueWindowSize: number;
@@ -201,9 +203,12 @@ class Player {
   private refillAbort: AbortController | null = null;
   private refillToken = 0;
   private saveTimer: number | undefined;
+  private wakeLock: WakeLockSentinel | null = null;
+  private wakeLockPending = false;
   private config: PlayerConfig = {
     nativeEnabled: false,
     fallbackEnabled: false,
+    screenWakeLockEnabled: false,
     signedIn: false,
     queueWindowSize: QUEUE_WINDOW_SIZE,
     queueRefillThreshold: QUEUE_REFILL_THRESHOLD,
@@ -269,6 +274,7 @@ class Player {
     });
 
     window.addEventListener('pagehide', () => this.save());
+    document.addEventListener('visibilitychange', () => this.syncWakeLock());
     this.saveTimer = window.setInterval(() => {
       if (this.mode === 'playing') this.save();
     }, SAVE_INTERVAL_MS);
@@ -809,6 +815,7 @@ class Player {
   }
 
   private stopAudio(): void {
+    this.releaseWakeLock();
     this.generation += 1;
     for (const audio of this.audios) {
       audio.pause();
@@ -824,6 +831,65 @@ class Player {
     audio.removeAttribute('src');
     audio.load();
     this.preloadedUid = null;
+  }
+
+  /**
+   * Hold a screen wake lock while the player is actively playing and the page
+   * is visible. This keeps Android browsers in the foreground so their media
+   * session is not suspended at a track boundary. It is best-effort: browsers
+   * may not support the API, may deny the request (battery saver, insecure
+   * context), or release the lock when the page becomes hidden.
+   */
+  private shouldHoldWakeLock(): boolean {
+    return (
+      this.config.screenWakeLockEnabled &&
+      this.config.nativeEnabled &&
+      this.config.signedIn &&
+      (this.mode === 'playing' || this.mode === 'loading') &&
+      document.visibilityState === 'visible' &&
+      'wakeLock' in navigator
+    );
+  }
+
+  private syncWakeLock(): void {
+    if (!this.shouldHoldWakeLock()) {
+      this.releaseWakeLock();
+      return;
+    }
+    if (this.wakeLock !== null || this.wakeLockPending) return;
+
+    this.wakeLockPending = true;
+    let pending: Promise<WakeLockSentinel>;
+    try {
+      pending = navigator.wakeLock.request('screen');
+    } catch {
+      this.wakeLockPending = false;
+      return;
+    }
+
+    void pending
+      .then((sentinel) => {
+        this.wakeLockPending = false;
+        // The player may have paused or the page may have been hidden while
+        // the request was in flight; do not keep a lock nobody needs.
+        if (!this.shouldHoldWakeLock()) {
+          void sentinel.release().catch(() => {});
+          return;
+        }
+        this.wakeLock = sentinel;
+        sentinel.addEventListener('release', () => {
+          if (this.wakeLock === sentinel) this.wakeLock = null;
+        });
+      })
+      .catch(() => {
+        this.wakeLockPending = false;
+      });
+  }
+
+  private releaseWakeLock(): void {
+    const sentinel = this.wakeLock;
+    this.wakeLock = null;
+    if (sentinel) void sentinel.release().catch(() => {});
   }
 
   private startCurrent(position: number, autoplay: boolean): void {
@@ -1440,6 +1506,7 @@ class Player {
       this.config.nativeEnabled &&
       this.config.signedIn &&
       this.queue.length > 0;
+    this.syncWakeLock();
     footer.hidden = !visible;
     document.body.classList.toggle('player-visible', visible);
     if (!visible) return;

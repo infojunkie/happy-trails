@@ -22,6 +22,7 @@ playback, and Play all result sources). Stage 4 (polish and hardening) remains.
 | Deleting the playing item | Advance to the next queue item; stop if the queue becomes empty. |
 | Persistence | Restore the queue/current item/position after a reload, paused. |
 | Crossfade | Not implemented. Use an instant switch between two preloaded `<audio>` elements. |
+| Screen wake lock | Automatic while playing, gated by `SCREEN_WAKE_LOCK_ENABLED`; released on pause/end/error/hide and re-acquired when visible. Best-effort. |
 | Audio Station fallback | Retained, gated by `AUDIO_STATION_FALLBACK_ENABLED` and the existing frontend target. |
 | Unsupported formats | WMA is ignored for native playback. No transcoding or special-case detection; the generic error state can offer the Audio Station fallback. |
 
@@ -136,6 +137,7 @@ Responses use `Cache-Control: private, max-age=3600` and
 | --- | --- | --- |
 | `NATIVE_PLAYBACK_ENABLED` | `true` | Enables the native player and `/api/stream`. Requires `DSM_URL`. |
 | `AUDIO_STATION_FALLBACK_ENABLED` | `true` | Keeps the Audio Station handoff available as a fallback. Also requires a resolved frontend target (`DSM_FRONTEND_URL` or `DSM_URL`). |
+| `SCREEN_WAKE_LOCK_ENABLED` | `true` | Holds a screen wake lock while the player is playing. Best-effort: only while the page is visible, and browsers may deny or release the lock. |
 
 The existing `DSM_FRONTEND_URL` / `DSM_FRONTEND_ALLOWED_ORIGINS` rules still
 apply to the fallback redirect.
@@ -216,6 +218,13 @@ Already included:
 - Media Session metadata, artwork, media-key handlers, and
   `setPositionState()` timeline sync for lock screens, notifications, and
   hardware/car media controls.
+- A screen wake lock while playing, gated by `SCREEN_WAKE_LOCK_ENABLED`. It is
+  acquired when playback starts (including buffering), released on
+  pause/end/error/clear/sign-out, and re-acquired when the page becomes visible
+  again. The browser may deny or release it (power saving, insecure context),
+  and it cannot survive the user locking the phone or switching apps. It is a
+  workaround for browsers refusing to start the next track while the page is
+  hidden, not a substitute for a compliant foreground service.
 - Full-size cover lightbox from the album dialog cover and player-footer cover.
   It uses a native modal dialog with an X button, Escape, and backdrop-click
   dismissal; other cover clicks keep their existing album-opening behavior.
@@ -241,6 +250,9 @@ Remaining:
 - Track removed or renamed in the library (stream 404 → skip).
 - Album with no playable tracks.
 - Session expiry, server restart, sign-out (stop and clear).
+- The screen wake lock is released when the page is hidden or the browser/system
+  denies it; the underlying browser/Android background-media limitation remains,
+  and a manually locked phone still stops the transition.
 - Safari/iOS autoplay: unlock both audio elements on the first user gesture.
 - Library index rebuilds block the Node event loop and can briefly stall audio;
   move the build to a worker if this becomes noticeable.
