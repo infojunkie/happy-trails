@@ -29,7 +29,25 @@ test('Tracks mode switches results and records the URL', async ({ page }) => {
   await expect(row.locator('.track-result-artist')).toBeVisible();
   await expect(row.locator('.track-result-album')).toBeVisible();
   await expect(row.locator('.track-result-duration')).toBeVisible();
-  await expect(page.locator('#result-summary')).toHaveText(/[\d,]+ tracks/);
+
+  // The summary separates the loaded rows from the library total, and Load
+  // more updates the shown count.
+  const tracksResponse = await page.request.get('/api/tracks?limit=1');
+  expect(tracksResponse.ok()).toBeTruthy();
+  const { total: trackTotal } = (await tracksResponse.json()) as {
+    total: number;
+  };
+  const firstPage = Math.min(48, trackTotal);
+  const secondPage = Math.min(firstPage + 48, trackTotal);
+  await expect(page.locator('#result-summary')).toHaveText(
+    `Showing ${firstPage.toLocaleString()} / ${trackTotal.toLocaleString()} tracks`,
+  );
+  if (firstPage < trackTotal) {
+    await page.locator('#load-more').click();
+    await expect(page.locator('#result-summary')).toHaveText(
+      `Showing ${secondPage.toLocaleString()} / ${trackTotal.toLocaleString()} tracks`,
+    );
+  }
 });
 
 test('track search filters rows and facet counts switch to tracks', async ({
@@ -44,6 +62,14 @@ test('track search filters rows and facet counts switch to tracks', async ({
   await page.locator('#search').press('Enter');
 
   await expect(page.locator('.track-result')).toHaveCount(1);
+  const statusResponse = await page.request.get('/api/status');
+  expect(statusResponse.ok()).toBeTruthy();
+  const { trackCount } = (await statusResponse.json()) as {
+    trackCount: number;
+  };
+  await expect(page.locator('#result-summary')).toHaveText(
+    `Showing 1 / 1 of ${trackCount.toLocaleString()} tracks`,
+  );
   const row = page.locator('.track-result').first();
   await expect(row.locator('.track-result-title')).toHaveText('So What');
   await expect(row.locator('.track-result-artist')).toContainText('Miles Davis');

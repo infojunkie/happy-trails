@@ -81,8 +81,11 @@ export function planRefill(
   const remaining = queueLength - trimCount; // current + upcoming
   if (remaining > windowSize) return null;
 
+  // A window smaller than the default threshold (small PAGE_SIZE) must still
+  // refill only to its own size, not keep growing past it.
+  const refillThreshold = Math.min(threshold, Math.max(1, windowSize - 1));
   const upcoming = remaining - 1;
-  if (upcoming >= threshold) return null;
+  if (upcoming >= refillThreshold) return null;
 
   return {
     trimCount,

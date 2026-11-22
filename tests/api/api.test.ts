@@ -123,6 +123,7 @@ test('GET /api/status exposes library and playback state', async () => {
   assert.equal(typeof body.lastCheckedAt, 'string');
   assert.equal(body.refreshing, false);
   assert.ok(body.checkIntervalMs > 0);
+  assert.equal(body.pageSize, 48);
   assert.equal(body.error, null);
   assert.equal(body.playbackEnabled, true);
   assert.equal(body.nativePlaybackEnabled, true);
@@ -258,6 +259,35 @@ test('session login is unavailable when DSM is not configured', async () => {
     assert.equal(status.body.playbackEnabled, false);
     assert.equal(status.body.nativePlaybackEnabled, false);
     assert.equal(status.body.audioStationFallbackEnabled, false);
+  } finally {
+    await closeFixture(fixture);
+  }
+});
+
+test('PAGE_SIZE drives the status page size and API defaults', async () => {
+  const fixture = await runFixture({ pageSize: 24 });
+  try {
+    const status = await json<StatusResponse>(
+      fixture.server.baseUrl,
+      '/api/status',
+    );
+    assert.equal(status.body.pageSize, 24);
+
+    const albumPage = await albums(fixture.server.baseUrl, '/api/albums');
+    assert.equal(albumPage.limit, 24);
+    assert.ok(albumPage.albums.length <= 24);
+
+    const trackPage = await json<TrackSearchResponse>(
+      fixture.server.baseUrl,
+      '/api/tracks',
+    );
+    assert.equal(trackPage.body.limit, 24);
+
+    const playbackPage = await json<TrackSearchResponse>(
+      fixture.server.baseUrl,
+      '/api/playback/tracks?mode=tracks',
+    );
+    assert.equal(playbackPage.body.limit, 24);
   } finally {
     await closeFixture(fixture);
   }

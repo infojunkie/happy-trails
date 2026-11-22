@@ -57,7 +57,8 @@ design and current status.
 - **Play all** beside the result count starts a lazily refilled queue from the
   current search results. In Albums mode it queues every track of every
   matching album; in Tracks mode it queues the matching tracks. The visible
-  queue stays at 48 items, fetching more from the original query as playback
+  queue stays at `PAGE_SIZE` items (48 by default), fetching more from the
+  original query as playback
   advances and dropping played history at each refill. The source keeps its own
   query, sort, and mode even if the visible search changes, and survives a page
   reload until another Play action replaces it.
@@ -426,8 +427,8 @@ All variables are optional; see [`.env.example`](.env.example).
 | `COVER_CACHE_TTL_MS` | `86400000` | Server-side cover cache TTL. |
 | `COVER_CACHE_ENTRIES` | `500` | Maximum cached covers (LRU); `0` disables the cache. |
 | `LIBRARY_CHECK_MS` | `60000` | Delay before checking the `music` table for changes; a detected change triggers a silent rebuild. The next check is scheduled after the previous check and any rebuild finish, so a rebuild longer than this interval delays the next check rather than overlapping it. `LIBRARY_REFRESH_MS` is accepted as a legacy fallback. |
-| `PAGE_SIZE` | `48` | Default albums per page. |
-| `MAX_PAGE_SIZE` | `200` | Upper bound accepted from clients. |
+| `PAGE_SIZE` | `48` | Results per page for the Albums and Tracks views, the default `limit` for API requests that omit it, and the visible Play all queue window. The client reads the effective value from `/api/status`. |
+| `MAX_PAGE_SIZE` | `200` | Upper bound for any API `limit`; `PAGE_SIZE` is clamped to it. |
 | `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
@@ -919,7 +920,7 @@ check.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including 48-item refills after the visible query changes.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
 - Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts`; backend tests cover the album-mode flattening order and pagination.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.
@@ -958,8 +959,9 @@ Index state and library totals. `libraryVersion` identifies the current
 snapshot; clients compare it with the version of the data they loaded to decide
 whether the Refresh control is enabled. `albumCount` counts albums visible in
 the Albums view (loose-track collections are excluded); `trackCount` counts
-every indexed track. `lastCheckedAt` and `refreshing`
-describe the change-detection loop. `playbackEnabled` is true when a DSM URL is
+every indexed track. `pageSize` is the effective `PAGE_SIZE` (clamped by
+`MAX_PAGE_SIZE`), which the client uses for paging and the Play all queue
+window. `lastCheckedAt` and `refreshing` describe the change-detection loop. `playbackEnabled` is true when a DSM URL is
 configured, i.e. when users can sign in and use the Play links.
 `screenWakeLockEnabled` controls whether the native player may hold a screen
 wake lock while it is playing.
@@ -974,6 +976,7 @@ wake lock while it is playing.
   "lastCheckedAt": "2026-11-02T12:00:30.000Z",
   "refreshing": false,
   "checkIntervalMs": 60000,
+  "pageSize": 48,
   "error": null,
   "playbackEnabled": true,
   "nativePlaybackEnabled": true,
@@ -1021,7 +1024,7 @@ filter in Tracks mode. A facet whose every album is hidden has
 | `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `track:`, `genre:`, `region:`, `serie:`, `composer:`, and `source:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
-| `limit` | Default `48`, maximum `200`. |
+| `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 
 The response's `libraryVersion` is the version of the snapshot used for the
 listing; compare it with `/api/status` before deciding to reload.
@@ -1122,7 +1125,7 @@ Track-level counterpart to `/api/albums`, used by the Tracks result list.
 | `q` | The same search syntax. Bare terms match the track title, artists, source title, composer, album title, the track's own genre/region tags, and album series names. `artist:` matches the track or album artist; `genre:` and `region:` are exact per-track tag filters; `serie:` is an exact album-level filter. |
 | `sort` | `recent` (default; per-track upload date), `artist`, `album`, or `year`. |
 | `offset` | Default `0`. |
-| `limit` | Default `48`, maximum `200`. |
+| `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 
 Each row includes the `music.id` (the id `/play/track/:id` accepts), the visible
 `artist` and parsed `artists`, the album artist, the opaque `albumKey` and
@@ -1168,7 +1171,7 @@ Flat, track-level pages for the Play all queue source.
 | `q` | The same search syntax as `/api/albums` or `/api/tracks`. |
 | `sort` | `recent` (default), `artist`, `album`, or `year`. In Albums mode the album sort is applied first, then each album's disc/track order. |
 | `offset` | Default `0`. Track-level offset. |
-| `limit` | Default `48`, maximum `200`. |
+| `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 
 The response has the same shape as `/api/tracks`: `total`, `offset`, `limit`,
 `tracks`, and `libraryVersion`. `total` is always a track count, including in

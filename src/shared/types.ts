@@ -145,6 +145,12 @@ export interface StatusResponse {
   /** True while a change-triggered rebuild is running. */
   refreshing: boolean;
   checkIntervalMs: number;
+  /**
+   * Results per page: the default `limit` for album/track/playback queries
+   * and the visible Play all queue window. Effective value of `PAGE_SIZE`
+   * clamped by `MAX_PAGE_SIZE`.
+   */
+  pageSize: number;
   error: string | null;
   /** True when a Synology DSM URL is configured, so users can sign in to play. */
   playbackEnabled: boolean;

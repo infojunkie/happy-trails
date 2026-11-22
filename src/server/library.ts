@@ -80,6 +80,9 @@ export class Library {
       lastCheckedAt: this.lastCheckedAt?.toISOString() ?? null,
       refreshing: this.rebuilding,
       checkIntervalMs: config.checkIntervalMs,
+      // The API clamps every limit to maxPageSize, so expose the effective
+      // value; the client uses it for paging and the Play all queue window.
+      pageSize: Math.min(config.defaultPageSize, config.maxPageSize),
       error: this.lastError,
       playbackEnabled: config.dsmUrl !== null,
       nativePlaybackEnabled: config.nativePlaybackEnabled,

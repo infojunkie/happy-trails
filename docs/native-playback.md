@@ -192,10 +192,11 @@ apply to the fallback redirect.
 - `GET /api/playback/tracks?mode=albums|tracks&q=&sort=&offset=&limit=` returns
   flat, track-level pages for both modes. Albums mode flattens the album query
   on the server instead of fetching each album separately.
-- The player keeps a 48-item visible window (the Load-more page size) and
-  refills when fewer than 12 tracks remain after the current one. It fetches
-  exactly enough to restore 48, trims items before the current track only after
-  a page commits, and persists the source cursor with the queue.
+- The player keeps a visible window equal to the page size (`PAGE_SIZE`, read
+  from `/api/status`; 48 by default, the same value the Load-more button uses)
+  and refills when fewer than 12 tracks remain after the current one. It fetches
+  exactly enough to restore the window, trims items before the current track
+  only after a page commits, and persists the source cursor with the queue.
 - The source remembers the original `q`, `sort`, and `mode`; changing the
   visible search does not change refills. Pressing Play all again, playing a
   track/album, clearing the queue, or signing out replaces/clears it.

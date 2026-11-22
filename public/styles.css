@@ -3366,23 +3366,20 @@ h4.disc-heading {
   }
 }
 
-.player-queue-footer {
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-}
-
 .player-clear {
-  padding: 0;
-  background: transparent;
-  border: 0;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.8rem;
 }
 
 .player-clear:hover:not(:disabled) {
-  color: var(--text);
+  border-color: var(--accent);
 }
 
 .player-clear:disabled {

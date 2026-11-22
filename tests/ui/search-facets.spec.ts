@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import type {
   AlbumsResponse,
   GenresResponse,
+  StatusResponse,
 } from '../../src/shared/types.js';
 import { expandFacet, expectSummaryFor } from './helpers.js';
 
@@ -344,6 +345,13 @@ test('fielded, quoted, and boolean search expressions work', async ({
     q: 'album:"abbey road"',
   });
   await expectFirstApiAlbum(page, phrase);
+  // Filtered album results show shown / matching / library totals.
+  const statusResponse = await page.request.get('/api/status');
+  expect(statusResponse.ok()).toBeTruthy();
+  const status = (await statusResponse.json()) as StatusResponse;
+  await expect(page.locator('#result-summary')).toHaveText(
+    `Showing ${Math.min(phrase.total, 48).toLocaleString()} / ${phrase.total.toLocaleString()} of ${status.albumCount.toLocaleString()} albums`,
+  );
 
   await page.locator('#search').fill('album:road OR artist:beatles');
   await page.locator('#search').press('Enter');

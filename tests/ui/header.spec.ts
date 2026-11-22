@@ -1,4 +1,26 @@
 import { test, expect } from '@playwright/test';
+import type { StatusResponse } from '../../src/shared/types.js';
+
+test('results page size follows the server status', async ({ page }) => {
+  await page.route('**/api/status', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as StatusResponse;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...body, pageSize: 24 }),
+    });
+  });
+
+  await page.goto('/?view=tracks');
+  await expect(page.locator('.track-result')).toHaveCount(24);
+  await expect(page.locator('#result-summary')).toHaveText(/^Showing 24 \//);
+
+  // Load more advances by the configured page size too.
+  await page.locator('#load-more').click();
+  await expect(page.locator('.track-result')).toHaveCount(48);
+  await expect(page.locator('#result-summary')).toHaveText(/^Showing 48 \//);
+});
 
 test('error banner lives in the sticky header and stays visible while scrolling', async ({
   page,

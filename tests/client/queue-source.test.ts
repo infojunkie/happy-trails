@@ -71,6 +71,19 @@ test('planRefill fills a queue shortened by deletions', () => {
   assert.deepEqual(plan, { trimCount: 0, fetchLimit: 38 });
 });
 
+test('planRefill keeps a small configured window instead of growing past it', () => {
+  // Window 5 is below the default threshold of 12; refills must stop at 5.
+  assert.equal(planRefill(5, 0, source(), 5), null);
+  assert.deepEqual(planRefill(5, 1, source(), 5), {
+    trimCount: 1,
+    fetchLimit: 1,
+  });
+  assert.deepEqual(planRefill(5, 4, source(), 5), {
+    trimCount: 4,
+    fetchLimit: 4,
+  });
+});
+
 test('planRefill ignores exhausted sources and missing current items', () => {
   assert.equal(planRefill(48, 36, source({ exhausted: true })), null);
   assert.equal(planRefill(48, -1, source()), null);

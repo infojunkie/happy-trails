@@ -279,6 +279,36 @@ test('Play all in Tracks mode fills the window from the full result set', async 
   ).toBe('tracks');
 });
 
+test('the Play all queue window follows the server page size', async ({
+  page,
+}) => {
+  await signIn(page);
+  await routeAudio(page);
+  const requests: URL[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/playback/tracks')) {
+      requests.push(new URL(request.url()));
+    }
+  });
+  await page.route('**/api/status', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as { pageSize: number };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...body, pageSize: 24 }),
+    });
+  });
+
+  await page.goto('/?view=tracks');
+  await expect(page.locator('.track-result').first()).toBeVisible();
+  await page.locator('#play-all').click();
+
+  await expect(page.locator('#player-queue-count')).toHaveText('24');
+  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  expect(requests[0]?.searchParams.get('limit')).toBe('24');
+});
+
 test('Play all in Albums mode queues every track of matching albums', async ({
   page,
 }) => {

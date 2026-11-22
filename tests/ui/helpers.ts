@@ -34,9 +34,12 @@ export async function expandFacet(
   await expect(panel).toBeVisible();
 }
 
+/** Number of results matching the current query, from the summary. */
 export async function summaryTotal(page: Page): Promise<number> {
   const text = await page.locator('#result-summary').innerText();
-  const match = /^([\d,]+)/.exec(text);
+  // "Showing 48 / 320 of 410,761 tracks" or "Showing 48 / 410,761 tracks":
+  // the first number is the shown count, the second is the matching total.
+  const match = /^Showing [\d,]+ \/ ([\d,]+)/.exec(text);
   // A transient "Loading…" summary should make expect.poll retry, not fail.
   return match?.[1] ? Number(match[1].replaceAll(',', '')) : Number.NaN;
 }

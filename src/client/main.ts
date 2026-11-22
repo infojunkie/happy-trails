@@ -45,7 +45,6 @@ import {
   formatTotalDuration,
 } from './format.js';
 
-const PAGE_SIZE = 48;
 const FACET_PREVIEW = 25;
 const SKELETON_COUNT = 8;
 const SEARCH_DEBOUNCE_MS = 400;
@@ -108,6 +107,8 @@ interface State {
   total: number;
   tracks: TrackSummary[];
   trackTotal: number;
+  /** Results per page and Play all queue window, from /api/status. */
+  pageSize: number;
   playbackEnabled: boolean;
   nativePlaybackEnabled: boolean;
   audioStationFallbackEnabled: boolean;
@@ -152,6 +153,7 @@ const state: State = {
   total: 0,
   tracks: [],
   trackTotal: 0,
+  pageSize: 0,
   playbackEnabled: false,
   nativePlaybackEnabled: false,
   audioStationFallbackEnabled: false,
@@ -767,6 +769,7 @@ async function pollStatus(): Promise<void> {
     state.audioStationFallbackEnabled =
       status.audioStationFallbackEnabled === true;
     state.screenWakeLockEnabled = status.screenWakeLockEnabled === true;
+    state.pageSize = status.pageSize;
     syncPlayerConfig();
     if (status.ready) renderStats(status);
     updateRefreshControl();
@@ -808,7 +811,7 @@ async function reloadLibrary(): Promise<void> {
           q: state.q,
           sort: state.sort,
           offset: 0,
-          limit: PAGE_SIZE,
+          limit: state.pageSize,
         },
         controller.signal,
       );
@@ -821,7 +824,7 @@ async function reloadLibrary(): Promise<void> {
           q: state.q,
           sort: state.sort,
           offset: 0,
-          limit: PAGE_SIZE,
+          limit: state.pageSize,
         },
         controller.signal,
       );
@@ -965,7 +968,7 @@ function syncPlayerConfig(): void {
     fallbackEnabled: state.audioStationFallbackEnabled,
     screenWakeLockEnabled: state.screenWakeLockEnabled,
     signedIn: state.session.authenticated,
-    queueWindowSize: PAGE_SIZE,
+    queueWindowSize: state.pageSize,
     queueRefillThreshold: QUEUE_REFILL_THRESHOLD,
     fetchQueuePage,
     onQueueCleared: cancelPendingPlayAll,
@@ -1088,7 +1091,7 @@ async function playAllSearchResults(): Promise<void> {
     const response = await api.playbackTracks({
       ...descriptor,
       offset: 0,
-      limit: PAGE_SIZE,
+      limit: state.pageSize,
     });
     if (token !== playAllToken) return;
     if (response.tracks.length === 0) {
@@ -1097,7 +1100,7 @@ async function playAllSearchResults(): Promise<void> {
     }
     const tracks = response.tracks.map(playerTrackFromSummary);
     const source = createQueueSource(descriptor, {
-      requested: PAGE_SIZE,
+      requested: state.pageSize,
       received: tracks.length,
       total: response.total,
       libraryVersion: response.libraryVersion,
@@ -1565,6 +1568,7 @@ async function loadLibrary(): Promise<void> {
 function renderStats(status: StatusResponse): void {
   state.totalAlbums = status.albumCount;
   state.totalTracks = status.trackCount;
+  state.pageSize = status.pageSize;
   statsEl.textContent = `${formatCount(status.albumCount)} albums · ${formatCount(status.trackCount)} tracks`;
   statsEl.title = status.lastRefreshed
     ? `Library indexed ${formatDateTime(status.lastRefreshed)}`
@@ -1600,7 +1604,7 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
         q: state.q,
         sort: state.sort,
         offset: reset ? 0 : state.albums.length,
-        limit: PAGE_SIZE,
+        limit: state.pageSize,
       },
       controller.signal,
     );
@@ -1850,7 +1854,7 @@ async function loadTrackResults(reset: boolean): Promise<number | null> {
         q: state.q,
         sort: state.sort,
         offset: reset ? 0 : state.tracks.length,
-        limit: PAGE_SIZE,
+        limit: state.pageSize,
       },
       controller.signal,
     );
@@ -1916,16 +1920,16 @@ function updateSummary(): void {
   if (state.searchMode === 'tracks') {
     setSummary(
       filtered
-        ? `${formatCount(state.trackTotal)} of ${formatCount(state.totalTracks)} tracks`
-        : `${formatCount(state.trackTotal)} tracks`,
+        ? `Showing ${formatCount(state.tracks.length)} / ${formatCount(state.trackTotal)} of ${formatCount(state.totalTracks)} tracks`
+        : `Showing ${formatCount(state.tracks.length)} / ${formatCount(state.totalTracks)} tracks`,
     );
     return;
   }
 
   setSummary(
     filtered
-      ? `${formatCount(state.total)} of ${formatCount(state.totalAlbums)} albums`
-      : `${formatCount(state.total)} albums`,
+      ? `Showing ${formatCount(state.albums.length)} / ${formatCount(state.total)} of ${formatCount(state.totalAlbums)} albums`
+      : `Showing ${formatCount(state.albums.length)} / ${formatCount(state.totalAlbums)} albums`,
   );
   updatePlayAllButton();
 }

@@ -504,6 +504,8 @@ export interface FixtureOptions {
   /** Full-resolution covers keyed by the representative track path. */
   originalCoverImages?: Map<string, { body: Buffer; contentType: string }>;
   ready?: boolean;
+  /** Results per page exposed by /api/status and used by the fixture app. */
+  pageSize?: number;
   extraRows?: AlbumRow[];
   /** Origins allowed to select an origin-based playback redirect target. */
   allowedFrontendOrigins?: string[];
@@ -576,6 +578,7 @@ export async function createFixtureContext(
     lastCheckedAt: '2026-01-01T00:00:00.000Z',
     refreshing: false,
     checkIntervalMs: 60_000,
+    pageSize: options.pageSize ?? 48,
     error: options.ready === false ? 'Fixture library is unavailable' : null,
     playbackEnabled: options.authEnabled ?? true,
     nativePlaybackEnabled:
@@ -781,7 +784,7 @@ export async function createFixtureContext(
       },
     },
     config: {
-      defaultPageSize: 48,
+      defaultPageSize: options.pageSize ?? 48,
       maxPageSize: 200,
       dsmUrl: authEnabled ? 'https://dsm.example' : null,
       dsmFrontendAllowedOrigins: options.allowedFrontendOrigins ?? [],
