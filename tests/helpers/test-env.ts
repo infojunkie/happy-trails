@@ -15,6 +15,7 @@ const TEST_ENV_DEFAULTS = [
   'ARTIST_SEPARATOR_WORDS',
   'ARTIST_EXCEPTIONS',
   'REGION_TAGS',
+  'LOOSE_TRACKS_FOLDERS',
 ] as const;
 
 for (const name of TEST_ENV_DEFAULTS) {

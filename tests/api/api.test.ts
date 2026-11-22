@@ -276,6 +276,14 @@ test('GET /api/genres returns separate genre, region, and series facets', async 
   assert.ok(facets.body.regions.length > 0);
   assert.ok(facets.body.genres.every((genre) => genre.albumCount > 0));
   assert.ok(facets.body.regions.every((region) => region.albumCount > 0));
+  for (const facet of [
+    ...facets.body.genres,
+    ...facets.body.regions,
+    ...facets.body.series,
+  ]) {
+    assert.equal(typeof facet.trackCount, 'number', facet.name);
+    assert.ok(facet.trackCount >= facet.albumCount, facet.name);
+  }
   assert.ok(facets.body.genres.some((genre) => genre.name === 'Rock'));
   assert.ok(facets.body.genres.every((genre) => genre.name !== 'Brazil'));
   assert.ok(facets.body.regions.some((region) => region.name === 'Brazil'));

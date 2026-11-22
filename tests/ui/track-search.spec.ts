@@ -32,7 +32,7 @@ test('Tracks mode switches results and records the URL', async ({ page }) => {
   await expect(page.locator('#result-summary')).toHaveText(/[\d,]+ tracks/);
 });
 
-test('track search filters rows and facet counts stay album-level', async ({
+test('track search filters rows and facet counts switch to tracks', async ({
   page,
 }) => {
   await page.goto('/?view=tracks');
@@ -49,11 +49,11 @@ test('track search filters rows and facet counts stay album-level', async ({
   await expect(row.locator('.track-result-artist')).toContainText('Miles Davis');
   await expect(row.locator('.track-result-album')).toHaveText('Kind of Blue');
 
-  // The sidebar still counts albums, and says so in track mode.
+  // Tracks mode shows track counts and says so in the facet tooltip.
   await expandFacet(page, '#genre-toggle', '#genre-panel');
   await expect(page.locator('#genre-list .facet-count').first()).toHaveAttribute(
     'title',
-    'Count of matching albums',
+    'Count of matching tracks',
   );
 
   await page.locator('#genre-list input[value="jazz"]').check();

@@ -476,7 +476,9 @@ test('the screen wake lock feature flag disables the request', async ({
   expect((await wakeLockCalls(page)).requests).toBe(0);
 });
 
-test('track Play queues the album from that track onward', async ({ page }) => {
+test('track Play queues the whole album and starts at that track', async ({
+  page,
+}) => {
   await signIn(page);
   await routeAudio(page);
   await openAbbeyRoad(page);
@@ -489,15 +491,22 @@ test('track Play queues the album from that track onward', async ({ page }) => {
   await something.locator('.track-play').click();
 
   await expect(page.locator('#player-title')).toHaveText('Something');
-  await expect(page.locator('#player-queue-count')).toHaveText('4');
+  await expect(page.locator('#player-queue-count')).toHaveText('5');
   await page.locator('#player-queue-toggle').click();
   const titles = page.locator('#player-queue-list .player-queue-title');
   await expect(titles).toHaveText([
+    'Come Together',
     'Something',
     'While My Guitar Gently Weeps',
     "Maxwell's Silver Hammer",
     'Come Together (Take 1)',
   ]);
+  // The album is fully queued, with the clicked track as the play pointer.
+  await expect(
+    page.locator(
+      '#player-queue-list .player-queue-item[aria-current="true"] .player-queue-title',
+    ),
+  ).toHaveText('Something');
 });
 
 test('queue items can be reordered and removed; deleting the current item advances', async ({

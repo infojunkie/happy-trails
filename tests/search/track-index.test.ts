@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
-import type { TrackSummary } from '../../src/shared/types.js';
+import type { AlbumRow } from '../../src/server/db.js';
+import type { GenreFacet, TrackSummary } from '../../src/shared/types.js';
 import { createFixtureContext, type FixtureContext } from '../fixtures/library.js';
 
 let context: FixtureContext;
@@ -244,4 +245,140 @@ test('tracks and albums agree on merged-album track counts', () => {
   );
   assert.equal(abbeyTracks.length, abbey.trackCount);
   assert.ok(abbeyTracks.some((track) => track.title === 'Come Together (Take 1)'));
+});
+
+test('loose-track folders keep Tracks results but not Albums entries', async () => {
+  const looseRows: AlbumRow[] = [
+    {
+      album: 'Loose Covers {Loose Series}',
+      artist: 'Various Artists',
+      year: 2020,
+      track_count: 2,
+      duration: 400,
+      latest: '2025-01-01T00:00:00',
+      genres: 'HiddenOnly',
+      track_artists: ['Various Artists'],
+      composers: [],
+      comments: [],
+      cover_path: '/music/loose/covers/a.flac',
+      title_track: false,
+      track_only: true,
+    },
+    {
+      album: 'Mixed Album',
+      artist: 'Mixed Artist',
+      year: 2021,
+      track_count: 1,
+      duration: 200,
+      latest: '2025-01-02T00:00:00',
+      genres: 'MixedOnly',
+      track_artists: ['Mixed Artist'],
+      composers: [],
+      comments: [],
+      cover_path: '/music/loose/random/mixed.flac',
+      title_track: false,
+      track_only: true,
+    },
+    {
+      album: 'Mixed Album',
+      artist: 'Mixed Artist',
+      year: 2021,
+      track_count: 1,
+      duration: 200,
+      latest: '2025-01-02T00:00:00',
+      genres: 'MixedOnly',
+      track_artists: ['Mixed Artist'],
+      composers: [],
+      comments: [],
+      cover_path: '/music/albums/mixed.flac',
+      title_track: false,
+      track_only: false,
+    },
+  ];
+  const loose = await createFixtureContext({ extraRows: looseRows });
+  const allQuery = { q: '', sort: 'recent' as const, offset: 0, limit: 1000 };
+  try {
+    const albumNames = loose.index
+      .queryAlbums(allQuery)
+      .albums.map((album) => album.album);
+    assert.ok(!albumNames.includes('Loose Covers {Loose Series}'));
+    // A mixed album with at least one normal track stays visible.
+    assert.ok(albumNames.includes('Mixed Album'));
+    assert.equal(loose.index.queryAlbums({ ...allQuery, q: 'serie:"Loose Series"' }).total, 0);
+
+    // Album-mode Play all uses the same visibility rule.
+    const playAlbums = new Set(
+      loose.index
+        .queryAlbumTracks(allQuery)
+        .tracks.map((track) => track.album),
+    );
+    assert.ok(!playAlbums.has('Loose Covers {Loose Series}'));
+    assert.ok(playAlbums.has('Mixed Album'));
+
+    // Tracks view still shows every track, with a working album lookup.
+    const looseTracks = loose.index
+      .queryTracks(allQuery)
+      .tracks.filter((track) => track.album === 'Loose Covers {Loose Series}');
+    assert.equal(looseTracks.length, 2);
+    const looseKey = looseTracks[0]?.albumKey;
+    assert.ok(looseKey);
+    assert.equal(
+      loose.index.albumForKey(looseKey)?.album,
+      'Loose Covers {Loose Series}',
+    );
+
+    // Facet album counts ignore hidden albums; track counts do not.
+    const counts = (facets: GenreFacet[], name: string) => {
+      const facet = facets.find((item) => item.name === name);
+      return facet
+        ? { albumCount: facet.albumCount, trackCount: facet.trackCount }
+        : null;
+    };
+    assert.deepEqual(counts(loose.index.genres(), 'HiddenOnly'), {
+      albumCount: 0,
+      trackCount: 2,
+    });
+    assert.deepEqual(counts(loose.index.genres(), 'MixedOnly'), {
+      albumCount: 1,
+      trackCount: 2,
+    });
+    assert.deepEqual(counts(loose.index.series(), 'Loose Series'), {
+      albumCount: 0,
+      trackCount: 2,
+    });
+
+    // Track counts equal what the corresponding Tracks filter returns.
+    for (const facet of loose.index.genres()) {
+      assert.equal(
+        facet.trackCount,
+        loose.index.queryTracks({
+          ...allQuery,
+          q: `genre:"${facet.name}"`,
+        }).total,
+        `genre ${facet.name}`,
+      );
+    }
+    for (const facet of loose.index.regions()) {
+      assert.equal(
+        facet.trackCount,
+        loose.index.queryTracks({
+          ...allQuery,
+          q: `region:"${facet.name}"`,
+        }).total,
+        `region ${facet.name}`,
+      );
+    }
+    for (const facet of loose.index.series()) {
+      assert.equal(
+        facet.trackCount,
+        loose.index.queryTracks({
+          ...allQuery,
+          q: `serie:"${facet.name}"`,
+        }).total,
+        `serie ${facet.name}`,
+      );
+    }
+  } finally {
+    loose.close();
+  }
 });

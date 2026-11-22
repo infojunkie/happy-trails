@@ -18,7 +18,7 @@ playback, and Play all result sources). Stage 4 (polish and hardening) remains.
 
 | Topic | Decision |
 | --- | --- |
-| Track Play | Queue the album **from the clicked track onward**. Album Play queues the whole album from track 1. If the album context cannot be loaded, queue just the clicked track. |
+| Track Play | Queue the **whole album** and start playback at the clicked track. Album Play queues the whole album from track 1. If the album context cannot be loaded, queue just the clicked track. |
 | Deleting the playing item | Advance to the next queue item; stop if the queue becomes empty. |
 | Persistence | Restore the queue/current item/position after a reload, paused. |
 | Crossfade | Not implemented. Use an instant switch between two preloaded `<audio>` elements. |
@@ -170,8 +170,9 @@ apply to the fallback redirect.
 
 ### Stage 3 — Album playback and queue (done)
 
-- Album Play queues all tracks; a track Play queues the album from that track
-  onward (or the single track if album context cannot be loaded).
+- Album Play queues all tracks; a track Play queues the whole album and starts
+  at the clicked track (or queues the single track if album context cannot be
+  loaded).
 - Album-dialog Play respects the active track filter; the dialog closes when a
   native Play action starts so the footer is reachable.
 - Queue panel: current/next highlight, click-to-play, remove, clear, move

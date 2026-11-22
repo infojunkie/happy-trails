@@ -41,6 +41,13 @@ export interface AlbumRow {
   title_track: boolean;
   /** Representative file path, used to resolve an AudioStation cover id. */
   cover_path: string;
+  /**
+   * True when every track of this raw album lives under a configured
+   * `LOOSE_TRACKS_FOLDERS` prefix. Such albums keep their track metadata but
+   * are omitted from the Albums view. ALBUM_QUERY always sets this; fixture
+   * rows may omit it and default to visible.
+   */
+  track_only?: boolean;
 }
 
 export interface TrackRow {
@@ -101,6 +108,12 @@ const ALBUM_QUERY = `
     -- rather than a series; the detector uses this as a negative signal.
     BOOL_OR(left(lower(m.album), char_length(m.title)) = lower(m.title))
       AS title_track,
+    -- Hidden only when every track of this raw album sits under a loose
+    -- folder; a real album with a stray loose copy stays visible.
+    BOOL_AND(EXISTS (
+      SELECT 1 FROM unnest($1::text[]) AS f(folder)
+       WHERE starts_with(m.path, f.folder || '/')
+    )) AS track_only,
     MIN(m.path) AS cover_path
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
@@ -227,7 +240,9 @@ export async function loadLibraryRows(): Promise<{
   const client = await pool.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-    const albums = await client.query<AlbumRow>(ALBUM_QUERY);
+    const albums = await client.query<AlbumRow>(ALBUM_QUERY, [
+      config.looseTracksFolders,
+    ]);
     const tracks = await client.query<TrackIndexRow>(TRACK_INDEX_QUERY);
     await client.query('COMMIT');
     return { albums: albums.rows, tracks: tracks.rows };

@@ -66,6 +66,7 @@ CREATE TABLE albums (
   duration    INTEGER NOT NULL,
   latest      TEXT,                   -- MAX(music.date), ISO-like text
   cover_path  TEXT,                   -- representative file path
+  track_only    INTEGER NOT NULL,       -- 1 = every track is in a loose folder
   search_text TEXT NOT NULL,          -- folded album + artist + sources + guests
   search_album TEXT NOT NULL,         -- folded album title + source titles
   search_artist TEXT NOT NULL,        -- folded album, parsed, and track artists
@@ -99,9 +100,11 @@ CREATE TABLE album_comments (          -- distinct track comments, sorted
 ) STRICT;
 
 CREATE TABLE series (
-  key       TEXT PRIMARY KEY,          -- folded series/label name
-  name      TEXT NOT NULL,             -- canonical first spelling
-  name_rank INTEGER NOT NULL
+  key         TEXT PRIMARY KEY,        -- folded series/label name
+  name        TEXT NOT NULL,           -- canonical first spelling
+  name_rank   INTEGER NOT NULL,
+  album_count INTEGER NOT NULL,        -- visible albums in this series
+  track_count INTEGER NOT NULL         -- tracks of all albums in this series
 ) STRICT;
 
 CREATE TABLE album_series (
@@ -112,9 +115,11 @@ CREATE TABLE album_series (
 ) STRICT;
 
 CREATE TABLE genres (
-  key       TEXT PRIMARY KEY,          -- lowercased, whitespace-collapsed
-  name      TEXT NOT NULL,             -- canonical first spelling
-  name_rank INTEGER NOT NULL
+  key         TEXT PRIMARY KEY,        -- lowercased, whitespace-collapsed
+  name        TEXT NOT NULL,           -- canonical first spelling
+  name_rank   INTEGER NOT NULL,
+  album_count INTEGER NOT NULL,        -- visible albums carrying this genre
+  track_count INTEGER NOT NULL         -- tracks whose own tags carry it
 ) STRICT;
 
 CREATE TABLE album_genres (
@@ -125,9 +130,11 @@ CREATE TABLE album_genres (
 ) STRICT;
 
 CREATE TABLE regions (
-  key       TEXT PRIMARY KEY,          -- folded country/region name
-  name      TEXT NOT NULL,             -- canonical first spelling
-  name_rank INTEGER NOT NULL
+  key         TEXT PRIMARY KEY,        -- folded country/region name
+  name        TEXT NOT NULL,           -- canonical first spelling
+  name_rank   INTEGER NOT NULL,
+  album_count INTEGER NOT NULL,        -- visible albums carrying this region
+  track_count INTEGER NOT NULL         -- tracks whose own tags carry it
 ) STRICT;
 
 CREATE TABLE album_regions (
@@ -250,9 +257,10 @@ WITH search_term_0 AS MATERIALIZED (
 )
 SELECT ...
   FROM albums a
- WHERE EXISTS (
-   SELECT 1 FROM search_term_0 WHERE search_term_0.rowid = a.id
- )
+ WHERE a.track_only = 0
+   AND EXISTS (
+     SELECT 1 FROM search_term_0 WHERE search_term_0.rowid = a.id
+   )
 ```
 
 The match string includes a field column, for example
@@ -276,12 +284,17 @@ WITH search_term_0 AS MATERIALIZED (
 )
 SELECT a.key, a.album, a.artist, a.year, a.track_count, a.duration, a.latest
   FROM albums a
- WHERE EXISTS (
+ WHERE a.track_only = 0
+   AND EXISTS (
          SELECT 1 FROM search_term_0 WHERE search_term_0.rowid = a.id
        )
  ORDER BY a.latest DESC, a.album_rank, a.artist_rank
  LIMIT ? OFFSET ?;
 ```
+
+Every album listing and album-mode Play all query starts with
+`a.track_only = 0`; album-key lookups used by the Tracks view deliberately do
+not, so a loose track can still open its album dialog.
 
 `search_text` contains the merged album title, the effective album artist, all
 parsed artists, every raw source title, every distinct track-level artist,
@@ -346,9 +359,10 @@ EXISTS (
 
 Fielded `genre:` and `region:` terms use the same `json_each` lookup, so only
 tracks carrying that tag match. `serie:` remains album-level because a series
-belongs to the album, not an individual track. Sidebar facet counts remain
-album counts; the UI labels them “Count of matching albums” in Tracks mode. The
-row pills come from `tracks.genre_names`/`region_names`.
+belongs to the album, not an individual track. The sidebar shows the facet's
+`trackCount` in Tracks mode and its `albumCount` in Albums mode, so each number
+equals the result of selecting that filter. The row pills come from
+`tracks.genre_names`/`region_names`.
 
 The row query joins the album for identity and display pills:
 
@@ -376,25 +390,24 @@ branches are materialized as one `UNION` CTE; composing them as correlated
 
 ### Genre, region, and series facets
 
+Both counts are accumulated while the index is built, so the facets are a
+single table read:
+
 ```sql
-SELECT g.key, g.name, COUNT(DISTINCT ag.album_id) AS album_count
-  FROM genres g
-  JOIN album_genres ag ON ag.genre_key = g.key
- GROUP BY g.key, g.name, g.name_rank
- ORDER BY album_count DESC, g.name_rank ASC;
-
-SELECT r.key, r.name, COUNT(DISTINCT ar.album_id) AS album_count
-  FROM regions r
-  JOIN album_regions ar ON ar.region_key = r.key
- GROUP BY r.key, r.name, r.name_rank
- ORDER BY album_count DESC, r.name_rank ASC;
-
-SELECT s.key, s.name, COUNT(DISTINCT ase.album_id) AS album_count
-  FROM series s
-  JOIN album_series ase ON ase.serie_key = s.key
- GROUP BY s.key, s.name, s.name_rank
- ORDER BY album_count DESC, s.name_rank ASC;
+SELECT key, name, album_count, track_count
+  FROM genres
+ ORDER BY album_count DESC, name_rank ASC;
+-- regions and series use the same shape.
 ```
+
+`album_count` increments once per visible album (`track_only = 0`) carrying the
+tag. `track_count` increments once per indexed track carrying it: the track's
+own `genre_keys`/`region_keys` for genres and regions, and the series of the
+track's album for series. Tracks of hidden `track_only` albums therefore still
+contribute to `track_count`, matching what the same filter returns in Tracks
+mode. Tags that occur only on hidden albums stay in the table with
+`album_count = 0`; the client hides them in Albums mode and shows them in Tracks
+mode.
 
 ## Adding a new field or facet
 

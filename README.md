@@ -26,6 +26,9 @@ design and current status.
 ![Screenshot of track listing with playback](docs/screenshot-tracks.png)
 
 - Album grid sorted by latest upload date (`MAX(date)`).
+- Tracks stored under `LOOSE_TRACKS_FOLDERS` prefixes (covers collections,
+  random-track folders, …) stay fully searchable in Tracks mode, but the
+  albums they name do not appear in the Albums view or its facet counts.
 - Multi-CD albums whose titles differ only by a whitespace-separated
   ` // <disc label>` suffix are merged into one album; the original titles
   (including the labels) remain searchable.
@@ -42,7 +45,7 @@ design and current status.
   `SCREEN_WAKE_LOCK_ENABLED` is on and the browser allows it), which keeps the
   page from being hidden at a track boundary on Android. Play controls and the
   footer are only shown while signed in. Album Play queues the album; a
-  track Play queues the album from that track onward. The queue supports
+  track Play queues the whole album and starts at the clicked track. The queue supports
   removing, reordering, clearing, and click-to-play, advances automatically with
   a preloaded next track, and survives a page reload paused (the restored queue
   appears after sign-in). Tracks whose format the browser cannot decode are
@@ -83,15 +86,16 @@ design and current status.
 - Long genre/region lists end in a clickable **+N more** pill in album cards,
   the album dialog, and track rows. It expands the list to every tag and
   switches to **Show less** to collapse it again.
-- Genre facet with album counts, facet search, and multi-select. Each selection
-  adds a `genre:"<name>"` term to the search bar.
+- Genre facet with facet search and multi-select. Counts follow the result
+  mode: number of albums in Albums mode, number of tracks in Tracks mode. Each
+  selection adds a `genre:"<name>"` term to the search bar.
 - Country and region tags in the genre column (Brazil, France, Corsica,
   Catalonia, …) are detected and exposed as a separate **Regions** facet, with
   their own filter. Selections add `region:"<name>"` terms. The genre facet
   contains only non-location tags.
 - A **Series** facet lists braced series names and `SERIES_ALLOWLIST` matches
-  with album counts, ordered by occurrence. It is a checkbox list: each
-  selection adds `serie:"<name>"` to the search bar joined with `OR` (a
+  with album or track counts, ordered by occurrence. It is a checkbox list:
+  each selection adds `serie:"<name>"` to the search bar joined with `OR` (a
   match-any selection), and Clear removes them.
 - Genre and region facets each have **Match any** / **Match all** modes. Any
   joins the selected terms with `OR` in the search bar; All joins them with
@@ -429,6 +433,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
 | `SERIES_DENYLIST` | — | Series names that remove an album from all series when found anywhere in its title. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
 | `SERIES_ALLOWLIST` | — | Additional series names matched anywhere in an album title that has no `{...}` series. Entries are checked in configured order and only the first match is retained for the album. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
+| `LOOSE_TRACKS_FOLDERS` | — | Folder prefixes holding loose tracks, such as covers collections and random-track folders. Tracks under them stay fully indexed and searchable in Tracks mode, but the albums they name are hidden from the Albums view, album-mode Play all, and album facet counts. Entries are path prefixes (the whole subtree is covered), separated by a vertical-bar character; trailing slashes are ignored. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
 ### Behind DSM's reverse proxy
@@ -549,14 +554,26 @@ Every `music` row is also written to a `tracks` table with its title, track
 artist, album artist, raw source title, composer, and its own genre/region
 display names and keys, plus a separate `track_search` FTS index. Track search
 uses the track's own tags for `genre:` and `region:` filters; album-title and
-`serie:` terms resolve through the album, and the sidebar facet counts remain
-album counts. `track:` searches track titles and, in Albums mode, finds albums
-that contain a matching track. In file-backed mode the aggregation and SQLite
-build run in a worker thread; the main thread keeps serving the previous index
-and the server listens from startup.
+`serie:` terms resolve through the album. `track:` searches track titles and,
+in Albums mode, finds albums that contain a matching track. In file-backed mode
+the aggregation and SQLite build run in a worker thread; the main thread keeps
+serving the previous index and the server listens from startup.
 See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
+
+Folder prefixes in `LOOSE_TRACKS_FOLDERS` (covers collections, random tracks,
+…) change album visibility, not indexing. An album is flagged `track_only` when
+every one of its raw titles consists solely of tracks under those prefixes. Such
+albums keep their track counts, tags, sources, and comments in the index, and
+their tracks remain in the Tracks view, but the albums are omitted from the
+Albums listing, album-mode Play all, the status album total, and the album side
+of facet counts. A mixed album with at least one track outside a loose folder
+stays visible with its normal counts. Facet rows carry both counts, precomputed
+at build time: `albumCount` counts visible albums; `trackCount` counts every
+indexed track, using the track's own genre/region tags and its album's series,
+so it matches the Tracks-mode filter result. The client displays the count for
+the active mode and hides rows whose active-mode count is zero.
 
 Country/region detection uses `Intl.DisplayNames` for ISO 3166 country names in
 English, French, German, Spanish, Portuguese, and Italian, plus UN M49
@@ -788,7 +805,8 @@ editing, and persistence are described in
 Play controls on album cards, the album dialog, and track rows start native
 playback. They, and the footer, are only shown while signed in; the stream
 endpoint independently returns `401` without a session. Album Play queues the
-whole album; a track Play queues the album from that track onward.
+whole album; a track Play also queues the whole album but starts at the clicked
+track.
 Ctrl/Cmd-click (or a middle-click) on a Play link opens the Audio Station
 handoff instead. The album dialog also shows a secondary **Audio Station** link
 when the fallback is enabled, and an unplayable track's error state links to
@@ -858,7 +876,7 @@ check keeps retrying in the background.
 
 ## Tests
 
-The suite is deterministic and does not require PostgreSQL, DSM, or network access. It uses synthetic album/track fixtures and fake cover, session, and playback services. `tests/helpers/test-env.ts` is loaded with `node --import` before the app config, clearing the search-related overrides (`SERIES_ALLOWLIST`, `SERIES_EXCEPTIONS`, `ARTIST_SEPARATOR_WORDS`, `ARTIST_EXCEPTIONS`, `REGION_TAGS`) so a developer `.env` cannot change fixture results.
+The suite is deterministic and does not require PostgreSQL, DSM, or network access. It uses synthetic album/track fixtures and fake cover, session, and playback services. `tests/helpers/test-env.ts` is loaded with `node --import` before the app config, clearing the search-related overrides (`SERIES_ALLOWLIST`, `SERIES_EXCEPTIONS`, `ARTIST_SEPARATOR_WORDS`, `ARTIST_EXCEPTIONS`, `REGION_TAGS`, `LOOSE_TRACKS_FOLDERS`) so a developer `.env` cannot change fixture results.
 
 ```bash
 npm run test:install-browsers  # once per machine/CI
@@ -901,7 +919,7 @@ check.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and album-from-track queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including 48-item refills after the visible query changes.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including 48-item refills after the visible query changes.
 - Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts`; backend tests cover the album-mode flattening order and pagination.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.
@@ -938,7 +956,9 @@ accepted.
 
 Index state and library totals. `libraryVersion` identifies the current
 snapshot; clients compare it with the version of the data they loaded to decide
-whether the Refresh control is enabled. `lastCheckedAt` and `refreshing`
+whether the Refresh control is enabled. `albumCount` counts albums visible in
+the Albums view (loose-track collections are excluded); `trackCount` counts
+every indexed track. `lastCheckedAt` and `refreshing`
 describe the change-detection loop. `playbackEnabled` is true when a DSM URL is
 configured, i.e. when users can sign in and use the Play links.
 `screenWakeLockEnabled` controls whether the native player may hold a screen
@@ -964,18 +984,33 @@ wake lock while it is playing.
 
 ### `GET /api/genres`
 
-All genres, regions, and series and their album counts, sorted by count then
-name. `key` is the normalised value accepted by the matching filter or used by
-the series radio list. `libraryVersion` identifies the snapshot the counts
-came from.
+All genres, regions, and series with both their album and track counts. The
+client displays `albumCount` in Albums mode and `trackCount` in Tracks mode;
+counts are sorted by album count then name. `key` is the normalised value
+accepted by the matching filter or used by the series radio list.
+`totalAlbums` counts visible albums (loose-track collections are excluded);
+`libraryVersion` identifies the snapshot the counts came from.
+
+`albumCount` counts visible albums carrying the tag. `trackCount` counts every
+indexed track carrying it: for genres and regions, each track's own tags; for
+series, the tracks of albums in that series. Track counts include tracks whose
+album is hidden by `LOOSE_TRACKS_FOLDERS`, so they match the result of the same
+filter in Tracks mode. A facet whose every album is hidden has
+`albumCount: 0` and is not rendered in Albums mode.
 
 ```json
 {
   "totalAlbums": 33356,
   "libraryVersion": 1,
-  "genres": [{ "key": "jazz", "name": "Jazz", "albumCount": 8726 }],
-  "regions": [{ "key": "ethiopia", "name": "Ethiopia", "albumCount": 42 }],
-  "series": [{ "key": "rock candy", "name": "Rock Candy", "albumCount": 228 }]
+  "genres": [
+    { "key": "jazz", "name": "Jazz", "albumCount": 8726, "trackCount": 91234 }
+  ],
+  "regions": [
+    { "key": "ethiopia", "name": "Ethiopia", "albumCount": 42, "trackCount": 511 }
+  ],
+  "series": [
+    { "key": "rock candy", "name": "Rock Candy", "albumCount": 228, "trackCount": 2954 }
+  ]
 }
 ```
 
@@ -1050,9 +1085,11 @@ quoted value is matched as a contiguous phrase rather than as separate words.
 | `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). In Tracks mode, this track's raw source title. |
 | `all` / `any` | All indexed fields, equivalent to a bare term. |
 
-In Tracks mode, terms are evaluated per track. `genre:`, `region:`, and
-`serie:` still match the album's tags, so the sidebar counts remain album
-counts (the UI labels them “Count of matching albums”).
+In Tracks mode, terms are evaluated per track. `genre:` and `region:` match
+each track's own tags, while `serie:` remains album-level. The sidebar follows
+the mode: album counts in Albums mode, track counts in Tracks mode (labelled
+“Count of matching tracks”); both are computed so each count equals what
+selecting that filter returns.
 
 A query made only of unquoted keywords is treated as one contiguous phrase:
 `abbey road` behaves like `"abbey road"`. Use `abbey AND road` to search the

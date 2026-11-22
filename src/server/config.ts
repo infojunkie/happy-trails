@@ -150,6 +150,23 @@ function seriesAllowlist(): string[] {
     : [];
 }
 
+/**
+ * Folder prefixes holding loose tracks (covers collections, random tracks).
+ * Tracks under them stay fully indexed so the Tracks view keeps working, but
+ * their albums are flagged no-album and omitted from the Albums view.
+ * Entries are separated by "|"; trailing slashes are ignored.
+ */
+export function parseLooseTracksFolders(
+  rawValue: string | undefined,
+): string[] {
+  const raw = (rawValue ?? '').trim();
+  if (!raw) return [];
+  return raw
+    .split('|')
+    .map((value) => value.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
 const dsmUrl = (process.env.DSM_URL ?? process.env.DSADDR ?? '').trim();
 
 export interface DsmFrontendTarget {
@@ -360,6 +377,13 @@ export const config = {
   seriesDenylist: seriesDenylist(),
   /** Additional series names matched anywhere in a title without {...}. */
   seriesAllowlist: seriesAllowlist(),
+  /**
+   * Folder prefixes whose tracks keep their album metadata but do not create
+   * entries in the Albums view.
+   */
+  looseTracksFolders: parseLooseTracksFolders(
+    process.env.LOOSE_TRACKS_FOLDERS,
+  ),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
   /**

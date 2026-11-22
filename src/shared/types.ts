@@ -28,12 +28,20 @@ export interface AlbumSummary {
   comments: string[];
 }
 
-/** A genre and the number of albums carrying it. */
+/** A genre, region, or series and the number of albums/tracks carrying it. */
 export interface GenreFacet {
   /** Normalised, lowercase key used in URLs and filter parameters. */
   key: string;
   name: string;
+  /** Visible albums carrying the tag (excludes no-album/loose collections). */
   albumCount: number;
+  /**
+   * Tracks carrying the tag. For genres and regions this counts each track's
+   * own tags; for series it counts the tracks of albums in that series. It
+   * includes tracks whose album is hidden from the Albums view, matching what
+   * the same filter returns in Tracks mode.
+   */
+  trackCount: number;
 }
 
 export interface GenresResponse {

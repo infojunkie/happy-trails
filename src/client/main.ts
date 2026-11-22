@@ -1162,17 +1162,17 @@ function playTrackFromAlbumContext(
   cancelPendingPlayAll();
   const index = context.tracks.findIndex((track) => track.id === musicId);
   if (index < 0) return;
-  const items = context.tracks
-    .slice(index)
-    .map((track) =>
-      playerTrackFromTrack(
-        track,
-        context.albumKey,
-        context.album,
-        context.artist,
-      ),
-    );
-  player.playTracks(items, 0);
+  // Queue the whole album so the queue keeps the same size whichever track is
+  // clicked, and start playback at the clicked track.
+  const items = context.tracks.map((track) =>
+    playerTrackFromTrack(
+      track,
+      context.albumKey,
+      context.album,
+      context.artist,
+    ),
+  );
+  player.playTracks(items, index);
 }
 
 async function playTrackFromSearch(track: TrackSummary): Promise<void> {
@@ -2370,6 +2370,32 @@ function visibleFacetItems(
   return [...preview, ...selectedExtras];
 }
 
+/** Facet count for the active result mode: albums or tracks. */
+function facetCount(facet: GenreFacet): number {
+  return state.searchMode === 'tracks'
+    ? facet.trackCount
+    : facet.albumCount;
+}
+
+function facetCountTitle(): string | undefined {
+  return state.searchMode === 'tracks'
+    ? 'Count of matching tracks'
+    : undefined;
+}
+
+/**
+ * Facets with a non-zero count in the active mode. A selected facet stays
+ * visible at zero so its filter chip can still be cleared.
+ */
+function activeFacetItems(
+  items: GenreFacet[],
+  selected: Set<string>,
+): GenreFacet[] {
+  return items.filter(
+    (facet) => selected.has(facet.key) || facetCount(facet) > 0,
+  );
+}
+
 function buildFacetRows(
   items: GenreFacet[],
   selected: Set<string>,
@@ -2379,7 +2405,7 @@ function buildFacetRows(
     .sort(
       (a, b) =>
         Number(selected.has(b.key)) - Number(selected.has(a.key)) ||
-        b.albumCount - a.albumCount ||
+        facetCount(b) - facetCount(a) ||
         a.name.localeCompare(b.name),
     )
     .map((facet) => {
@@ -2401,11 +2427,8 @@ function buildFacetRows(
         }),
         el('span', {
           class: 'facet-count',
-          text: formatCount(facet.albumCount),
-          title:
-            state.searchMode === 'tracks'
-              ? 'Count of matching albums'
-              : undefined,
+          text: formatCount(facetCount(facet)),
+          title: facetCountTitle(),
         }),
       );
     });
@@ -2414,46 +2437,62 @@ function buildFacetRows(
 function updateFacetChrome(): void {
   clearGenresButton.hidden = state.selectedGenres.length === 0;
   const hasQuery = state.genreQuery.trim().length > 0;
-  const canToggle = state.facets.length > FACET_PREVIEW && !hasQuery;
+  const count = activeFacetItems(
+    state.facets,
+    selectedGenreKeys(),
+  ).length;
+  const canToggle = count > FACET_PREVIEW && !hasQuery;
   toggleAllButton.hidden = !canToggle;
   if (canToggle) {
     toggleAllButton.textContent = state.genreExpanded
       ? 'Show fewer genres'
-      : `Show all ${formatCount(state.facets.length)} genres`;
+      : `Show all ${formatCount(count)} genres`;
   }
 }
 
 function updateRegionChrome(): void {
   clearRegionsButton.hidden = state.selectedRegions.length === 0;
   const hasQuery = state.regionQuery.trim().length > 0;
-  const canToggle = state.regionFacets.length > FACET_PREVIEW && !hasQuery;
+  const count = activeFacetItems(
+    state.regionFacets,
+    selectedRegionKeys(),
+  ).length;
+  const canToggle = count > FACET_PREVIEW && !hasQuery;
   toggleAllRegionsButton.hidden = !canToggle;
   if (canToggle) {
     toggleAllRegionsButton.textContent = state.regionExpanded
       ? 'Show fewer regions'
-      : `Show all ${formatCount(state.regionFacets.length)} regions`;
+      : `Show all ${formatCount(count)} regions`;
   }
 }
 
 function updateSerieChrome(): void {
   clearSerieButton.hidden = state.selectedSeries.length === 0;
   const hasQuery = state.serieQuery.trim().length > 0;
-  const canToggle = state.seriesFacets.length > FACET_PREVIEW && !hasQuery;
+  const count = activeFacetItems(
+    state.seriesFacets,
+    selectedSeriesKeys(),
+  ).length;
+  const canToggle = count > FACET_PREVIEW && !hasQuery;
   toggleAllSeriesButton.hidden = !canToggle;
   if (canToggle) {
     toggleAllSeriesButton.textContent = state.serieExpanded
       ? 'Show fewer series'
-      : `Show all ${formatCount(state.seriesFacets.length)} series`;
+      : `Show all ${formatCount(count)} series`;
   }
 }
 
 function renderSeries(): void {
   const selected = selectedSeriesKeys();
   const query = state.serieQuery.trim();
-  serieSearch.hidden = state.seriesFacets.length <= 12;
+  const available = activeFacetItems(state.seriesFacets, selected).sort(
+    (a, b) =>
+      facetCount(b) - facetCount(a) || a.name.localeCompare(b.name),
+  );
+  serieSearch.hidden = available.length <= 12;
 
   const items = visibleFacetItems(
-    state.seriesFacets,
+    available,
     selected,
     query,
     state.serieExpanded,
@@ -2477,11 +2516,8 @@ function renderSeries(): void {
       }),
       el('span', {
         class: 'facet-count',
-        text: formatCount(facet.albumCount),
-        title:
-          state.searchMode === 'tracks'
-            ? 'Count of matching albums'
-            : undefined,
+        text: formatCount(facetCount(facet)),
+        title: facetCountTitle(),
       }),
     );
   });
@@ -2503,11 +2539,12 @@ function renderSeries(): void {
 function renderFacets(): void {
   const selected = selectedGenreKeys();
   const query = state.genreQuery.trim();
-  genreSearch.hidden = state.facets.length <= 12;
+  const available = activeFacetItems(state.facets, selected);
+  genreSearch.hidden = available.length <= 12;
 
   const rows = buildFacetRows(
     visibleFacetItems(
-      state.facets,
+      available,
       selected,
       query,
       state.genreExpanded,
@@ -2533,11 +2570,12 @@ function renderFacets(): void {
 function renderRegions(): void {
   const selected = selectedRegionKeys();
   const query = state.regionQuery.trim();
-  regionSearch.hidden = state.regionFacets.length <= 12;
+  const available = activeFacetItems(state.regionFacets, selected);
+  regionSearch.hidden = available.length <= 12;
 
   const rows = buildFacetRows(
     visibleFacetItems(
-      state.regionFacets,
+      available,
       selected,
       query,
       state.regionExpanded,

@@ -72,6 +72,10 @@ const SCHEMA_SQL = `
     duration    INTEGER NOT NULL,
     latest      TEXT,
     cover_path  TEXT,
+    -- 1 when every track is under a LOOSE_TRACKS_FOLDERS prefix; such albums
+    -- keep their metadata for the Tracks view but are hidden from the Albums
+    -- view and its facets.
+    track_only    INTEGER NOT NULL,
     search_text TEXT NOT NULL,
     search_album TEXT NOT NULL,
     search_artist TEXT NOT NULL,
@@ -105,9 +109,11 @@ const SCHEMA_SQL = `
   ) STRICT;
 
   CREATE TABLE series (
-    key       TEXT PRIMARY KEY,
-    name      TEXT NOT NULL,
-    name_rank INTEGER NOT NULL
+    key         TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    name_rank   INTEGER NOT NULL,
+    album_count INTEGER NOT NULL,
+    track_count INTEGER NOT NULL
   ) STRICT;
 
   CREATE TABLE album_series (
@@ -118,9 +124,11 @@ const SCHEMA_SQL = `
   ) STRICT;
 
   CREATE TABLE genres (
-    key       TEXT PRIMARY KEY,
-    name      TEXT NOT NULL,
-    name_rank INTEGER NOT NULL
+    key         TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    name_rank   INTEGER NOT NULL,
+    album_count INTEGER NOT NULL,
+    track_count INTEGER NOT NULL
   ) STRICT;
 
   CREATE TABLE album_genres (
@@ -131,9 +139,11 @@ const SCHEMA_SQL = `
   ) STRICT;
 
   CREATE TABLE regions (
-    key       TEXT PRIMARY KEY,
-    name      TEXT NOT NULL,
-    name_rank INTEGER NOT NULL
+    key         TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    name_rank   INTEGER NOT NULL,
+    album_count INTEGER NOT NULL,
+    track_count INTEGER NOT NULL
   ) STRICT;
 
   CREATE TABLE album_regions (
@@ -400,6 +410,8 @@ interface AlbumAccumulator {
   trackCount: number;
   duration: number;
   latest: string | null;
+  /** True while every raw title merged here consists only of loose tracks. */
+  noAlbum: boolean;
 }
 
 interface DbAlbumRow {
@@ -489,7 +501,9 @@ interface AlbumFilter {
  * the same result set as the visible album results.
  */
 function buildAlbumFilter(q: string): AlbumFilter {
-  const where: string[] = [];
+  // Loose-track collections keep their album metadata for the Tracks view,
+  // but they never surface as albums or album-mode playback.
+  const where: string[] = ['a.track_only = 0'];
   const params: Array<string | number> = [];
 
   const trimmedQuery = q.trim();
@@ -623,6 +637,11 @@ function sourceAlbumTitle(raw: string | null): string {
 function effectiveTrackArtist(row: TrackIndexRow): string {
   const artist = row.artist?.trim() ?? '';
   return artist.length > 0 ? artist : row.album_artist;
+}
+
+/** Increment a sparse facet count while loading the index. */
+function incrementCount(counts: Map<string, number>, key: string): void {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -763,9 +782,13 @@ async function accumulateAlbums(
         trackCount: 0,
         duration: 0,
         latest: null,
+        noAlbum: row.track_only === true,
       };
       accumulators.set(key, acc);
     }
+    // An album merged from several raw titles stays visible when any one of
+    // them has a track outside a loose folder.
+    if (row.track_only !== true) acc.noAlbum = false;
 
     if (rawAlbum !== null) acc.sourceAlbums.add(rawAlbum);
     acc.sourcePaths.set(rawAlbum ?? album, row.cover_path);
@@ -864,13 +887,17 @@ export class SqliteIndex {
     const artistNames: string[] = [];
     const keyValues: string[] = [];
     let albumTrackTotal = 0;
+    let visibleAlbumCount = 0;
     for (const acc of accumulators.values()) {
       albumNames.push(acc.album);
       artistNames.push(acc.artist);
       keyValues.push(acc.key);
       albumTrackTotal += acc.trackCount;
+      if (!acc.noAlbum) visibleAlbumCount += 1;
     }
-    const albumCount = accumulators.size;
+    // The status album count is the Albums-view total; loose-track albums
+    // stay in the index but are not surfaced there.
+    const albumCount = visibleAlbumCount;
 
     // Track sorts use the visible artist (track artist, falling back to the
     // album artist), so rank that value separately from the album artists.
@@ -896,20 +923,20 @@ export class SqliteIndex {
         'INSERT INTO meta(key, value) VALUES (?, ?)',
       );
       const insertGenre = db.prepare(
-        'INSERT INTO genres(key, name, name_rank) VALUES (?, ?, ?)',
+        'INSERT INTO genres(key, name, name_rank, album_count, track_count) VALUES (?, ?, ?, ?, ?)',
       );
       const insertRegion = db.prepare(
-        'INSERT INTO regions(key, name, name_rank) VALUES (?, ?, ?)',
+        'INSERT INTO regions(key, name, name_rank, album_count, track_count) VALUES (?, ?, ?, ?, ?)',
       );
       const insertSerie = db.prepare(
-        'INSERT INTO series(key, name, name_rank) VALUES (?, ?, ?)',
+        'INSERT INTO series(key, name, name_rank, album_count, track_count) VALUES (?, ?, ?, ?, ?)',
       );
       const insertAlbum = db.prepare(`
         INSERT INTO albums(
           key, album, artist, year, track_count, duration, latest, cover_path,
-          search_text, search_album, search_artist, search_source,
+          track_only, search_text, search_album, search_artist, search_source,
           search_composer, album_rank, artist_rank, key_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertTrack = db.prepare(`
         INSERT INTO tracks(
@@ -939,11 +966,12 @@ export class SqliteIndex {
         'INSERT INTO album_regions(album_id, position, region_key) VALUES (?, ?, ?)',
       );
 
+      // Counts are filled in after the album and track rows are loaded.
       for (const [key, name] of genreDisplayNames) {
-        insertGenre.run(key, name, genreRanks.get(name) ?? 0);
+        insertGenre.run(key, name, genreRanks.get(name) ?? 0, 0, 0);
       }
       for (const [key, name] of regionDisplayNames) {
-        insertRegion.run(key, name, regionRanks.get(name) ?? 0);
+        insertRegion.run(key, name, regionRanks.get(name) ?? 0, 0, 0);
       }
 
       const seriesByKey = new Map<string, string[]>();
@@ -965,8 +993,20 @@ export class SqliteIndex {
       }
       const seriesRanks = rankValues(seriesDisplayNames.values());
       for (const [key, name] of seriesDisplayNames) {
-        insertSerie.run(key, name, seriesRanks.get(name) ?? 0);
+        insertSerie.run(key, name, seriesRanks.get(name) ?? 0, 0, 0);
       }
+
+      // Both counts are precomputed during the bulk load: album_count for the
+      // Albums view, track_count for the Tracks view. Only visible albums feed
+      // album_count; every indexed track feeds track_count.
+      const genreAlbumCounts = new Map<string, number>();
+      const regionAlbumCounts = new Map<string, number>();
+      const seriesAlbumCounts = new Map<string, number>();
+      const genreTrackCounts = new Map<string, number>();
+      const regionTrackCounts = new Map<string, number>();
+      const seriesTrackCounts = new Map<string, number>();
+      /** Folded series keys per album id, for the track-level series counts. */
+      const seriesKeysByAlbumId = new Map<number, string[]>();
 
       // Track rows need the album ids and album ranks assigned during the
       // album insert. The map is small (one entry per album).
@@ -989,8 +1029,22 @@ export class SqliteIndex {
         const composers = [...acc.composers];
         const comments = [...acc.comments].sort(compareComments);
         const series = seriesByKey.get(key) ?? [];
+        const serieKeys = series.map((value) => foldSearch(value));
         const genreKeys = [...acc.genreKeys];
         const regionKeys = [...acc.regionKeys];
+        // Album facet counts ignore loose-track collections; track facet
+        // counts are accumulated below for every track.
+        if (!acc.noAlbum) {
+          for (const genreKey of genreKeys) {
+            incrementCount(genreAlbumCounts, genreKey);
+          }
+          for (const regionKey of regionKeys) {
+            incrementCount(regionAlbumCounts, regionKey);
+          }
+          for (const serieKey of serieKeys) {
+            incrementCount(seriesAlbumCounts, serieKey);
+          }
+        }
         const genreNames = genreKeys.map(
           (genre) => genreDisplayNames.get(genre) ?? genre,
         );
@@ -1030,6 +1084,7 @@ export class SqliteIndex {
           acc.duration,
           acc.latest,
           coverPath,
+          acc.noAlbum ? 1 : 0,
           searchText,
           searchAlbum,
           searchArtist,
@@ -1041,6 +1096,9 @@ export class SqliteIndex {
         );
         const albumId = Number(result.lastInsertRowid);
         albumMetaByKey.set(key, { id: albumId, rank: albumRank });
+        if (serieKeys.length > 0) {
+          seriesKeysByAlbumId.set(albumId, serieKeys);
+        }
 
         for (let position = 0; position < displayArtists.length; position += 1) {
           insertAlbumArtist.run(
@@ -1061,11 +1119,11 @@ export class SqliteIndex {
         for (let position = 0; position < comments.length; position += 1) {
           insertAlbumComment.run(albumId, position, comments[position] ?? '');
         }
-        for (let position = 0; position < series.length; position += 1) {
+        for (let position = 0; position < serieKeys.length; position += 1) {
           insertAlbumSerie.run(
             albumId,
             position,
-            foldSearch(series[position] ?? ''),
+            serieKeys[position] ?? '',
           );
         }
         for (let position = 0; position < genreKeys.length; position += 1) {
@@ -1123,6 +1181,16 @@ export class SqliteIndex {
           (key) => regionDisplayNames.get(key) ?? key,
         );
 
+        for (const genreKey of trackGenreKeys) {
+          incrementCount(genreTrackCounts, genreKey);
+        }
+        for (const regionKey of trackRegionKeys) {
+          incrementCount(regionTrackCounts, regionKey);
+        }
+        for (const serieKey of seriesKeysByAlbumId.get(albumMeta.id) ?? []) {
+          incrementCount(seriesTrackCounts, serieKey);
+        }
+
         insertTrack.run(
           row.id,
           albumMeta.id,
@@ -1162,18 +1230,51 @@ export class SqliteIndex {
         );
       }
 
+      // Both sides of each facet now have their counts; the rows were inserted
+      // before the albums because the mapping tables reference them.
+      const updateGenre = db.prepare(
+        'UPDATE genres SET album_count = ?, track_count = ? WHERE key = ?',
+      );
+      for (const key of genreDisplayNames.keys()) {
+        updateGenre.run(
+          genreAlbumCounts.get(key) ?? 0,
+          genreTrackCounts.get(key) ?? 0,
+          key,
+        );
+      }
+      const updateRegion = db.prepare(
+        'UPDATE regions SET album_count = ?, track_count = ? WHERE key = ?',
+      );
+      for (const key of regionDisplayNames.keys()) {
+        updateRegion.run(
+          regionAlbumCounts.get(key) ?? 0,
+          regionTrackCounts.get(key) ?? 0,
+          key,
+        );
+      }
+      const updateSerie = db.prepare(
+        'UPDATE series SET album_count = ?, track_count = ? WHERE key = ?',
+      );
+      for (const key of seriesDisplayNames.keys()) {
+        updateSerie.run(
+          seriesAlbumCounts.get(key) ?? 0,
+          seriesTrackCounts.get(key) ?? 0,
+          key,
+        );
+      }
+
       insertMeta.run('version', String(version));
       insertMeta.run('album_count', String(albumCount));
       insertMeta.run('track_count', String(indexedTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '12');
+      insertMeta.run('schema_version', '13');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec(`INSERT INTO track_search(track_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 12');
+      db.exec('PRAGMA user_version = 13');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -1247,52 +1348,30 @@ export class SqliteIndex {
   }
 
   genres(): GenreFacet[] {
-    const rows = this.db
-      .prepare(
-        `SELECT g.key AS key, g.name AS name,
-                COUNT(DISTINCT ag.album_id) AS album_count
-           FROM genres g
-           JOIN album_genres ag ON ag.genre_key = g.key
-          GROUP BY g.key, g.name, g.name_rank
-          ORDER BY album_count DESC, g.name_rank ASC`,
-      )
-      .all();
-
-    return rows.map((row) => ({
-      key: String(row.key),
-      name: String(row.name),
-      albumCount: Number(row.album_count),
-    }));
+    return this.facetRows('genres');
   }
 
   regions(): GenreFacet[] {
-    const rows = this.db
-      .prepare(
-        `SELECT r.key AS key, r.name AS name,
-                COUNT(DISTINCT ar.album_id) AS album_count
-           FROM regions r
-           JOIN album_regions ar ON ar.region_key = r.key
-          GROUP BY r.key, r.name, r.name_rank
-          ORDER BY album_count DESC, r.name_rank ASC`,
-      )
-      .all();
-
-    return rows.map((row) => ({
-      key: String(row.key),
-      name: String(row.name),
-      albumCount: Number(row.album_count),
-    }));
+    return this.facetRows('regions');
   }
 
   series(): GenreFacet[] {
+    return this.facetRows('series');
+  }
+
+  /**
+   * Facet rows with precomputed album and track counts. Tags that occur only
+   * on hidden loose-track albums have `albumCount = 0`; the client hides them
+   * in Albums mode but still offers them in Tracks mode.
+   */
+  private facetRows(
+    table: 'genres' | 'regions' | 'series',
+  ): GenreFacet[] {
     const rows = this.db
       .prepare(
-        `SELECT s.key AS key, s.name AS name,
-                COUNT(DISTINCT ase.album_id) AS album_count
-           FROM series s
-           JOIN album_series ase ON ase.serie_key = s.key
-          GROUP BY s.key, s.name, s.name_rank
-          ORDER BY album_count DESC, s.name_rank ASC`,
+        `SELECT key, name, album_count, track_count
+           FROM ${table}
+          ORDER BY album_count DESC, name_rank ASC`,
       )
       .all();
 
@@ -1300,6 +1379,7 @@ export class SqliteIndex {
       key: String(row.key),
       name: String(row.name),
       albumCount: Number(row.album_count),
+      trackCount: Number(row.track_count),
     }));
   }
 

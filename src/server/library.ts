@@ -145,12 +145,12 @@ export class Library {
   private prepareIndexStorage(): void {
     const dir = config.indexDbDir;
     if (dir === null) {
-      console.log('[library] index storage: in memory');
+      console.log('[library] Index storage: in memory');
       return;
     }
 
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    console.log(`[library] index storage: ${dir}`);
+    console.log(`[library] Index storage: ${dir}`);
     for (const name of fs.readdirSync(dir)) {
       if (!name.startsWith(INDEX_FILE_PREFIX)) continue;
       try {

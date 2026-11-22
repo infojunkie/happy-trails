@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
-import type { AlbumsResponse } from '../../src/shared/types.js';
+import type {
+  AlbumsResponse,
+  GenresResponse,
+} from '../../src/shared/types.js';
 import { expandFacet, expectSummaryFor } from './helpers.js';
 
 async function expectFirstApiAlbum(
@@ -199,6 +202,39 @@ test('region facets write query terms, search, and clear', async ({ page }) => {
 
   await page.locator('#clear-regions').click();
   await expectSummaryFor(page);
+});
+
+test('facet counts switch between albums and tracks with the result mode', async ({
+  page,
+}) => {
+  const response = await page.request.get('/api/genres');
+  expect(response.ok()).toBeTruthy();
+  const facets = (await response.json()) as GenresResponse;
+  const jazz = facets.genres.find((genre) => genre.name === 'Jazz');
+  expect(jazz).toBeTruthy();
+  if (!jazz) return;
+  // The fixture has multi-track albums, so the two counts differ.
+  expect(jazz.trackCount).not.toBe(jazz.albumCount);
+
+  await expandFacet(page, '#genre-toggle', '#genre-panel');
+  const row = page.locator('#genre-list .facet-row').filter({
+    has: page.locator('input[value="jazz"]'),
+  });
+  const count = row.locator('.facet-count');
+  await expect(count).toHaveText(jazz.albumCount.toLocaleString());
+  await expect(count).not.toHaveAttribute('title');
+
+  await page.locator('#mode-tracks').click();
+  await expect(page.locator('#mode-tracks')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(count).toHaveText(jazz.trackCount.toLocaleString());
+  await expect(count).toHaveAttribute('title', 'Count of matching tracks');
+
+  await page.locator('#mode-albums').click();
+  await expect(count).toHaveText(jazz.albumCount.toLocaleString());
+  await expect(count).not.toHaveAttribute('title');
 });
 
 test('genre and region facet groups combine with AND', async ({ page }) => {
