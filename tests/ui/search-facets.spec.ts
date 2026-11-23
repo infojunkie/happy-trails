@@ -4,7 +4,12 @@ import type {
   GenresResponse,
   StatusResponse,
 } from '../../src/shared/types.js';
-import { expandFacet, expectSummaryFor } from './helpers.js';
+import {
+  expandFacet,
+  expectSummaryFor,
+  selectSortField,
+  selectSortOrder,
+} from './helpers.js';
 
 async function expectFirstApiAlbum(
   page: import('@playwright/test').Page,
@@ -34,7 +39,7 @@ test('header and initial library controls are present', async ({ page }) => {
   );
   await expect(page.locator('#search')).toBeVisible();
   await expect(page.locator('#search-help-button')).toBeVisible();
-  await expect(page.locator('#sort')).toBeVisible();
+  await expect(page.locator('#sort-button')).toBeVisible();
   await expect(page.locator('#refresh-button')).toBeDisabled();
   await expect(page.locator('#session-button')).toHaveText('Sign in');
   await expect(
@@ -479,12 +484,17 @@ test('Back and Forward restore search and sort states', async ({ page }) => {
   await expect(page.locator('#search')).toHaveValue('beatles');
   await expectSummaryFor(page, { q: 'beatles' });
 
-  await page.locator('#sort').selectOption('album');
+  await selectSortField(page, 'album');
   await expectSummaryFor(page, { q: 'beatles', sort: 'album' });
   await expect(page).toHaveURL(/sort=album/);
+  await expect(page.locator('#sort-button-text')).toHaveText(
+    'Album name · Descending',
+  );
 
   await page.goBack();
-  await expect(page.locator('#sort')).toHaveValue('recent');
+  await expect(page.locator('#sort-button-text')).toHaveText(
+    'Added on · Descending',
+  );
   await expectSummaryFor(page, { q: 'beatles' });
 });
 
@@ -492,14 +502,59 @@ test('sort and URL state survive navigation', async ({ page }) => {
   await page.goto('/?q=artist%3Abeatles&sort=album');
   await expect(page.locator('.album-card').first()).toBeVisible();
   await expect(page.locator('#search')).toHaveValue('artist:beatles');
-  await expect(page.locator('#sort')).toHaveValue('album');
+  await expect(page.locator('#sort-button-text')).toHaveText(
+    'Album name · Descending',
+  );
   const sorted = await expectSummaryFor(page, {
     q: 'artist:beatles',
     sort: 'album',
   });
   await expectFirstApiAlbum(page, sorted);
 
-  await page.locator('#sort').selectOption('recent');
-  await expectSummaryFor(page, { q: 'artist:beatles', sort: 'recent' });
+  await selectSortField(page, 'added');
+  await expectSummaryFor(page, { q: 'artist:beatles' });
   await expect(page).toHaveURL(/q=artist%3Abeatles/);
+  await expect(page).not.toHaveURL(/sort=/);
+  await expect(page.locator('#sort-button-text')).toHaveText(
+    'Added on · Descending',
+  );
+});
+
+test('sort menu shows two checked sections and preserves the other choice', async ({
+  page,
+}) => {
+  await page.locator('#sort-button').click();
+  await expect(page.locator('#sort-panel')).toBeVisible();
+  await expect(page.locator('#sort-group-field')).toHaveText('Sort by');
+  await expect(page.locator('#sort-group-order')).toHaveText('Order');
+  await expect(
+    page.locator('#sort-field-options .sort-option[data-key="added"]'),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    page.locator(
+      '#sort-field-options .sort-option[data-key="added"] .sort-check',
+    ),
+  ).toHaveText('✓');
+  await expect(
+    page.locator('#sort-order-options .sort-option[data-key="desc"]'),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  // Changing Sort by keeps Order.
+  await page.locator('#sort-field-options .sort-option[data-key="artist"]').click();
+  await expect(page.locator('#sort-button-text')).toHaveText(
+    'Artist name · Descending',
+  );
+  await expect(page).toHaveURL(/sort=artist/);
+
+  // Changing Order keeps Sort by.
+  await selectSortOrder(page, 'asc');
+  await expect(page.locator('#sort-button-text')).toHaveText(
+    'Artist name · Ascending',
+  );
+  await expect(page).toHaveURL(/sort=artist/);
+  await expect(page).toHaveURL(/order=asc/);
+  await page.locator('#sort-button').click();
+  await expect(
+    page.locator('#sort-order-options .sort-option[data-key="asc"] .sort-check'),
+  ).toHaveText('✓');
 });

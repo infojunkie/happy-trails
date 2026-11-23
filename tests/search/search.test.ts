@@ -19,7 +19,8 @@ after(() => {
 function query(overrides: Partial<AlbumsQuery> = {}) {
   return context.index.queryAlbums({
     q: '',
-    sort: 'recent',
+    sort: 'added',
+    order: 'desc',
     offset: 0,
     limit: 1000,
     ...overrides,
@@ -445,7 +446,7 @@ test('album comments are aggregated, deduplicated, and sorted', () => {
 });
 
 test('sorting and pagination return slices of the full ordered result', () => {
-  const full = query({ sort: 'album' });
+  const full = query({ sort: 'album', order: 'asc' });
   assert.ok(full.total > 0);
   for (let index = 1; index < full.albums.length; index += 1) {
     const previous = full.albums[index - 1];
@@ -456,7 +457,7 @@ test('sorting and pagination return slices of the full ordered result', () => {
   }
 
   const offset = Math.min(1, Math.max(0, full.albums.length - 1));
-  const page = query({ sort: 'album', offset, limit: 2 });
+  const page = query({ sort: 'album', order: 'asc', offset, limit: 2 });
   assert.equal(page.total, full.total);
   assert.deepEqual(
     names(page.albums),

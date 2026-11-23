@@ -168,12 +168,20 @@ CREATE TABLE tracks (
 
 CREATE INDEX tracks_artist_order
   ON tracks(artist_rank, album_rank, disc, track, id);
+CREATE INDEX tracks_artist_desc
+  ON tracks(artist_rank DESC, album_rank, disc, track, id);
 CREATE INDEX tracks_album_order
   ON tracks(album_rank, disc, track, id);
+CREATE INDEX tracks_album_desc
+  ON tracks(album_rank DESC, disc, track, id);
 CREATE INDEX tracks_date_order
-  ON tracks(date DESC, album_rank, disc, track, id);
+  ON tracks((date IS NULL), date DESC, album_rank, disc, track, id);
+CREATE INDEX tracks_date_asc
+  ON tracks((date IS NULL), date ASC, album_rank, disc, track, id);
 CREATE INDEX tracks_year_order
-  ON tracks(year DESC, album_rank, disc, track, id);
+  ON tracks((year IS NULL), year DESC, album_rank, disc, track, id);
+CREATE INDEX tracks_year_asc
+  ON tracks((year IS NULL), year ASC, album_rank, disc, track, id);
 CREATE INDEX tracks_by_album ON tracks(album_id);
 
 CREATE VIRTUAL TABLE album_search USING fts5(
@@ -374,13 +382,13 @@ SELECT t.id, t.title, al.key AS album_key, al.album,
        t.genre_names, t.region_names
   FROM tracks t
   JOIN albums al ON al.id = t.album_id
- ORDER BY t.date DESC, t.album_rank, t.disc, t.track, t.id
+ ORDER BY (t.date IS NULL), t.date DESC, t.album_rank, t.disc, t.track, t.id
  LIMIT ? OFFSET ?;
 ```
 
-The four sort keys reuse the album meanings: `recent` is the per-track upload
-date, `artist` is the visible artist, `album` is the album rank then disc/track,
-and `year` is the track year.
+The four sort fields reuse the album meanings: `added` is the per-track upload
+date, `released` is the track year, `artist` is the visible artist, and `album`
+is the album rank then disc/track. Each accepts `order=asc|desc`.
 
 On the 410k-track reference library, selective fielded track queries answer in
 roughly 25–45 ms, exact album-level facet filters in 25–50 ms, and a broad bare
@@ -545,17 +553,20 @@ so the builder precomputes dense ranks for album titles, artists, and keys.
 Values that the collator considers equal share a rank, allowing the same
 tie-breaking chain as before:
 
-| Sort | `ORDER BY` |
+| Sort field | `ORDER BY` (ascending; `order=desc` flips the value term) |
 | --- | --- |
-| `recent` | `latest DESC, album_rank, artist_rank` |
+| `added` | `(latest IS NULL), latest, album_rank, artist_rank` |
+| `released` | `(year IS NULL), year, album_rank, artist_rank` |
 | `artist` | `artist_rank, album_rank, key_rank` |
 | `album` | `album_rank, artist_rank, key_rank` |
-| `year` | `year DESC, album_rank, artist_rank` |
 
-SQLite sorts NULLs last for `DESC`, which matches the old comparator. Avoiding
-the `latest IS NULL` expression on the leading sort term lets the
-`(latest DESC, …)` and `(year DESC, …)` indexes serve deep `OFFSET`
-pagination without a full sort.
+Each field supports `order=asc` and `order=desc`; missing years and track dates
+sort last in both directions. The `(column IS NULL)` expression is the first
+term, and matching expression indexes (`(year IS NULL), year DESC, …` and
+`(year IS NULL), year ASC, …`, and the same for `latest`/`date`) keep deep
+`OFFSET` pagination index-backed. The opposite-direction name indexes
+(`artist_rank DESC`, `album_rank DESC`) are created alongside the ascending
+ones.
 
 ### Album details
 
@@ -630,8 +641,9 @@ and is reported through `/api/status`.
   files (~750 MB) or two in-memory databases. Streaming and inserting track
   rows in chunks would reduce the build peak; the FTS tables dominate the
   steady database size.
-- Track sorting offers `recent`, `artist`, `album`, and `year`; there is no
-  track-title sort and therefore no `title_rank`.
+- Track sorting offers the same `added`, `released`, `artist`, and `album`
+  fields in both directions; there is no track-title sort and therefore no
+  `title_rank`.
 - The expression parser supports `AND`, `OR`, implicit AND, parentheses, and
   quoted phrases. `NOT`/negation is not implemented.
 - Region detection is exact-tag only. A future pass could split compound tags

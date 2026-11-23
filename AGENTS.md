@@ -25,5 +25,3 @@
 - Show an implementation plan before you code.
 
 - Show implementation options clearly, e.g. as a numbered list.
-
-

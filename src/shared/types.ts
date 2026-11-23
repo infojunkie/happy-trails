@@ -186,14 +186,26 @@ export interface AboutResponse {
   homepageUrl: string | null;
 }
 
-export const SORT_KEYS = ['recent', 'artist', 'album', 'year'] as const;
+/** Sort field; the UI labels these Added on, Released on, Artist name, Album name. */
+export const SORT_KEYS = ['added', 'released', 'artist', 'album'] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
+
+/** Sort direction for every sort field. */
+export const SORT_ORDERS = ['asc', 'desc'] as const;
+export type SortOrder = (typeof SORT_ORDERS)[number];
 
 /** Scope of a Play all source: per-track matches or all tracks of matching albums. */
 export type PlaybackTrackMode = 'albums' | 'tracks';
 
 export function isSortKey(value: unknown): value is SortKey {
   return typeof value === 'string' && (SORT_KEYS as readonly string[]).includes(value);
+}
+
+export function isSortOrder(value: unknown): value is SortOrder {
+  return (
+    typeof value === 'string' &&
+    (SORT_ORDERS as readonly string[]).includes(value)
+  );
 }
 
 export const FILTER_MODES = ['any', 'all'] as const;

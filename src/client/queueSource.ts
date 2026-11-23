@@ -1,7 +1,9 @@
 import {
   isSortKey,
+  isSortOrder,
   type PlaybackTrackMode,
   type SortKey,
+  type SortOrder,
 } from '../shared/types.js';
 
 /** Visible queue size, matching the existing Load-more page size. */
@@ -14,6 +16,7 @@ export interface QueueSourceDescriptor {
   mode: PlaybackTrackMode;
   q: string;
   sort: SortKey;
+  order: SortOrder;
 }
 
 /** Serializable cursor for one Play all source. */
@@ -127,6 +130,7 @@ export function isStoredQueueSource(
   }
   if (typeof descriptor.q !== 'string') return false;
   if (!isSortKey(descriptor.sort)) return false;
+  if (!isSortOrder(descriptor.order)) return false;
   if (
     typeof record.nextOffset !== 'number' ||
     !Number.isSafeInteger(record.nextOffset) ||

@@ -12,7 +12,12 @@ import {
 
 function source(overrides: Partial<QueueSourceState> = {}): QueueSourceState {
   return {
-    descriptor: { mode: 'tracks', q: 'beatles', sort: 'recent' },
+    descriptor: {
+      mode: 'tracks',
+      q: 'beatles',
+      sort: 'added',
+      order: 'desc',
+    },
     nextOffset: 48,
     total: 100,
     libraryVersion: 7,
@@ -23,21 +28,21 @@ function source(overrides: Partial<QueueSourceState> = {}): QueueSourceState {
 
 test('createQueueSource marks a short first page exhausted', () => {
   const full = createQueueSource(
-    { mode: 'tracks', q: '', sort: 'recent' },
+    { mode: 'tracks', q: '', sort: 'added', order: 'desc' },
     { requested: 48, received: 48, total: 100, libraryVersion: 3 },
   );
   assert.equal(full.nextOffset, 48);
   assert.equal(full.exhausted, false);
 
   const short = createQueueSource(
-    { mode: 'albums', q: 'beatles', sort: 'artist' },
+    { mode: 'albums', q: 'beatles', sort: 'artist', order: 'desc' },
     { requested: 48, received: 20, total: 20, libraryVersion: 3 },
   );
   assert.equal(short.nextOffset, 20);
   assert.equal(short.exhausted, true);
 
   const empty = createQueueSource(
-    { mode: 'tracks', q: 'nothing', sort: 'album' },
+    { mode: 'tracks', q: 'nothing', sort: 'album', order: 'desc' },
     { requested: 48, received: 0, total: 0, libraryVersion: 3 },
   );
   assert.equal(empty.exhausted, true);

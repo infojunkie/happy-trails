@@ -83,15 +83,40 @@
           Tracks buttons to switch between album and track results.
         </span>
 
-        <label class="sort-field">
+        <div class="sort-field">
           <span class="sort-label">Sort</span>
-          <select id="sort">
-            <option value="recent">Recently added</option>
-            <option value="artist">Artist A–Z</option>
-            <option value="album">Album A–Z</option>
-            <option value="year">Year, newest</option>
-          </select>
-        </label>
+          <button
+            id="sort-button"
+            class="sort-button"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="sort-panel"
+          >
+            <span id="sort-button-text">Added on · Descending</span>
+            <span class="sort-caret" aria-hidden="true"></span>
+          </button>
+          <div id="sort-panel" class="sort-panel" hidden>
+            <div class="sort-group">
+              <span class="sort-group-title" id="sort-group-field">Sort by</span>
+              <div
+                id="sort-field-options"
+                class="sort-options"
+                role="group"
+                aria-labelledby="sort-group-field"
+              ></div>
+            </div>
+            <div class="sort-group">
+              <span class="sort-group-title" id="sort-group-order">Order</span>
+              <div
+                id="sort-order-options"
+                class="sort-options"
+                role="group"
+                aria-labelledby="sort-group-order"
+              ></div>
+            </div>
+          </div>
+        </div>
 
         <button
           id="refresh-button"

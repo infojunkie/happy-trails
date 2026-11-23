@@ -4,6 +4,7 @@ import type {
   AlbumSummary,
   GenreFacet,
   SortKey,
+  SortOrder,
   TrackSummary,
 } from '../shared/types.js';
 import { regionKey } from '../shared/text.js';
@@ -30,6 +31,7 @@ import {
 export interface AlbumsQuery {
   q: string;
   sort: SortKey;
+  order: SortOrder;
   offset: number;
   limit: number;
 }
@@ -43,6 +45,7 @@ export interface AlbumsResult {
 export interface TracksQuery {
   q: string;
   sort: SortKey;
+  order: SortOrder;
   offset: number;
   limit: number;
 }
@@ -181,10 +184,20 @@ const SCHEMA_SQL = `
     ON tracks(artist_rank, album_rank, disc, track, id);
   CREATE INDEX tracks_album_order
     ON tracks(album_rank, disc, track, id);
+  -- The (date IS NULL)/(year IS NULL) expression sorts missing metadata last
+  -- in both directions while keeping deep OFFSET pagination index-backed.
   CREATE INDEX tracks_date_order
-    ON tracks(date DESC, album_rank, disc, track, id);
+    ON tracks((date IS NULL), date DESC, album_rank, disc, track, id);
   CREATE INDEX tracks_year_order
-    ON tracks(year DESC, album_rank, disc, track, id);
+    ON tracks((year IS NULL), year DESC, album_rank, disc, track, id);
+  CREATE INDEX tracks_artist_desc
+    ON tracks(artist_rank DESC, album_rank, disc, track, id);
+  CREATE INDEX tracks_album_desc
+    ON tracks(album_rank DESC, disc, track, id);
+  CREATE INDEX tracks_date_asc
+    ON tracks((date IS NULL), date ASC, album_rank, disc, track, id);
+  CREATE INDEX tracks_year_asc
+    ON tracks((year IS NULL), year ASC, album_rank, disc, track, id);
   CREATE INDEX tracks_by_album ON tracks(album_id);
 
   CREATE TABLE meta (
@@ -197,9 +210,17 @@ const SCHEMA_SQL = `
   CREATE INDEX albums_album_order
     ON albums(album_rank, artist_rank, key_rank);
   CREATE INDEX albums_year_order
-    ON albums(year DESC, album_rank, artist_rank);
+    ON albums((year IS NULL), year DESC, album_rank, artist_rank);
   CREATE INDEX albums_latest_order
-    ON albums(latest DESC, album_rank, artist_rank);
+    ON albums((latest IS NULL), latest DESC, album_rank, artist_rank);
+  CREATE INDEX albums_artist_desc
+    ON albums(artist_rank DESC, album_rank, key_rank);
+  CREATE INDEX albums_album_desc
+    ON albums(album_rank DESC, artist_rank, key_rank);
+  CREATE INDEX albums_year_asc
+    ON albums((year IS NULL), year ASC, album_rank, artist_rank);
+  CREATE INDEX albums_latest_asc
+    ON albums((latest IS NULL), latest ASC, album_rank, artist_rank);
   CREATE INDEX album_genres_by_genre
     ON album_genres(genre_key, album_id);
   CREATE INDEX album_regions_by_region
@@ -322,39 +343,63 @@ const TRIGGER_SQL = `
   END;
 `;
 
-const ORDER_BY: Readonly<Record<SortKey, string>> = {
-  artist: 'a.artist_rank ASC, a.album_rank ASC, a.key_rank ASC',
-  album: 'a.album_rank ASC, a.artist_rank ASC, a.key_rank ASC',
-  // SQLite sorts NULLs last for DESC, matching the old comparator. Keeping
-  // the expression off the first sort term lets the (value DESC, rank…)
-  // indexes satisfy deep OFFSET pagination without a full sort.
-  year: 'a.year DESC, a.album_rank ASC, a.artist_rank ASC',
-  recent: 'a.latest DESC, a.album_rank ASC, a.artist_rank ASC',
-};
+/** SQL direction for a sort order. */
+function sortDirection(order: SortOrder): 'ASC' | 'DESC' {
+  return order === 'asc' ? 'ASC' : 'DESC';
+}
 
-const TRACK_ORDER_BY: Readonly<Record<SortKey, string>> = {
-  artist:
-    't.artist_rank ASC, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-  album:
-    't.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-  year: 't.year DESC, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-  recent:
-    't.date DESC, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-};
+/**
+ * Album listing order. Missing dates/years always sort last; the remaining
+ * terms are stable tie-breakers and match an index for deep pagination.
+ */
+function albumOrderBy(sort: SortKey, order: SortOrder): string {
+  const direction = sortDirection(order);
+  switch (sort) {
+    case 'added':
+      return `(a.latest IS NULL) ASC, a.latest ${direction}, a.album_rank ASC, a.artist_rank ASC`;
+    case 'released':
+      return `(a.year IS NULL) ASC, a.year ${direction}, a.album_rank ASC, a.artist_rank ASC`;
+    case 'artist':
+      return `a.artist_rank ${direction}, a.album_rank ASC, a.key_rank ASC`;
+    case 'album':
+      return `a.album_rank ${direction}, a.artist_rank ASC, a.key_rank ASC`;
+  }
+}
+
+function trackOrderBy(sort: SortKey, order: SortOrder): string {
+  const direction = sortDirection(order);
+  switch (sort) {
+    case 'added':
+      return `(t.date IS NULL) ASC, t.date ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+    case 'released':
+      return `(t.year IS NULL) ASC, t.year ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+    case 'artist':
+      return `t.artist_rank ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+    case 'album':
+      return `t.album_rank ${direction}, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+  }
+}
 
 /**
  * Albums-mode playback flattens matching albums into their tracks. Albums keep
  * the normal album sort order, and each album's tracks keep disc/track order.
  */
-const ALBUM_TRACK_ORDER_BY: Readonly<Record<SortKey, string>> = {
-  artist:
-    'a.artist_rank ASC, a.album_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-  album:
-    'a.album_rank ASC, a.artist_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-  year: 'a.year DESC, a.album_rank ASC, a.artist_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-  recent:
-    'a.latest DESC, a.album_rank ASC, a.artist_rank ASC, a.key_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC',
-};
+function albumTrackOrderBy(sort: SortKey, order: SortOrder): string {
+  const direction = sortDirection(order);
+  const tracks =
+    't.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC';
+  const key = 'a.key_rank ASC';
+  switch (sort) {
+    case 'added':
+      return `(a.latest IS NULL) ASC, a.latest ${direction}, a.album_rank ASC, a.artist_rank ASC, ${key}, ${tracks}`;
+    case 'released':
+      return `(a.year IS NULL) ASC, a.year ${direction}, a.album_rank ASC, a.artist_rank ASC, ${key}, ${tracks}`;
+    case 'artist':
+      return `a.artist_rank ${direction}, a.album_rank ASC, ${key}, ${tracks}`;
+    case 'album':
+      return `a.album_rank ${direction}, a.artist_rank ASC, ${key}, ${tracks}`;
+  }
+}
 
 /** Album fields shared by the listing and the single-album lookup. */
 const ALBUM_SUMMARY_COLUMNS = `
@@ -1268,13 +1313,13 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(indexedTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '13');
+      insertMeta.run('schema_version', '14');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec(`INSERT INTO track_search(track_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 13');
+      db.exec('PRAGMA user_version = 14');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -1402,7 +1447,7 @@ export class SqliteIndex {
         `${withSql}SELECT ${ALBUM_SUMMARY_COLUMNS}
          FROM albums a
          ${whereSql}
-         ORDER BY ${ORDER_BY[query.sort]}
+         ORDER BY ${albumOrderBy(query.sort, query.order)}
          LIMIT ? OFFSET ?`,
       )
       .all(...boundParams, query.limit, query.offset) as unknown as DbAlbumRow[];
@@ -1666,7 +1711,7 @@ export class SqliteIndex {
          FROM tracks t
          JOIN albums al ON al.id = t.album_id
          ${whereSql}
-         ORDER BY ${TRACK_ORDER_BY[query.sort]}
+         ORDER BY ${trackOrderBy(query.sort, query.order)}
          LIMIT ? OFFSET ?`,
       )
       .all(...boundParams, query.limit, query.offset) as unknown as DbTrackRow[];
@@ -1710,7 +1755,7 @@ export class SqliteIndex {
          FROM albums a
          JOIN tracks t ON t.album_id = a.id
          ${whereSql}
-         ORDER BY ${ALBUM_TRACK_ORDER_BY[query.sort]}
+         ORDER BY ${albumTrackOrderBy(query.sort, query.order)}
          LIMIT ? OFFSET ?`,
       )
       .all(...params, query.limit, query.offset) as unknown as DbTrackRow[];

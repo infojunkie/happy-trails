@@ -341,7 +341,7 @@ test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () 
 
   const full = await albums(
     main.server.baseUrl,
-    '/api/albums?sort=album&limit=200',
+    '/api/albums?sort=album&order=asc&limit=200',
   );
   assert.ok(full.total > 0);
   for (let index = 1; index < full.albums.length; index += 1) {
@@ -355,7 +355,7 @@ test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () 
   const offset = Math.min(2, Math.max(0, full.albums.length - 1));
   const page = await albums(
     main.server.baseUrl,
-    `/api/albums?sort=album&offset=${offset}&limit=2`,
+    `/api/albums?sort=album&order=asc&offset=${offset}&limit=2`,
   );
   assert.equal(page.total, full.total);
   assert.equal(page.offset, offset);
@@ -377,6 +377,60 @@ test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () 
   assert.equal(invalidSort.total, all.total);
 });
 
+test('sort fields and orders produce the requested direction', async () => {
+  const descending = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=artist&limit=200',
+  );
+  for (let index = 1; index < descending.albums.length; index += 1) {
+    const previous = descending.albums[index - 1];
+    const current = descending.albums[index];
+    assert.ok(previous);
+    assert.ok(current);
+    assert.ok(collator.compare(previous.artist, current.artist) >= 0);
+  }
+
+  const ascending = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=artist&order=asc&limit=200',
+  );
+  for (let index = 1; index < ascending.albums.length; index += 1) {
+    const previous = ascending.albums[index - 1];
+    const current = ascending.albums[index];
+    assert.ok(previous);
+    assert.ok(current);
+    assert.ok(collator.compare(previous.artist, current.artist) <= 0);
+  }
+
+  const oldest = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=released&order=asc&limit=200',
+  );
+  const years = oldest.albums.map((album) => album.year);
+  const known = years.filter((year): year is number => year !== null);
+  assert.deepEqual(known, [...known].sort((a, b) => a - b));
+  let seenNull = false;
+  for (const year of years) {
+    if (year === null) seenNull = true;
+    else assert.ok(!seenNull, 'known years must precede missing ones');
+  }
+
+  const newest = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=released&limit=200',
+  );
+  const newestYears = newest.albums
+    .map((album) => album.year)
+    .filter((year): year is number => year !== null);
+  assert.deepEqual(newestYears, [...newestYears].sort((a, b) => b - a));
+
+  const invalidOrder = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=album&order=bogus&limit=1',
+  );
+  assert.equal(invalidOrder.total, descending.total);
+});
+
 test('GET /api/tracks lists, searches, sorts, and paginates', async () => {
   const all = await trackSearch(main.server.baseUrl, '/api/tracks');
   assert.ok(all.total > 0);
@@ -387,7 +441,7 @@ test('GET /api/tracks lists, searches, sorts, and paginates', async () => {
 
   const page = await trackSearch(
     main.server.baseUrl,
-    '/api/tracks?sort=album&offset=5&limit=3',
+    '/api/tracks?sort=album&order=asc&offset=5&limit=3',
   );
   assert.equal(page.total, all.total);
   assert.equal(page.offset, 5);

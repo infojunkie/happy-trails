@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   isSortKey,
+  isSortOrder,
   type AlbumsResponse,
   type GenresResponse,
   type SessionResponse,
@@ -398,7 +399,9 @@ export function createApp(
 
     const q = (stringParam(req.query.q) ?? '').slice(0, MAX_SEARCH_LENGTH).trim();
     const sortParam = stringParam(req.query.sort);
-    const sort = isSortKey(sortParam) ? sortParam : 'recent';
+    const sort = isSortKey(sortParam) ? sortParam : 'added';
+    const orderParam = stringParam(req.query.order);
+    const order = isSortOrder(orderParam) ? orderParam : 'desc';
     const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
     const limit = integerParam(
       req.query.limit,
@@ -409,6 +412,7 @@ export function createApp(
     const result = dependencies.library.queryAlbums({
       q,
       sort,
+      order,
       offset,
       limit,
     });
@@ -430,7 +434,9 @@ export function createApp(
 
     const q = (stringParam(req.query.q) ?? '').slice(0, MAX_SEARCH_LENGTH).trim();
     const sortParam = stringParam(req.query.sort);
-    const sort = isSortKey(sortParam) ? sortParam : 'recent';
+    const sort = isSortKey(sortParam) ? sortParam : 'added';
+    const orderParam = stringParam(req.query.order);
+    const order = isSortOrder(orderParam) ? orderParam : 'desc';
     const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
     const limit = integerParam(
       req.query.limit,
@@ -441,6 +447,7 @@ export function createApp(
     const result = dependencies.library.queryTracks({
       q,
       sort,
+      order,
       offset,
       limit,
     });
@@ -471,7 +478,9 @@ export function createApp(
     }
     const q = (stringParam(req.query.q) ?? '').slice(0, MAX_SEARCH_LENGTH).trim();
     const sortParam = stringParam(req.query.sort);
-    const sort = isSortKey(sortParam) ? sortParam : 'recent';
+    const sort = isSortKey(sortParam) ? sortParam : 'added';
+    const orderParam = stringParam(req.query.order);
+    const order = isSortOrder(orderParam) ? orderParam : 'desc';
     const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
     const limit = integerParam(
       req.query.limit,
@@ -479,7 +488,7 @@ export function createApp(
       1,
       dependencies.config.maxPageSize,
     );
-    const request = { q, sort, offset, limit };
+    const request = { q, sort, order, offset, limit };
     const result =
       mode === 'albums'
         ? dependencies.library.queryAlbumTracks(request)

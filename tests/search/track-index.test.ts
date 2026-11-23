@@ -17,7 +17,8 @@ after(() => {
 function tracks(query = '', overrides: Record<string, unknown> = {}) {
   return context.index.queryTracks({
     q: query,
-    sort: 'recent',
+    sort: 'added',
+    order: 'desc',
     offset: 0,
     limit: 1000,
     ...overrides,
@@ -27,7 +28,8 @@ function tracks(query = '', overrides: Record<string, unknown> = {}) {
 function albums(query = '') {
   return context.index.queryAlbums({
     q: query,
-    sort: 'recent',
+    sort: 'added',
+    order: 'desc',
     offset: 0,
     limit: 1000,
   });
@@ -296,7 +298,13 @@ test('loose-track folders keep Tracks results but not Albums entries', async () 
     },
   ];
   const loose = await createFixtureContext({ extraRows: looseRows });
-  const allQuery = { q: '', sort: 'recent' as const, offset: 0, limit: 1000 };
+  const allQuery = {
+    q: '',
+    sort: 'added' as const,
+    order: 'desc' as const,
+    offset: 0,
+    limit: 1000,
+  };
   try {
     const albumNames = loose.index
       .queryAlbums(allQuery)
@@ -380,5 +388,35 @@ test('loose-track folders keep Tracks results but not Albums entries', async () 
     }
   } finally {
     loose.close();
+  }
+});
+
+test('track sort fields and orders apply with missing years last', () => {
+  const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
+  const assertYears = (years: Array<number | null>, direction: 1 | -1) => {
+    const known = years.filter((year): year is number => year !== null);
+    assert.deepEqual(
+      known,
+      [...known].sort((a, b) => direction * (a - b)),
+    );
+    let seenNull = false;
+    for (const year of years) {
+      if (year === null) seenNull = true;
+      else assert.ok(!seenNull, 'missing years must be last');
+    }
+  };
+
+  const oldest = tracks('', { sort: 'released', order: 'asc', limit: 1000 });
+  assertYears(oldest.tracks.map((track) => track.year), 1);
+  const newest = tracks('', { sort: 'released', order: 'desc', limit: 1000 });
+  assertYears(newest.tracks.map((track) => track.year), -1);
+
+  const artistDesc = tracks('', { sort: 'artist', order: 'desc', limit: 1000 });
+  for (let index = 1; index < artistDesc.tracks.length; index += 1) {
+    const previous = artistDesc.tracks[index - 1];
+    const current = artistDesc.tracks[index];
+    assert.ok(previous);
+    assert.ok(current);
+    assert.ok(collator.compare(previous.artist, current.artist) >= 0);
   }
 });

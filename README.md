@@ -134,7 +134,10 @@ design and current status.
   silently rebuilds the snapshot when needed. The header **Refresh** control
   enables when a newer snapshot is available and reloads the current view; it
   never triggers a rebuild itself.
-- Additional sort orders: artist A–Z, album A–Z, and release year.
+- A two-section **Sort** menu: **Sort by** (Added on, Released on, Artist
+  name, Album name) and **Order** (Ascending / Descending), each with a check mark on the active choice. Changing one
+  preserves the other. The default is Added on + Descending. Missing years and
+  track dates always sort last.
 - Album dialog with the full track list and duration.
   Composer tags appear as a separate italic **Composer** line when they differ
   from the track and album artists; each composer name is a link that runs a
@@ -163,7 +166,7 @@ design and current status.
   blue play control that queues just that track. No audio player lives in this
   app. Play controls are hidden until the app session is authenticated.
 - Shareable URL state
-  (`?q=genre%3A%22Jazz%22+region%3A%22France%22&sort=artist&view=tracks`).
+  (`?q=genre%3A%22Jazz%22+region%3A%22France%22&sort=artist&order=asc&view=tracks`).
   Facet selections are encoded as `genre:` / `region:` / `serie:` terms in `q`,
   and `view=tracks` selects the track list.
 - Browser Back/Forward replays searches, filters, sorts, and album dialogs.
@@ -853,7 +856,7 @@ Notes on the data:
 
 - "Latest upload date" uses `date`. `mdate` is the media server's modification
   time, which changes when files or metadata are touched and would make edited
-  albums look newly added, so it is not used for the "Recently added" sort.
+  albums look newly added, so it is not used for the "Added on" sort.
   Both columns are wall-clock `timestamp` values without a zone; they are
   displayed as recorded rather than converted between time zones.
 - Tracks with `fs_online = false` are excluded.
@@ -1022,7 +1025,8 @@ filter in Tracks mode. A facet whose every album is hidden has
 | Parameter | Description |
 | --- | --- |
 | `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `track:`, `genre:`, `region:`, `serie:`, `composer:`, and `source:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
-| `sort` | `recent` (default), `artist`, `album`, or `year`. |
+| `sort` | `added` (default), `released`, `artist`, or `album`. |
+| `order` | `desc` (default) or `asc`. Missing years/dates sort last in both directions. |
 | `offset` | Default `0`. |
 | `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 
@@ -1123,7 +1127,8 @@ Track-level counterpart to `/api/albums`, used by the Tracks result list.
 | Parameter | Description |
 | --- | --- |
 | `q` | The same search syntax. Bare terms match the track title, artists, source title, composer, album title, the track's own genre/region tags, and album series names. `artist:` matches the track or album artist; `genre:` and `region:` are exact per-track tag filters; `serie:` is an exact album-level filter. |
-| `sort` | `recent` (default; per-track upload date), `artist`, `album`, or `year`. |
+| `sort` | `added` (default; per-track upload date), `released`, `artist`, or `album`. |
+| `order` | `desc` (default) or `asc`. |
 | `offset` | Default `0`. |
 | `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 
@@ -1169,7 +1174,8 @@ Flat, track-level pages for the Play all queue source.
 | --- | --- |
 | `mode` | Required. `tracks` returns tracks matching the query per track; `albums` selects matching albums and returns **all** tracks of those albums. |
 | `q` | The same search syntax as `/api/albums` or `/api/tracks`. |
-| `sort` | `recent` (default), `artist`, `album`, or `year`. In Albums mode the album sort is applied first, then each album's disc/track order. |
+| `sort` | `added` (default), `released`, `artist`, or `album`. In Albums mode the album sort is applied first, then each album's disc/track order. |
+| `order` | `desc` (default) or `asc`. |
 | `offset` | Default `0`. Track-level offset. |
 | `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 

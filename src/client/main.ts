@@ -17,12 +17,14 @@ import {
 import {
   isFilterMode,
   isSortKey,
+  isSortOrder,
   type AboutResponse,
   type AlbumSummary,
   type FilterMode,
   type GenreFacet,
   type SessionResponse,
   type SortKey,
+  type SortOrder,
   type StatusResponse,
   type Track,
   type TrackSummary,
@@ -101,6 +103,7 @@ interface State {
   regionExpanded: boolean;
   q: string;
   sort: SortKey;
+  order: SortOrder;
   searchMode: SearchMode;
   albumView: AlbumView;
   albums: AlbumSummary[];
@@ -146,7 +149,8 @@ const state: State = {
   regionQuery: '',
   regionExpanded: false,
   q: '',
-  sort: 'recent',
+  sort: 'added',
+  order: 'desc',
   searchMode: 'albums',
   albumView: loadAlbumView(),
   albums: [],
@@ -182,7 +186,12 @@ let mapNeedsFit = true;
 let albumsLoading = false;
 
 const searchInput = $<HTMLInputElement>('#search');
-const sortSelect = $<HTMLSelectElement>('#sort');
+const sortField = $('.sort-field');
+const sortButton = $<HTMLButtonElement>('#sort-button');
+const sortButtonText = $('#sort-button-text');
+const sortPanel = $('#sort-panel');
+const sortFieldOptions = $('#sort-field-options');
+const sortOrderOptions = $('#sort-order-options');
 const modeAlbumsButton = $<HTMLButtonElement>('#mode-albums');
 const modeTracksButton = $<HTMLButtonElement>('#mode-tracks');
 const statsEl = $('#library-stats');
@@ -347,6 +356,132 @@ function renderModeControls(): void {
   for (const input of regionModeInputs) {
     input.checked = input.value === state.regionMode;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Sort menu                                                           */
+/* ------------------------------------------------------------------ */
+
+const SORT_FIELD_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
+  { key: 'added', label: 'Added on' },
+  { key: 'released', label: 'Released on' },
+  { key: 'artist', label: 'Artist name' },
+  { key: 'album', label: 'Album name' },
+];
+
+const SORT_ORDER_OPTIONS: ReadonlyArray<{ key: SortOrder; label: string }> = [
+  { key: 'asc', label: 'Ascending (Oldest, A–Z)' },
+  { key: 'desc', label: 'Descending (Newest, Z–A)' },
+];
+
+const sortFieldButtons = new Map<SortKey, HTMLButtonElement>();
+const sortOrderButtons = new Map<SortOrder, HTMLButtonElement>();
+
+function sortButtonLabel(): string {
+  const field =
+    SORT_FIELD_OPTIONS.find((option) => option.key === state.sort)?.label ??
+    'Added on';
+  const order = state.order === 'asc' ? 'Ascending' : 'Descending';
+  return `${field} · ${order}`;
+}
+
+function updateSortOptionButton(button: HTMLButtonElement, selected: boolean): void {
+  button.setAttribute('aria-pressed', String(selected));
+  const check = button.querySelector('.sort-check');
+  if (check) check.textContent = selected ? '✓' : '';
+}
+
+function updateSortControl(): void {
+  sortButtonText.textContent = sortButtonLabel();
+  for (const [key, button] of sortFieldButtons) {
+    updateSortOptionButton(button, key === state.sort);
+  }
+  for (const [key, button] of sortOrderButtons) {
+    updateSortOptionButton(button, key === state.order);
+  }
+}
+
+function closeSortPanel(): void {
+  sortPanel.hidden = true;
+  sortButton.setAttribute('aria-expanded', 'false');
+}
+
+function selectSort(sort: SortKey): void {
+  closeSortPanel();
+  if (sort === state.sort) return;
+  state.sort = sort;
+  updateSortControl();
+  pushFilterState();
+  void loadResults(true);
+}
+
+function selectOrder(order: SortOrder): void {
+  closeSortPanel();
+  if (order === state.order) return;
+  state.order = order;
+  updateSortControl();
+  pushFilterState();
+  void loadResults(true);
+}
+
+function buildSortOptions<K extends string>(
+  options: ReadonlyArray<{ key: K; label: string }>,
+  container: HTMLElement,
+  buttons: Map<K, HTMLButtonElement>,
+  selected: K,
+  select: (key: K) => void,
+): void {
+  for (const option of options) {
+    const button = el(
+      'button',
+      {
+        type: 'button',
+        class: 'sort-option',
+        'data-key': option.key,
+        'aria-pressed': String(option.key === selected),
+      },
+      el('span', { class: 'sort-check', 'aria-hidden': 'true', text: '✓' }),
+      el('span', { class: 'sort-option-label', text: option.label }),
+    );
+    button.addEventListener('click', () => select(option.key));
+    buttons.set(option.key, button);
+    container.append(button);
+  }
+}
+
+function buildSortMenu(): void {
+  buildSortOptions(
+    SORT_FIELD_OPTIONS,
+    sortFieldOptions,
+    sortFieldButtons,
+    state.sort,
+    selectSort,
+  );
+  buildSortOptions(
+    SORT_ORDER_OPTIONS,
+    sortOrderOptions,
+    sortOrderButtons,
+    state.order,
+    selectOrder,
+  );
+  updateSortControl();
+
+  sortButton.addEventListener('click', () => {
+    sortPanel.hidden = !sortPanel.hidden;
+    sortButton.setAttribute('aria-expanded', String(!sortPanel.hidden));
+  });
+  document.addEventListener('click', (event) => {
+    if (sortPanel.hidden) return;
+    if (!(event.target instanceof Node)) return;
+    if (sortField.contains(event.target)) return;
+    closeSortPanel();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !sortPanel.hidden) {
+      closeSortPanel();
+      sortButton.focus();
+    }
+  });
 }
 
 function isAlbumView(value: string | null): value is AlbumView {
@@ -810,6 +945,7 @@ async function reloadLibrary(): Promise<void> {
         {
           q: state.q,
           sort: state.sort,
+          order: state.order,
           offset: 0,
           limit: state.pageSize,
         },
@@ -823,6 +959,7 @@ async function reloadLibrary(): Promise<void> {
         {
           q: state.q,
           sort: state.sort,
+          order: state.order,
           offset: 0,
           limit: state.pageSize,
         },
@@ -1082,6 +1219,7 @@ async function playAllSearchResults(): Promise<void> {
     mode: state.searchMode,
     q: state.q,
     sort: state.sort,
+    order: state.order,
   };
   const token = ++playAllToken;
   playAllStarting = true;
@@ -1364,7 +1502,9 @@ function applyFilterParams(
 ): void {
   state.q = (params.get('q') ?? '').slice(0, 200);
   const sort = params.get('sort');
-  state.sort = isSortKey(sort) ? sort : 'recent';
+  state.sort = isSortKey(sort) ? sort : 'added';
+  const order = params.get('order');
+  state.order = isSortOrder(order) ? order : 'desc';
   state.searchMode = params.get('view') === 'tracks' ? 'tracks' : 'albums';
   const layout = params.get('layout');
   state.albumView = isAlbumView(layout)
@@ -1374,7 +1514,7 @@ function applyFilterParams(
       : 'grid';
   if (!options.useStoredView) saveAlbumView(state.albumView);
   searchInput.value = state.q;
-  sortSelect.value = state.sort;
+  updateSortControl();
   syncSelectionsFromQuery();
   renderSearchMode();
 }
@@ -1434,7 +1574,8 @@ function currentUrl(): string {
 function buildFilterUrl(): string {
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
-  if (state.sort !== 'recent') params.set('sort', state.sort);
+  if (state.sort !== 'added') params.set('sort', state.sort);
+  if (state.order !== 'desc') params.set('order', state.order);
   if (state.searchMode === 'tracks') params.set('view', 'tracks');
   if (state.albumView !== 'grid') params.set('layout', state.albumView);
   const query = params.toString();
@@ -1603,6 +1744,7 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
       {
         q: state.q,
         sort: state.sort,
+        order: state.order,
         offset: reset ? 0 : state.albums.length,
         limit: state.pageSize,
       },
@@ -1853,6 +1995,7 @@ async function loadTrackResults(reset: boolean): Promise<number | null> {
       {
         q: state.q,
         sort: state.sort,
+        order: state.order,
         offset: reset ? 0 : state.tracks.length,
         limit: state.pageSize,
       },
@@ -3476,13 +3619,6 @@ function bindEvents(): void {
   });
   searchInput.addEventListener('blur', commitSearch);
 
-  sortSelect.addEventListener('change', () => {
-    if (!isSortKey(sortSelect.value) || sortSelect.value === state.sort) return;
-    state.sort = sortSelect.value;
-    pushFilterState();
-    void loadResults(true);
-  });
-
   modeAlbumsButton.addEventListener('click', () => setSearchMode('albums'));
   modeTracksButton.addEventListener('click', () => setSearchMode('tracks'));
   playAllButton.addEventListener('click', () => void playAllSearchResults());
@@ -3752,6 +3888,7 @@ async function boot(): Promise<void> {
 }
 
 renderViewSwitch();
+buildSortMenu();
 readUrlState();
 lastSyncedUrl = currentUrl();
 bindEvents();

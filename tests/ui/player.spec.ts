@@ -384,7 +384,8 @@ test('Play all keeps refilling from the original query after the UI query change
   assertURL(refill);
   expect(refill?.searchParams.get('mode')).toBe('tracks');
   expect(refill?.searchParams.get('q')).toBeNull();
-  expect(refill?.searchParams.get('sort')).toBe('recent');
+  expect(refill?.searchParams.get('sort')).toBe('added');
+  expect(refill?.searchParams.get('order')).toBe('desc');
   expect(refill?.searchParams.get('limit')).toBe('36');
 
   await expect(page.locator('#player-queue-count')).toHaveText('48');

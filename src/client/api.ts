@@ -6,6 +6,7 @@ import type {
   PlaybackTrackMode,
   SessionResponse,
   SortKey,
+  SortOrder,
   StatusResponse,
   TrackSearchResponse,
   TracksResponse,
@@ -61,6 +62,7 @@ function postJson<T>(url: string, body: unknown): Promise<T> {
 export interface AlbumRequest {
   q: string;
   sort: SortKey;
+  order: SortOrder;
   offset: number;
   limit: number;
 }
@@ -87,6 +89,7 @@ export const api = {
     const params = new URLSearchParams();
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
+    params.set('order', request.order);
     params.set('offset', String(request.offset));
     params.set('limit', String(request.limit));
     return getJson<AlbumsResponse>(
@@ -102,6 +105,7 @@ export const api = {
     const params = new URLSearchParams();
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
+    params.set('order', request.order);
     params.set('offset', String(request.offset));
     params.set('limit', String(request.limit));
     return getJson<TrackSearchResponse>(
@@ -118,6 +122,7 @@ export const api = {
     params.set('mode', request.mode);
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
+    params.set('order', request.order);
     params.set('offset', String(request.offset));
     params.set('limit', String(request.limit));
     return getJson<TrackSearchResponse>(

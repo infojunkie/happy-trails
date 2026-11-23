@@ -17,7 +17,8 @@ test('a file-backed index builds, queries, and removes its file on close', async
 
     const result = context.index.queryTracks({
       q: 'track:"so what"',
-      sort: 'recent',
+      sort: 'added',
+      order: 'desc',
       offset: 0,
       limit: 10,
     });
@@ -51,7 +52,8 @@ test('a persisted index file can be reopened by another connection', async () =>
     try {
       const result = opened.queryTracks({
         q: 'track:"so what"',
-        sort: 'recent',
+        sort: 'added',
+        order: 'desc',
         offset: 0,
         limit: 10,
       });

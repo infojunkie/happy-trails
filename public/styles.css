@@ -363,6 +363,7 @@ p {
 }
 
 .sort-field {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
@@ -374,24 +375,94 @@ p {
   font-size: 0.78rem;
 }
 
-.sort-field select {
-  padding: 8px 30px 8px 10px;
-  appearance: none;
-  background-color: var(--surface);
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
-    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) 53%,
-    calc(100% - 10px) 53%;
-  background-repeat: no-repeat;
-  background-size:
-    5px 5px,
-    5px 5px;
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 9px;
+  color: var(--text);
   font-size: 0.85rem;
-  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sort-button:hover,
+.sort-button:focus-visible,
+.sort-button[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+.sort-caret {
+  width: 0;
+  height: 0;
+  border-top: 5px solid var(--text-muted);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+}
+
+.sort-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 16px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+}
+
+.sort-panel[hidden] {
+  display: none;
+}
+
+.sort-group {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+
+.sort-group-title {
+  padding: 4px 8px 6px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sort-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.84rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sort-option:hover,
+.sort-option:focus-visible {
+  background: var(--surface-2);
+}
+
+.sort-option[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+.sort-check {
+  flex: none;
+  width: 1em;
+  color: var(--accent);
 }
 
 .session-button {
@@ -2842,8 +2913,16 @@ h4.disc-heading {
     flex: 1;
   }
 
-  .sort-field select {
+  .sort-button {
     width: 100%;
+    justify-content: space-between;
+  }
+
+  .sort-panel {
+    right: auto;
+    left: 0;
+    grid-template-columns: 1fr;
+    max-width: calc(100vw - 24px);
   }
 
   .sort-label {
