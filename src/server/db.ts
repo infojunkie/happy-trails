@@ -22,6 +22,18 @@ pool.on('error', (error) => {
  */
 const ALBUM_ARTIST = `COALESCE(NULLIF(m.album_artist, ''), NULLIF(m.artist, ''), 'Unknown Artist')`;
 
+/**
+ * SQL predicate: the row's path is not under any configured folder prefix.
+ * Each query has a different parameter position, so the caller supplies the
+ * placeholder (for example "$2").
+ */
+function pathNotUnder(column: string, placeholder: string): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM unnest(${placeholder}::text[]) AS ignored(folder)
+     WHERE starts_with(${column}, ignored.folder || '/')
+  )`;
+}
+
 export interface AlbumRow {
   /** Raw album title; may include a " // <disc label>" suffix. */
   album: string | null;
@@ -43,7 +55,7 @@ export interface AlbumRow {
   cover_path: string;
   /**
    * True when every track of this raw album lives under a configured
-   * `LOOSE_TRACKS_FOLDERS` prefix. Such albums keep their track metadata but
+   * `TRACKS_FOLDERS` prefix. Such albums keep their track metadata but
    * are omitted from the Albums view. ALBUM_QUERY always sets this; fixture
    * rows may omit it and default to visible.
    */
@@ -117,6 +129,7 @@ const ALBUM_QUERY = `
     MIN(m.path) AS cover_path
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
+    AND ${pathNotUnder('m.path', '$2')}
   GROUP BY 1, 2
 `;
 
@@ -137,6 +150,7 @@ const TRACK_INDEX_QUERY = `
     lower(substring(m.path from '\\.([^./]+)$')) AS format
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
+    AND ${pathNotUnder('m.path', '$1')}
   ORDER BY m.id
 `;
 
@@ -160,6 +174,7 @@ const TRACK_QUERY = `
   WHERE (m.album = ANY($1::text[]) OR (m.album IS NULL AND $2 = '(Unknown Album)'))
     AND ${ALBUM_ARTIST} = $3
     AND m.fs_online IS NOT FALSE
+    AND ${pathNotUnder('m.path', '$4')}
   ORDER BY m.disc NULLS LAST, m.track NULLS LAST, lower(m.title), m.id
 `;
 
@@ -177,6 +192,7 @@ const PLAYBACK_IDS_QUERY = `
   WHERE m.album = ANY($1::text[])
     AND ${ALBUM_ARTIST} = $2
     AND m.fs_online IS NOT FALSE
+    AND ${pathNotUnder('m.path', '$3')}
     AND t.is_virtual = false
   ORDER BY
     array_position($1::text[], m.album),
@@ -192,6 +208,7 @@ const PLAYBACK_TRACK_ID_QUERY = `
   JOIN ${trackTable} t ON t.path = m.path
   WHERE m.id = $1
     AND m.fs_online IS NOT FALSE
+    AND ${pathNotUnder('m.path', '$2')}
     AND t.is_virtual = false
   LIMIT 1
 `;
@@ -202,6 +219,7 @@ const PLAYBACK_IDS_BY_MUSIC_QUERY = `
   JOIN ${trackTable} t ON t.path = m.path
   WHERE m.id = ANY($1::int[])
     AND m.fs_online IS NOT FALSE
+    AND ${pathNotUnder('m.path', '$2')}
     AND t.is_virtual = false
   ORDER BY array_position($1::int[], m.id)
 `;
@@ -215,6 +233,7 @@ const FINGERPRINT_QUERY = `
     COALESCE(MAX(m.id), 0)::int AS max_id
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
+    AND ${pathNotUnder('m.path', '$1')}
 `;
 
 interface FingerprintRow {
@@ -242,8 +261,11 @@ export async function loadLibraryRows(): Promise<{
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     const albums = await client.query<AlbumRow>(ALBUM_QUERY, [
       config.looseTracksFolders,
+      config.ignoreFolders,
     ]);
-    const tracks = await client.query<TrackIndexRow>(TRACK_INDEX_QUERY);
+    const tracks = await client.query<TrackIndexRow>(TRACK_INDEX_QUERY, [
+      config.ignoreFolders,
+    ]);
     await client.query('COMMIT');
     return { albums: albums.rows, tracks: tracks.rows };
   } catch (error) {
@@ -263,7 +285,9 @@ export async function loadLibraryRows(): Promise<{
  * Counts and ids catch inserts/deletes; dates/size catch most updates.
  */
 export async function loadLibraryFingerprint(): Promise<string> {
-  const result = await pool.query<FingerprintRow>(FINGERPRINT_QUERY);
+  const result = await pool.query<FingerprintRow>(FINGERPRINT_QUERY, [
+    config.ignoreFolders,
+  ]);
   const row = result.rows[0];
   if (!row) return '0|||0|0';
   return [
@@ -290,6 +314,7 @@ export async function loadPlaybackTrackIdForMusicId(
 ): Promise<number | null> {
   const result = await pool.query<{ id: number }>(PLAYBACK_TRACK_ID_QUERY, [
     musicId,
+    config.ignoreFolders,
   ]);
   return result.rows[0]?.id ?? null;
 }
@@ -305,7 +330,7 @@ export async function loadPlaybackTrackIdsForMusicIds(
   if (musicIds.length === 0) return [];
   const result = await pool.query<{ id: number }>(
     PLAYBACK_IDS_BY_MUSIC_QUERY,
-    [musicIds],
+    [musicIds, config.ignoreFolders],
   );
   const seen = new Set<number>();
   const ids: number[] = [];
@@ -325,6 +350,7 @@ export async function loadPlaybackTrackIds(
   const result = await pool.query<{ id: number }>(PLAYBACK_IDS_QUERY, [
     sourceAlbums,
     artist,
+    config.ignoreFolders,
   ]);
   const seen = new Set<number>();
   const ids: number[] = [];
@@ -350,6 +376,7 @@ export async function loadTracks(
     sourceAlbums,
     album,
     artist,
+    config.ignoreFolders,
   ]);
   return result.rows;
 }

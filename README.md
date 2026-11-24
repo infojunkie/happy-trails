@@ -26,9 +26,12 @@ design and current status.
 ![Screenshot of track listing with playback](docs/screenshot-tracks.png)
 
 - Album grid sorted by latest upload date (`MAX(date)`).
-- Tracks stored under `LOOSE_TRACKS_FOLDERS` prefixes (covers collections,
+- Tracks stored under `TRACKS_FOLDERS` prefixes (covers collections,
   random-track folders, …) stay fully searchable in Tracks mode, but the
   albums they name do not appear in the Albums view or its facet counts.
+- Folders listed in `IGNORE_FOLDERS` are not indexed at all: their tracks
+  never appear in Albums, Tracks, search, facet counts, album dialogs, or
+  playback, and changes there do not trigger an index rebuild.
 - Multi-CD albums whose titles differ only by a whitespace-separated
   ` // <disc label>` suffix are merged into one album; the original titles
   (including the labels) remain searchable.
@@ -445,7 +448,8 @@ All variables are optional; see [`.env.example`](.env.example).
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
 | `SERIES_DENYLIST` | — | Series names that remove an album from all series when found anywhere in its title. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
 | `SERIES_ALLOWLIST` | — | Additional series names matched anywhere in an album title that has no `{...}` series. Entries are checked in configured order and only the first match is retained for the album. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
-| `LOOSE_TRACKS_FOLDERS` | — | Folder prefixes holding loose tracks, such as covers collections and random-track folders. Tracks under them stay fully indexed and searchable in Tracks mode, but the albums they name are hidden from the Albums view, album-mode Play all, and album facet counts. Entries are path prefixes (the whole subtree is covered), separated by a vertical-bar character; trailing slashes are ignored. |
+| `TRACKS_FOLDERS` | — | Folder prefixes holding loose tracks, such as covers collections and random-track folders. Tracks under them stay fully indexed and searchable in Tracks mode, but the albums they name are hidden from the Albums view, album-mode Play all, and album facet counts. Entries are path prefixes (the whole subtree is covered), separated by a vertical-bar character; trailing slashes are ignored. |
+| `IGNORE_FOLDERS` | — | Folder prefixes excluded from the index entirely: their files appear nowhere (Albums, Tracks, search, facets, album dialogs, playback), and the change fingerprint ignores them, so edits there do not trigger rebuilds. Same prefix and separator rules as `TRACKS_FOLDERS`; an ignore entry wins when a path matches both. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
 ### Behind DSM's reverse proxy
@@ -574,7 +578,13 @@ See
 [`docs/sqlite-index.md`](docs/sqlite-index.md) for the schema and query
 equivalents.
 
-Folder prefixes in `LOOSE_TRACKS_FOLDERS` (covers collections, random tracks,
+Folder prefixes in `IGNORE_FOLDERS` remove their rows in PostgreSQL before any
+aggregation or fingerprinting: such files never reach the SQLite index, album
+dialogs, or playback, and edits under them do not cause a rebuild. Ignored rows
+are removed before loose-track detection, so `IGNORE_FOLDERS` takes precedence
+when a path matches both settings.
+
+Folder prefixes in `TRACKS_FOLDERS` (covers collections, random tracks,
 …) change album visibility, not indexing. An album is flagged `track_only` when
 every one of its raw titles consists solely of tracks under those prefixes. Such
 albums keep their track counts, tags, sources, and comments in the index, and
@@ -891,7 +901,7 @@ check keeps retrying in the background.
 
 ## Tests
 
-The suite is deterministic and does not require PostgreSQL, DSM, or network access. It uses synthetic album/track fixtures and fake cover, session, and playback services. `tests/helpers/test-env.ts` is loaded with `node --import` before the app config, clearing the search-related overrides (`SERIES_ALLOWLIST`, `SERIES_EXCEPTIONS`, `ARTIST_SEPARATOR_WORDS`, `ARTIST_EXCEPTIONS`, `REGION_TAGS`, `LOOSE_TRACKS_FOLDERS`) so a developer `.env` cannot change fixture results.
+The suite is deterministic and does not require PostgreSQL, DSM, or network access. It uses synthetic album/track fixtures and fake cover, session, and playback services. `tests/helpers/test-env.ts` is loaded with `node --import` before the app config, clearing the search-related overrides (`SERIES_ALLOWLIST`, `SERIES_EXCEPTIONS`, `ARTIST_SEPARATOR_WORDS`, `ARTIST_EXCEPTIONS`, `REGION_TAGS`, `TRACKS_FOLDERS`, `IGNORE_FOLDERS`) so a developer `.env` cannot change fixture results.
 
 ```bash
 npm run test:install-browsers  # once per machine/CI
@@ -1011,7 +1021,7 @@ accepted by the matching filter or used by the series radio list.
 `albumCount` counts visible albums carrying the tag. `trackCount` counts every
 indexed track carrying it: for genres and regions, each track's own tags; for
 series, the tracks of albums in that series. Track counts include tracks whose
-album is hidden by `LOOSE_TRACKS_FOLDERS`, so they match the result of the same
+album is hidden by `TRACKS_FOLDERS`, so they match the result of the same
 filter in Tracks mode. A facet whose every album is hidden has
 `albumCount: 0` and is not rendered in Albums mode.
 

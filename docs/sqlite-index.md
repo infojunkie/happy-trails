@@ -53,6 +53,13 @@ build, ~560–600 MB peak build RSS, and ~75 MB steady process RSS (the OS page
 cache holds the file and is reclaimable). `:memory:` mode peaks around 920 MB
 RSS.
 
+Folder prefixes in `IGNORE_FOLDERS` are filtered out in PostgreSQL before the
+album aggregate, track rows, fingerprint, album dialog query, and playback-id
+queries, so their files never reach SQLite or the API. `TRACKS_FOLDERS`
+rows are still indexed; only their albums are flagged `track_only` and hidden
+from album-facing surfaces. Ignored rows are removed first, so an ignore entry
+wins when both lists match.
+
 ## Schema
 
 ```sql

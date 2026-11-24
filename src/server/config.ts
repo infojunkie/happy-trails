@@ -151,12 +151,10 @@ function seriesAllowlist(): string[] {
 }
 
 /**
- * Folder prefixes holding loose tracks (covers collections, random tracks).
- * Tracks under them stay fully indexed so the Tracks view keeps working, but
- * their albums are flagged no-album and omitted from the Albums view.
- * Entries are separated by "|"; trailing slashes are ignored.
+ * Parse a "|"-separated list of folder prefixes. Entries are trimmed and
+ * trailing slashes are ignored; matching covers the whole subtree.
  */
-export function parseLooseTracksFolders(
+export function parseFolderPrefixes(
   rawValue: string | undefined,
 ): string[] {
   const raw = (rawValue ?? '').trim();
@@ -165,6 +163,24 @@ export function parseLooseTracksFolders(
     .split('|')
     .map((value) => value.trim().replace(/\/+$/, ''))
     .filter(Boolean);
+}
+
+/**
+ * Folder prefixes holding loose tracks (covers collections, random tracks).
+ * Tracks under them stay fully indexed so the Tracks view keeps working, but
+ * their albums are flagged no-album and omitted from the Albums view.
+ */
+export function parseLooseTracksFolders(
+  rawValue: string | undefined,
+): string[] {
+  return parseFolderPrefixes(rawValue);
+}
+
+/** Folder prefixes excluded from the index and every view. */
+export function parseIgnoreFolders(
+  rawValue: string | undefined,
+): string[] {
+  return parseFolderPrefixes(rawValue);
 }
 
 const dsmUrl = (process.env.DSM_URL ?? process.env.DSADDR ?? '').trim();
@@ -382,8 +398,14 @@ export const config = {
    * entries in the Albums view.
    */
   looseTracksFolders: parseLooseTracksFolders(
-    process.env.LOOSE_TRACKS_FOLDERS,
+    process.env.TRACKS_FOLDERS,
   ),
+  /**
+   * Folder prefixes whose files are not indexed at all: no albums, tracks,
+   * facets, dialogs, or playback. Ignored rows are removed before loose-track
+   * detection, so an ignore entry wins when both configs match.
+   */
+  ignoreFolders: parseIgnoreFolders(process.env.IGNORE_FOLDERS),
   /** Required for user sign-in and playback. */
   dsmUrl: dsmUrl.length > 0 ? dsmUrl : null,
   /**

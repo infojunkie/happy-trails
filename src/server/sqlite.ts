@@ -75,7 +75,7 @@ const SCHEMA_SQL = `
     duration    INTEGER NOT NULL,
     latest      TEXT,
     cover_path  TEXT,
-    -- 1 when every track is under a LOOSE_TRACKS_FOLDERS prefix; such albums
+    -- 1 when every track is under a TRACKS_FOLDERS prefix; such albums
     -- keep their metadata for the Tracks view but are hidden from the Albums
     -- view and its facets.
     track_only    INTEGER NOT NULL,

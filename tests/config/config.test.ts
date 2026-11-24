@@ -6,6 +6,7 @@ import {
   formatOriginTarget,
   parseAllowedFrontendOrigins,
   parseDsmFrontendUrl,
+  parseIgnoreFolders,
   parseIndexDbDir,
   parseLooseTracksFolders,
   parseTrustProxy,
@@ -189,7 +190,7 @@ test('resolveDsmFrontendBase selects fixed or origin-based targets', () => {
   );
 });
 
-test('LOOSE_TRACKS_FOLDERS splits on "|" and drops trailing slashes', () => {
+test('TRACKS_FOLDERS splits on "|" and drops trailing slashes', () => {
   assert.deepEqual(parseLooseTracksFolders(undefined), []);
   assert.deepEqual(parseLooseTracksFolders(''), []);
   assert.deepEqual(parseLooseTracksFolders('   '), []);
@@ -199,6 +200,15 @@ test('LOOSE_TRACKS_FOLDERS splits on "|" and drops trailing slashes', () => {
       ' /music/loose/covers/ | /music/random tracks/// |  | /music/other ',
     ),
     ['/music/loose/covers', '/music/random tracks', '/music/other'],
+  );
+});
+
+test('IGNORE_FOLDERS uses the same prefix parsing', () => {
+  assert.deepEqual(parseIgnoreFolders(undefined), []);
+  assert.deepEqual(parseIgnoreFolders('   '), []);
+  assert.deepEqual(
+    parseIgnoreFolders(' /music/temp/ | /music/old/// |  '),
+    ['/music/temp', '/music/old'],
   );
 });
 
