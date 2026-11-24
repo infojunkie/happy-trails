@@ -283,9 +283,13 @@ The match string includes a field column, for example
 `instr(a.search_album, ?) > 0`. Boolean `AND`/`OR`/parentheses are composed at
 the SQL level from these leaves.
 
-Both paths use the same `foldSearch()` output that was written to the index:
-NFKD, combining-mark removal, lowercasing, and explicit mappings for Latin
-letters that NFKD leaves alone (`ø`, `æ`, `œ`, `ß`, `ł`, …).
+Both paths use the same `foldAlnum()` output that was written to the index:
+NFKD, combining-mark removal, lowercasing, explicit mappings for Latin letters
+that NFKD leaves alone (`ø`, `æ`, `œ`, `ß`, `ł`, …), and removal of every
+non-alphanumeric character except whitespace. Thus `-M-` and `M` match
+identically, while `The Beatles` and `TheBeatles` do not. An all-punctuation
+value falls back to the punctuation-preserving fold so unrelated names stay
+distinct. Exact genre/region/series keys still use `foldSearch()`.
 
 ## Query layer
 
@@ -460,11 +464,11 @@ matching would make the query total larger than the facet count.
    list/value in `TRIGGER_SQL`, the bulk `INSERT` statement, and the bound
    values. Bump `schema_version` and `PRAGMA user_version`.
 3. **Build**: in the per-album and/or per-track loop, compute
-   `const searchField = foldSearch(values.join(' '))` and insert it. Include
+   `const searchField = foldAlnum(values.join(' '))` and insert it. Include
    the raw values in the mode's `all` text if bare terms should match the field
    too.
 4. **Track filter**: `TrackFields` is `Record<SearchField, string>`, so
-   TypeScript forces a value. Add `field: foldSearch(...)` in `trackFields()`;
+   TypeScript forces a value. Add `field: foldAlnum(...)` in `trackFields()`;
    `matchesNode()` then uses the normal substring path automatically.
 5. **Tests/docs**: add parser, search, and API tests in both modes; update the
    search syntax table and the help popup. No mapping table or facet count is
@@ -557,8 +561,9 @@ component.
 The old code used `Intl.Collator('en', { sensitivity: 'base', numeric: true })`.
 SQLite's built-in collations do not reproduce ICU's accent/case/numeric rules,
 so the builder precomputes dense ranks for album titles, artists, and keys.
-Values that the collator considers equal share a rank, allowing the same
-tie-breaking chain as before:
+Artist and album ranks compare `foldAlnum()` values, so punctuation does not
+affect name order (`-M-` and `M` share a rank). Values that compare equal share
+a rank, allowing the same tie-breaking chain as before:
 
 | Sort field | `ORDER BY` (ascending; `order=desc` flips the value term) |
 | --- | --- |

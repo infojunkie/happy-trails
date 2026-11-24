@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
-import { bracedSeries, detectSeries } from '../../src/server/search.js';
+import {
+  bracedSeries,
+  detectSeries,
+  foldAlnum,
+} from '../../src/server/search.js';
 import { parseSearchQuery } from '../../src/server/searchQuery.js';
 import type { AlbumsQuery } from '../../src/server/sqlite.js';
 import type { AlbumSummary } from '../../src/shared/types.js';
@@ -331,6 +335,30 @@ test('search syntax combines with genre and region tags as set intersections', (
   assert.deepEqual(
     keys(both.albums),
     intersection(keys(album.albums), keys(rock.albums)),
+  );
+});
+
+test('search folding ignores punctuation but keeps spaces', () => {
+  assert.equal(foldAlnum('-M-'), 'm');
+  assert.equal(foldAlnum('Therapy?'), 'therapy');
+  assert.equal(foldAlnum('The Beatles'), 'the beatles');
+  assert.equal(foldAlnum('Jay-Z'), 'jayz');
+  assert.equal(foldAlnum('Søren'), 'soren');
+  // All-punctuation values keep their punctuation so they stay distinct.
+  assert.equal(foldAlnum('!!!'), '!!!');
+});
+
+test('album and artist matching ignores punctuation', () => {
+  const bySlash = query({ q: 'album:"Getz/Gilberto"' });
+  const byPlain = query({ q: 'album:"GetzGilberto"' });
+  assert.deepEqual(keys(byPlain.albums), keys(bySlash.albums));
+  assert.ok(byPlain.albums.some((album) => album.album === 'Getz/Gilberto'));
+
+  const artist = query({ q: 'artist:"Earth Wind Fire"' });
+  const artistPunct = query({ q: 'artist:"Earth, Wind & Fire"' });
+  assert.deepEqual(keys(artist.albums), keys(artistPunct.albums));
+  assert.ok(
+    artist.albums.some((album) => album.artist === 'Earth, Wind & Fire'),
   );
 });
 

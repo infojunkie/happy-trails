@@ -43,6 +43,22 @@ export function foldSearch(value: string): string {
 }
 
 /**
+ * Free-text search and name-sort folding that also ignores non-alphanumeric
+ * characters while keeping whitespace as a word separator: "-M-" and "M"
+ * compare equal, as do "Therapy?" and "Therapy". Values with no letters or
+ * digits at all fall back to the punctuation-preserving fold so they stay
+ * distinct.
+ */
+export function foldAlnum(value: string): string {
+  const folded = foldSearch(value);
+  const stripped = folded
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped || folded.trim();
+}
+
+/**
  * Stable key for a country/region tag. Folding accents and apostrophe
  * variants groups spellings such as "Grèce"/"Grece" and
  * "Côte d’Ivoire"/"Cote d'Ivoire".

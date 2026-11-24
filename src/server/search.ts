@@ -4,13 +4,13 @@
  * insert time and values folded for a query use exactly the same rules.
  */
 
-import { foldSearch } from '../shared/text.js';
+import { foldAlnum, foldSearch } from '../shared/text.js';
 
-export { foldSearch } from '../shared/text.js';
+export { foldAlnum, foldSearch } from '../shared/text.js';
 
 /** Whitespace-delimited, folded search tokens; the unit FTS5 matches. */
 export function searchTokens(value: string): string[] {
-  return foldSearch(value)
+  return foldAlnum(value)
     .split(/\s+/)
     .filter(Boolean);
 }

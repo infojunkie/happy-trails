@@ -107,9 +107,11 @@ design and current status.
 - Genre, region, and series sections are collapsible and start collapsed;
   toggling one does not affect the others. Each list shows about seven rows by
   default, and **Show all** expands it to roughly three times that height.
-- Free-text album/artist/track search with case-, accent-, and
-  ligature-insensitive matching (`Soren` finds `Søren`, `caetera` finds
-  `cætera`, `Bjork` finds `Björk`). Track-level artists are searchable through
+- Free-text album/artist/track search with case-, accent-, ligature-, and
+  punctuation-insensitive matching (`Soren` finds `Søren`, `caetera` finds
+  `cætera`, `Bjork` finds `Björk`, `Therapy` finds `Therapy?`, `M` finds
+  `-M-`). Whitespace is still a word separator, so `The Beatles` and
+  `TheBeatles` remain different. Track-level artists are searchable through
   `artist:` in both modes. The search box is compact: desktop keeps the applied
   query in a trigger field, while phones show only a magnifier button. Clicking,
   tapping, or focusing it opens a search dialog; it submits on Enter or the
@@ -284,6 +286,10 @@ Notes:
 - The mounted `.env` is read from `/app/.env`. The container forces
   `HOST=0.0.0.0` and defaults `PORT=3000`, overriding those values in `.env`;
   override the port with `-e PORT=8080` and map `-p 8080:8080`.
+- Port fallback is meant for local runs. In a container the published `-p`
+  mapping and the health check target the configured `PORT`; if the server
+  falls back inside the container, that port is not reachable from the host
+  and the health check fails. Make sure the container's `PORT` is free.
 - `~/.pgpass` is not part of the image. Either mount it as shown above, or put
   `PGPASSWORD` / `DATABASE_URL` in the mounted `.env`.
 - The mounted `.env` must be readable by the container's `node` user (UID
@@ -420,7 +426,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | --- | --- | --- |
 | `DATABASE_URL` | — | Full libpq URL. If unset, standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` apply. |
 | `HOST` | `127.0.0.1` | Interface to bind. Use `0.0.0.0` to expose the app on the LAN. |
-| `PORT` | `3000` | HTTP port. |
+| `PORT` | `3000` | First HTTP port to try. If it is already in use, the server binds the next free port and logs the actual URL at startup. |
 | `TRUST_PROXY` | off | Express `trust proxy` setting. Set it to the reverse proxy's address/CIDR, a preset such as `loopback`, or a hop count when the app sits behind a trusted proxy, so `req.ip` is the real client IP for login rate limiting (and `req.secure` is correct for cookie flags). Do not enable it on a directly exposed port. |
 | `LOGIN_RATE_LIMIT_MAX` | `20` | Failed sign-ins allowed per client IP per window; further attempts get `429` with `Retry-After`. |
 | `LOGIN_ACCOUNT_LIMIT_MAX` | `5` | Failed sign-ins allowed per account per window, regardless of client IP. |
@@ -609,11 +615,16 @@ classified.
 Search folding lowercases the text, applies Unicode NFKD, removes combining
 marks, and maps Latin letters that NFKD leaves intact (`ø`→`o`, `æ`→`ae`,
 `œ`→`oe`, `ß`→`ss`, `ł`→`l`, `đ`→`d`, `ð`→`d`, `þ`→`th`, `ı`→`i`, and a few
-others). The folded text is stored in `albums.search_text`, and queries are
-folded with the same function, so accented and unaccented searches match in
-either direction. `album_search` is an FTS5 table using the `trigram`
-tokenizer, which preserves substring semantics; phrases shorter than three
-characters fall back to an exact `instr()` scan.
+others). It then removes every non-alphanumeric character except whitespace,
+so `-M-` and `M` behave identically and `Therapy?` matches `Therapy`; spaces
+still separate words. A value made only of punctuation keeps its punctuation
+in the fallback so unrelated names do not collapse. The folded text is stored
+in `albums.search_text`, and queries are folded with the same function, so
+accented, unaccented, and punctuation-decorated searches match in either
+direction. Artist and album sort ranks use this same folding. `album_search` is
+an FTS5 table using the `trigram` tokenizer, which preserves substring
+semantics; phrases shorter than three characters fall back to an exact
+`instr()` scan.
 
 The search expression parser supports plain keyword phrases, `album:`,
 `artist:`, `track:`, `serie:`, `composer:`, `source:`, `genre:`, and `region:`
@@ -673,7 +684,8 @@ carrying each tag. The UI writes selections as `genre:` / `region:` query
 terms: **any** joins the terms with `OR`, **all** with `AND`, and the genre and
 region groups are combined with `AND`. Sorting uses precomputed dense ranks
 that reproduce the old `Intl.Collator` ordering, including its
-case/accent-insensitive ties. Filtering, searching, and pagination are single
+case/accent-insensitive ties; artist and album name ranks also ignore
+punctuation. Filtering, searching, and pagination are single
 SQLite queries; the current dataset answers typical searches in a few
 milliseconds.
 
@@ -1124,7 +1136,8 @@ A query made only of unquoted keywords is treated as one contiguous phrase:
 words independently. For expressions containing fields, operators, or quotes,
 adjacent terms are implicitly ANDed. Operators are case-insensitive; `AND`
 binds more tightly than `OR`; parentheses group expressions. Matching is
-case-, accent-, and ligature-insensitive, including quoted phrases.
+case-, accent-, ligature-, and punctuation-insensitive, including quoted
+phrases. Spaces remain word separators.
 
 ```text
 album:"abbey road"

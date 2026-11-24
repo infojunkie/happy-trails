@@ -2,17 +2,27 @@ import { app } from './app.js';
 import { config } from './config.js';
 import { pool } from './db.js';
 import { library } from './library.js';
+import { listenOnFirstFreePort } from './listen.js';
 
 async function main(): Promise<void> {
   // Listen before the first index is ready so /api/status and the static UI
   // are available while the builder worker runs. Data endpoints return 503
   // until `ready` is true. If the database is down, Library keeps retrying in
-  // the background and the UI shows the error.
-  const server = app.listen(config.port, config.host, () => {
-    console.log(
-      `[server] happy-trails listening at http://${config.host}:${config.port}`,
+  // the background and the UI shows the error. If PORT is taken, the next free
+  // port is used so a second local instance can start without editing .env.
+  const { server, port } = await listenOnFirstFreePort(
+    app,
+    config.host,
+    config.port,
+  );
+  if (port !== config.port) {
+    console.warn(
+      `[server] port ${config.port} is in use; using ${port} instead`,
     );
-  });
+  }
+  console.log(
+    `[server] happy-trails listening at http://${config.host}:${port}`,
+  );
 
   let shuttingDown = false;
   const shutdown = (signal: NodeJS.Signals): void => {

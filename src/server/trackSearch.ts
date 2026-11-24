@@ -2,7 +2,7 @@ import { regionKey } from '../shared/text.js';
 import { parseArtists } from './artists.js';
 import type { TrackRow } from './db.js';
 import { isRegionTag } from './regions.js';
-import { foldSearch, genreKey, searchTokens } from './search.js';
+import { foldAlnum, foldSearch, genreKey, searchTokens } from './search.js';
 import {
   parseSearchQuery,
   type SearchField,
@@ -67,19 +67,19 @@ function trackFields(
   const regionTags = regions.map(regionKey);
 
   return {
-    all: foldSearch(
+    all: foldAlnum(
       [albumText, allArtists, composer, ...genres, ...regions].join(' '),
     ),
-    album: foldSearch(albumText),
-    artist: foldSearch(allArtists),
-    track: foldSearch(track.title),
+    album: foldAlnum(albumText),
+    artist: foldAlnum(allArtists),
+    track: foldAlnum(track.title),
     genre:
       genreTags.length > 0 ? `\u0000${genreTags.join('\u0000')}\u0000` : '',
     region:
       regionTags.length > 0 ? `\u0000${regionTags.join('\u0000')}\u0000` : '',
     serie: serieKeys,
-    source: foldSearch(source),
-    composer: foldSearch(composer),
+    source: foldAlnum(source),
+    composer: foldAlnum(composer),
   };
 }
 
@@ -101,7 +101,7 @@ function matchesNode(node: SearchNode, fields: TrackFields): boolean {
         return fields[node.field].includes(`\u0000${key}\u0000`);
       }
 
-      const value = foldSearch(node.value).trim();
+      const value = foldAlnum(node.value).trim();
       if (!value || CONTROL_CHARS.test(value)) return false;
       return fields[node.field].includes(value);
     }

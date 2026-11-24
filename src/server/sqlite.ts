@@ -16,6 +16,7 @@ import { isRegionTag } from './regions.js';
 import {
   albumKey,
   detectSeries,
+  foldAlnum,
   foldSearch,
   genreKey,
   normalizeAlbumName,
@@ -237,7 +238,7 @@ const SCHEMA_SQL = `
 
   -- The trigram tokenizer gives FTS5 substring semantics, which is what the
   -- original index did with String.includes(). unicode61 would only match
-  -- whole words or prefixes. Search text is already folded by foldSearch().
+  -- whole words or prefixes. Search text is already folded by foldAlnum().
   CREATE VIRTUAL TABLE album_search USING fts5(
     search_text,
     search_album,
@@ -595,7 +596,7 @@ function buildAlbumFilter(q: string): AlbumFilter {
     // `track:` matches albums that contain a matching track title. The
     // track index is separate, so this uses its own FTS materialization.
     if (term.field === 'track') {
-      const phrase = foldSearch(term.value).trim();
+      const phrase = foldAlnum(term.value).trim();
       if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
       if ([...phrase].length >= 3) {
         const name = `track_term_${ctes.length}`;
@@ -619,7 +620,7 @@ function buildAlbumFilter(q: string): AlbumFilter {
       )`;
     }
 
-    const phrase = foldSearch(term.value).trim();
+    const phrase = foldAlnum(term.value).trim();
     if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
 
     const column = SEARCH_FIELD_COLUMNS[term.field];
@@ -669,7 +670,7 @@ function loadSearchNames(
   const rows = db.prepare(`SELECT key, name FROM ${table}`).all();
   return rows.map((row) => ({
     key: String(row.key),
-    search: foldSearch(String(row.name)),
+    search: foldAlnum(String(row.name)),
   }));
 }
 
@@ -717,22 +718,34 @@ function splitGenres(raw: string | null): Array<{ key: string; name: string }> {
 
 /**
  * Assign dense ranks in the same order as Intl.Collator. Values that compare
- * equal (for example "Live at X" and "Live At X" with sensitivity: base) get
- * the same rank, so SQL can use the next column as the tie-breaker just like
- * the old comparator did.
+ * equal after `normalize` (by default case/accent-insensitive collation, and
+ * for names also punctuation-insensitive) get the same rank, so SQL can use
+ * the next column as the tie-breaker just like the old comparator did.
  */
-function rankValues(values: Iterable<string>): Map<string, number> {
-  const sorted = [...new Set(values)].sort((a, b) => collator.compare(a, b));
+function rankValues(
+  values: Iterable<string>,
+  normalize: (value: string) => string = (value) => value,
+): Map<string, number> {
+  const sorted = [...new Set(values)]
+    .map((value) => ({ value, key: normalize(value) }))
+    .sort(
+      (left, right) =>
+        collator.compare(left.key, right.key) ||
+        (left.value < right.value ? -1 : left.value > right.value ? 1 : 0),
+    );
   const ranks = new Map<string, number>();
   let rank = -1;
-  let previous: string | null = null;
+  let previousKey: string | null = null;
 
-  for (const value of sorted) {
-    if (previous === null || collator.compare(previous, value) !== 0) {
+  for (const entry of sorted) {
+    if (
+      previousKey === null ||
+      collator.compare(previousKey, entry.key) !== 0
+    ) {
       rank += 1;
     }
-    ranks.set(value, rank);
-    previous = value;
+    ranks.set(entry.value, rank);
+    previousKey = entry.key;
   }
 
   return ranks;
@@ -948,12 +961,12 @@ export class SqliteIndex {
     // album artist), so rank that value separately from the album artists.
     const trackArtistNames = trackRows.map((row) => effectiveTrackArtist(row));
 
-    const albumRanks = rankValues(albumNames);
-    const artistRanks = rankValues(artistNames);
+    const albumRanks = rankValues(albumNames, foldAlnum);
+    const artistRanks = rankValues(artistNames, foldAlnum);
     const keyRanks = rankValues(keyValues);
     const genreRanks = rankValues(genreDisplayNames.values());
     const regionRanks = rankValues(regionDisplayNames.values());
-    const trackArtistRanks = rankValues(trackArtistNames);
+    const trackArtistRanks = rankValues(trackArtistNames, foldAlnum);
     albumNames.length = 0;
     artistNames.length = 0;
     keyValues.length = 0;
@@ -1097,7 +1110,7 @@ export class SqliteIndex {
           (region) => regionDisplayNames.get(region) ?? region,
         );
         // Include tags, source titles, track artists, composers, and series.
-        const searchText = foldSearch(
+        const searchText = foldAlnum(
           [
             acc.album,
             acc.artist,
@@ -1110,14 +1123,14 @@ export class SqliteIndex {
             ...regionNames,
           ].join(' '),
         );
-        const searchAlbum = foldSearch(
+        const searchAlbum = foldAlnum(
           [acc.album, ...sourceAlbums].join(' '),
         );
-        const searchArtist = foldSearch(
+        const searchArtist = foldAlnum(
           [acc.artist, ...displayArtists, ...trackArtists].join(' '),
         );
-        const searchSource = foldSearch(sourceAlbums.join(' '));
-        const searchComposer = foldSearch(composers.join(' '));
+        const searchSource = foldAlnum(sourceAlbums.join(' '));
+        const searchComposer = foldAlnum(composers.join(' '));
         const albumRank = albumRanks.get(acc.album) ?? 0;
 
         const result = insertAlbum.run(
@@ -1205,7 +1218,7 @@ export class SqliteIndex {
         }
 
         const visibleArtist = effectiveTrackArtist(row);
-        const searchArtist = foldSearch(
+        const searchArtist = foldAlnum(
           [row.artist?.trim() ?? '', row.album_artist.trim()]
             .filter(Boolean)
             .join(' '),
@@ -1252,10 +1265,10 @@ export class SqliteIndex {
           JSON.stringify(regionNames),
           JSON.stringify([...trackGenreKeys]),
           JSON.stringify([...trackRegionKeys]),
-          foldSearch(row.title),
+          foldAlnum(row.title),
           searchArtist,
-          foldSearch(sourceAlbum),
-          foldSearch(row.composer?.trim() ?? ''),
+          foldAlnum(sourceAlbum),
+          foldAlnum(row.composer?.trim() ?? ''),
           trackArtistRanks.get(visibleArtist) ?? 0,
           albumMeta.rank,
         );
@@ -1649,7 +1662,7 @@ export class SqliteIndex {
         )`;
       }
 
-      const phrase = foldSearch(term.value).trim();
+      const phrase = foldAlnum(term.value).trim();
       if (!phrase || CONTROL_CHARS.test(phrase)) return '0';
 
       switch (term.field) {
