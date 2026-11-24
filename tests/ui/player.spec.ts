@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openSearch, submitSearch } from './helpers.js';
 
 const WAV_SECONDS = 30;
 const WAV_RATE = 8_000;
@@ -362,8 +363,7 @@ test('Play all keeps refilling from the original query after the UI query change
   expect(before).toHaveLength(48);
 
   // Change the visible result query. The playing source must keep its own q.
-  await page.locator('#search').fill('track:"so what"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'track:"so what"');
   await expect(page.locator('#result-summary')).toContainText('tracks');
   await blurActiveElement(page);
 
@@ -1025,11 +1025,11 @@ test('typing in the search field does not trigger player shortcuts', async ({
   await albumCard(page, 'Abbey Road').first().locator('.album-play').click();
   await expect.poll(() => audioPlaying(page)).toBe(true);
 
-  await page.locator('#search').click();
-  await page.locator('#search').fill('beatles');
+  const input = await openSearch(page);
+  await input.fill('beatles');
   const before = await page.locator('#player-toggle').getAttribute('aria-label');
-  await page.locator('#search').press('Space');
-  await expect(page.locator('#search')).toHaveValue('beatles ');
+  await input.press('Space');
+  await expect(input).toHaveValue('beatles ');
   await expect(page.locator('#player-toggle')).toHaveAttribute(
     'aria-label',
     before ?? 'Pause',

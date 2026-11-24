@@ -17,6 +17,13 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <svg class="icon-defs" aria-hidden="true" focusable="false">
+      <symbol id="icon-search" viewBox="0 0 24 24">
+        <circle cx="10.5" cy="10.5" r="6.5" />
+        <path d="M15.5 15.5 21 21" />
+      </symbol>
+    </svg>
+
     <a class="skip-link" href="#album-results">Skip to albums</a>
 
     <header class="site-header">
@@ -48,21 +55,42 @@
           </button>
         </div>
 
-        <label class="search-field">
-          <span class="visually-hidden">Search the mediatheque</span>
-          <span class="search-icon" aria-hidden="true">⌕</span>
+        <div class="search-field">
+          <span class="search-icon" aria-hidden="true">
+            <svg class="search-icon-svg">
+              <use href="#icon-search" />
+            </svg>
+          </span>
           <input
-            id="search"
-            type="search"
-            placeholder="Search the mediatheque…"
+            id="search-trigger"
+            class="search-trigger"
+            type="text"
+            readonly
             autocomplete="off"
             spellcheck="false"
-            aria-describedby="search-syntax"
+            aria-label="Search the mediatheque"
+            aria-haspopup="dialog"
+            aria-controls="search-dialog"
             aria-keyshortcuts="/"
             title='album:"exact phrase" artist:name track:title genre:name region:name serie:name composer:name source:label — supports AND, OR, and parentheses'
           />
           <kbd class="search-hint" aria-hidden="true">/</kbd>
-        </label>
+        </div>
+        <button
+          id="search-trigger-button"
+          class="search-trigger-button"
+          type="button"
+          aria-label="Search the mediatheque"
+          aria-haspopup="dialog"
+          aria-controls="search-dialog"
+          aria-keyshortcuts="/"
+          title="Search"
+        >
+          <svg class="search-icon-svg" aria-hidden="true">
+            <use href="#icon-search" />
+          </svg>
+          <span id="search-active-dot" class="search-active-dot" hidden></span>
+        </button>
         <button
           id="search-help-button"
           class="search-help-button"
@@ -80,7 +108,8 @@
           combine terms with AND or OR. Fields are album, artist, track,
           genre, region, serie, composer, and source. A plain sequence of
           keywords searches all fields as one phrase. Use the Albums and
-          Tracks buttons to switch between album and track results.
+          Tracks buttons in the header to switch between album and track
+          results.
         </span>
 
         <div class="sort-field">
@@ -476,6 +505,62 @@
     </dialog>
 
     <dialog
+      id="search-dialog"
+      class="search-dialog"
+      aria-labelledby="search-dialog-title"
+    >
+      <div id="search-dialog-panel" class="search-dialog-panel">
+        <form id="search-form" class="search-dialog-form" role="search">
+          <h2 id="search-dialog-title" class="visually-hidden">
+            Search the mediatheque
+          </h2>
+          <div class="search-dialog-field">
+            <span class="search-icon" aria-hidden="true">
+              <svg class="search-icon-svg">
+                <use href="#icon-search" />
+              </svg>
+            </span>
+            <input
+              id="search"
+              type="search"
+              placeholder="Search the mediatheque…"
+              autocomplete="off"
+              spellcheck="false"
+              enterkeyhint="search"
+              aria-describedby="search-syntax"
+              title='album:"exact phrase" artist:name track:title genre:name region:name serie:name composer:name source:label — supports AND, OR, and parentheses'
+            />
+            <button
+              id="search-dialog-close"
+              class="search-dialog-close"
+              type="button"
+              aria-label="Close search"
+              title="Close"
+            >
+              ×
+            </button>
+            <button type="submit" class="visually-hidden">Search</button>
+          </div>
+          <p class="search-operator-summary">
+            <span class="search-operator-label">Fields</span>
+            <span
+              id="search-operator-fields"
+              class="search-operator-fields"
+            ></span>
+            <span class="search-operator-separator" aria-hidden="true">·</span>
+            <span class="search-operator-label">Combine</span>
+            <span class="search-operator-codes">
+              <code>AND</code>
+              <code>OR</code>
+              <code>"…"</code>
+              <code>( )</code>
+            </span>
+          </p>
+        </form>
+      </div>
+    </dialog>
+
+    <dialog
       id="search-help-dialog"
       class="search-help-dialog"
       aria-labelledby="search-help-title"
@@ -508,11 +593,11 @@
           <div class="help-section-body">
             <dl class="search-help-shortcuts">
               <dt><kbd>/</kbd></dt>
-              <dd>Focus the search field.</dd>
+              <dd>Open the search dialog.</dd>
               <dt><kbd>?</kbd></dt>
               <dd>Open this help dialog.</dd>
               <dt><kbd>Enter</kbd></dt>
-              <dd>Run the search from the search field.</dd>
+              <dd>Run the search from the search dialog.</dd>
               <dt><kbd>Esc</kbd></dt>
               <dd>Close the open dialog, full-screen map, or play queue.</dd>
               <dt><kbd>Space</kbd></dt>

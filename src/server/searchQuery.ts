@@ -16,19 +16,9 @@
  * reported as null and the caller falls back to the pre-syntax search behavior.
  */
 
-export const SEARCH_FIELDS = [
-  'all',
-  'album',
-  'artist',
-  'track',
-  'genre',
-  'region',
-  'serie',
-  'source',
-  'composer',
-] as const;
+import type { SearchField } from '../shared/searchFields.js';
 
-export type SearchField = (typeof SEARCH_FIELDS)[number];
+export { SEARCH_FIELDS, type SearchField } from '../shared/searchFields.js';
 
 export interface SearchTermNode {
   kind: 'term';

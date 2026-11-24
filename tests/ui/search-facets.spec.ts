@@ -9,6 +9,7 @@ import {
   expectSummaryFor,
   selectSortField,
   selectSortOrder,
+  submitSearch,
 } from './helpers.js';
 
 async function expectFirstApiAlbum(
@@ -37,7 +38,7 @@ test('header and initial library controls are present', async ({ page }) => {
   await expect(page.locator('#library-stats')).toHaveText(
     /^[\d,]+ albums · [\d,]+ tracks$/,
   );
-  await expect(page.locator('#search')).toBeVisible();
+  await expect(page.locator('#search-trigger')).toBeVisible();
   await expect(page.locator('#search-help-button')).toBeVisible();
   await expect(page.locator('#sort-button')).toBeVisible();
   await expect(page.locator('#refresh-button')).toBeDisabled();
@@ -163,8 +164,7 @@ test('genre facets write query terms, combine, and clear', async ({ page }) => {
   await expect(page.locator('#search')).toHaveValue('');
 
   // A typed facet query mirrors the checkboxes and match mode.
-  await page.locator('#search').fill('genre:"Jazz" AND genre:"Folk"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'genre:"Jazz" AND genre:"Folk"');
   await expect(page.locator('#genre-list input[value="jazz"]')).toBeChecked();
   await expect(page.locator('#genre-list input[value="folk"]')).toBeChecked();
   await expect(
@@ -325,10 +325,7 @@ test('series checkboxes write an any query and clear resets them', async ({
   await expect(rockCandy.locator('input[type="checkbox"]')).not.toBeChecked();
 
   // Typing an equivalent any-query also checks both boxes.
-  await page
-    .locator('#search')
-    .fill('serie:"Rock Candy" OR serie:"Blue Note"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'serie:"Rock Candy" OR serie:"Blue Note"');
   await expect(blueNote.locator('input[type="checkbox"]')).toBeChecked();
   await expect(rockCandy.locator('input[type="checkbox"]')).toBeChecked();
 });
@@ -336,16 +333,14 @@ test('series checkboxes write an any query and clear resets them', async ({
 test('fielded, quoted, and boolean search expressions work', async ({
   page,
 }) => {
-  await page.locator('#search').fill('composer:jobim');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'composer:jobim');
   const composer = await expectSummaryFor(page, { q: 'composer:jobim' });
   expect(composer.total).toBeGreaterThan(0);
   await expect(
     page.locator('.album-card', { hasText: 'Getz/Gilberto' }),
   ).toBeVisible();
 
-  await page.locator('#search').fill('album:"abbey road"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'album:"abbey road"');
   const phrase = await expectSummaryFor(page, {
     q: 'album:"abbey road"',
   });
@@ -358,15 +353,13 @@ test('fielded, quoted, and boolean search expressions work', async ({
     `Showing ${Math.min(phrase.total, 48).toLocaleString()} / ${phrase.total.toLocaleString()} of ${status.albumCount.toLocaleString()} albums`,
   );
 
-  await page.locator('#search').fill('album:road OR artist:beatles');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'album:road OR artist:beatles');
   const boolean = await expectSummaryFor(page, {
     q: 'album:road OR artist:beatles',
   });
   await expectFirstApiAlbum(page, boolean);
 
-  await page.locator('#search').fill('foo:bar');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'foo:bar');
   await expectSummaryFor(page, { q: 'foo:bar' });
   await expect(page.locator('#empty-state')).toBeVisible();
   await page.locator('#empty-clear').click();
@@ -463,13 +456,11 @@ test('Back and Forward restore search and sort states', async ({ page }) => {
   await expect(page.locator('.album-card').first()).toBeVisible();
   await expectSummaryFor(page);
 
-  await page.locator('#search').fill('beatles');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'beatles');
   await expectSummaryFor(page, { q: 'beatles' });
   await expect(page).toHaveURL(/[?&]q=beatles/);
 
-  await page.locator('#search').fill('miles');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'miles');
   await expectSummaryFor(page, { q: 'miles' });
 
   await page.goBack();

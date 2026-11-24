@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import type { AlbumsResponse } from '../../src/shared/types.js';
 
 type QueryValue = string | readonly string[];
@@ -19,6 +19,29 @@ export async function apiAlbums(
   const response = await page.request.get(`/api/albums?${search.toString()}`);
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as AlbumsResponse;
+}
+
+/**
+ * Open the search dialog through whichever header trigger is visible (the
+ * desktop field or the mobile icon) and return its input.
+ */
+export async function openSearch(page: Page): Promise<Locator> {
+  const trigger = page
+    .locator('#search-trigger:visible, #search-trigger-button:visible')
+    .first();
+  await trigger.click();
+  const input = page.locator('#search');
+  await expect(input).toBeVisible();
+  await expect(input).toBeFocused();
+  return input;
+}
+
+/** Type a query into the search dialog and submit it with Enter. */
+export async function submitSearch(page: Page, query: string): Promise<void> {
+  const input = await openSearch(page);
+  await input.fill(query);
+  await input.press('Enter');
+  await expect(page.locator('#search-dialog')).toBeHidden();
 }
 
 /** Facet panels start collapsed; expand one before using its controls. */

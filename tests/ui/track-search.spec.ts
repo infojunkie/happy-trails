@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { expandFacet } from './helpers.js';
+import { expandFacet, submitSearch } from './helpers.js';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
@@ -58,8 +58,7 @@ test('track search filters rows and facet counts switch to tracks', async ({
     page.locator('.track-result .track-result-title').first(),
   ).toBeVisible();
 
-  await page.locator('#search').fill('track:"so what"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'track:"so what"');
 
   await expect(page.locator('.track-result')).toHaveCount(1);
   const statusResponse = await page.request.get('/api/status');
@@ -96,10 +95,10 @@ test('track-mode region filters use the track tags', async ({ page }) => {
     page.locator('.track-result .track-result-title').first(),
   ).toBeVisible();
 
-  await page
-    .locator('#search')
-    .fill('region:Iceland album:"Putumayo - Family Gathering"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(
+    page,
+    'region:Iceland album:"Putumayo - Family Gathering"',
+  );
 
   await expect(page.locator('.track-result')).toHaveCount(1);
   await expect(page.locator('.track-result-title')).toHaveText(
@@ -115,8 +114,7 @@ test('opening a track row shows the album dialog without a track filter', async 
     page.locator('.track-result .track-result-title').first(),
   ).toBeVisible();
 
-  await page.locator('#search').fill('track:"so what"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'track:"so what"');
   await expect(page.locator('.track-result')).toHaveCount(1);
 
   await page.locator('.track-result-title').click();

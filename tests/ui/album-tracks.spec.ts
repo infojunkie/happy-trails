@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { expectSummaryFor } from './helpers.js';
+import { expectSummaryFor, submitSearch } from './helpers.js';
 
 async function openAlbum(page: import('@playwright/test').Page, title: string) {
   await page.locator('.album-title', { hasText: new RegExp(`^${title}$`) }).click();
@@ -321,8 +321,7 @@ test('album dialog shows Artwork only when the folder has Artwork.pdf', async ({
 
 test('Back closes an album dialog and Forward reopens it', async ({ page }) => {
   await page.goto('/');
-  await page.locator('#search').fill('album:"abbey road"');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'album:"abbey road"');
   await expectSummaryFor(page, { q: 'album:"abbey road"' });
 
   await openAlbum(page, 'Abbey Road');

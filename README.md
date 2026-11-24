@@ -107,17 +107,23 @@ design and current status.
 - Free-text album/artist/track search with case-, accent-, and
   ligature-insensitive matching (`Soren` finds `Søren`, `caetera` finds
   `cætera`, `Bjork` finds `Björk`). Track-level artists are searchable through
-  `artist:` in both modes.
+  `artist:` in both modes. The search box is compact: desktop keeps the applied
+  query in a trigger field, while phones show only a magnifier button. Clicking,
+  tapping, or focusing it opens a search dialog; it submits on Enter or the
+  phone keyboard's Go/Search key, and Escape, the backdrop, or the close button
+  discard an unsubmitted draft. The dialog is full-width on phones and spans
+  from the brand to the search box over the header row on desktop, with a
+  footer summarizing the recognized fields and operators.
 - Fielded search syntax: `album:"abbey road" artist:beatles`,
   `track:"come together"`, `genre:"Jazz" region:"Brazil"`, `composer:jobim`,
   `serie:"Rock Candy"`, `source:"Bonus Tracks"`, combined with `AND`, `OR`,
   implicit AND, and parentheses. Quoted values are matched as contiguous
   phrases. A query made only of plain keywords is treated as one phrase; use
-  `AND` to combine independent words. The `?` button beside the search bar
+  `AND` to combine independent words. The `?` button beside the search control
   opens a collapsible **Help** dialog with **Keyboard shortcuts**, **Search
   syntax**, and **About Happy Trails** sections, including clickable examples,
   package author/contributor links, and a bug/feedback link.
-- Keyboard shortcuts: `/` focuses the search field and `?` opens the help
+- Keyboard shortcuts: `/` opens the search dialog and `?` opens the help
   dialog. With the player open, `Space` toggles playback, `←`/`→` seek,
   `Shift`+`←`/`→` skip tracks, `↑`/`↓` adjust volume, `M` mutes, and `R`
   restarts the current track. The help dialog lists these plus the Cover Flow
@@ -172,8 +178,9 @@ design and current status.
 - Browser Back/Forward replays searches, filters, sorts, and album dialogs.
   Opening an album records a history entry; closing it consumes that entry, and
   Forward reopens it.
-- Light/dark colour schemes, keyboard navigation, `/` focuses search.
-- Responsive layout for narrow screens.
+- Light/dark colour schemes, keyboard navigation, `/` opens the search dialog.
+- Responsive layout for narrow screens, with an icon-only search control and a
+  full-width search sheet on phones.
 
 ## Requirements
 
@@ -780,12 +787,13 @@ cleanup.
 
 Every committed search, facet change, match-mode change, sort change, view-mode
 change, and clear action pushes a browser history entry whose URL carries the
-filter and layout state. Typing in the search box is debounced (400 ms): the
-first live query in an editing session pushes one entry and later edits replace
-it, so the URL always matches the visible results. Enter or leaving the search
-field commits the session, and Back returns to the state before editing rather
-than stepping through every keystroke. Loading more albums, scroll position,
-map pan/zoom, and full-screen changes are not part of the recorded state.
+filter and layout state. A search is applied only when it is submitted from the
+search dialog, so each submission is one entry; typing a draft changes neither
+the URL nor the results. Escape, the backdrop, and the close button discard the
+draft and leave the header showing the last applied query. Back returns to the
+previous applied query rather than stepping through every keystroke. Loading
+more albums, scroll position, map pan/zoom, and full-screen changes are not part
+of the recorded state.
 
 Opening an album pushes another entry. The full album summary is stored in
 `history.state` (the URL is unchanged), so Back closes the dialog and returns to

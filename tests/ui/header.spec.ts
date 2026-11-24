@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { StatusResponse } from '../../src/shared/types.js';
+import { submitSearch } from './helpers.js';
 
 test('results page size follows the server status', async ({ page }) => {
   await page.route('**/api/status', async (route) => {
@@ -48,8 +49,7 @@ test('error banner lives in the sticky header and stays visible while scrolling'
     await route.continue();
   });
 
-  await page.locator('#search').fill('beat');
-  await page.locator('#search').press('Enter');
+  await submitSearch(page, 'beat');
   const banner = page.locator('#error-banner');
   await expect(banner).toBeVisible();
   await expect(banner).toHaveText(/Simulated library failure/);

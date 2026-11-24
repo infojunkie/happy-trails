@@ -30,6 +30,7 @@ import {
   type TrackSummary,
   type TracksResponse,
 } from '../shared/types.js';
+import { SEARCH_FIELDS } from '../shared/searchFields.js';
 import { artistSegments, foldSearch, regionKey } from '../shared/text.js';
 import { api } from './api.js';
 import { $, el } from './dom.js';
@@ -49,7 +50,6 @@ import {
 
 const FACET_PREVIEW = 25;
 const SKELETON_COUNT = 8;
-const SEARCH_DEBOUNCE_MS = 400;
 const STATUS_POLL_MS = 30_000;
 
 type SearchMode = 'albums' | 'tracks';
@@ -186,6 +186,16 @@ let mapNeedsFit = true;
 let albumsLoading = false;
 
 const searchInput = $<HTMLInputElement>('#search');
+const searchTrigger = $<HTMLInputElement>('#search-trigger');
+const searchTriggerButton = $<HTMLButtonElement>('#search-trigger-button');
+const searchActiveDot = $('#search-active-dot');
+const searchDialog = $<HTMLDialogElement>('#search-dialog');
+const searchForm = $<HTMLFormElement>('#search-form');
+const searchDialogClose = $<HTMLButtonElement>('#search-dialog-close');
+const searchOperatorFields = $('#search-operator-fields');
+const searchFieldWrap = $('.search-field');
+const brand = $('.brand');
+const siteHeader = $('.site-header');
 const sortField = $('.sort-field');
 const sortButton = $<HTMLButtonElement>('#sort-button');
 const sortButtonText = $('#sort-button-text');
@@ -268,8 +278,12 @@ const aboutError = $('#about-error');
 const trackCache = new Map<string, TracksResponse>();
 let requestSequence = 0;
 let dialogSequence = 0;
-let searchTimer: number | undefined;
-let searchSessionActive = false;
+/** True while a just-closed desktop trigger is restoring focus. */
+let suppressSearchOpen = false;
+/** Pointer-driven focus opens the dialog on click so the click can finish first. */
+let searchTriggerPointerDown = false;
+/** Element focused when the search dialog opened, for native focus restore. */
+let searchDialogInvoker: HTMLElement | null = null;
 let albumAbort: AbortController | null = null;
 let trackAbort: AbortController | null = null;
 let playerRestored = false;
@@ -699,14 +713,36 @@ function renderSearchMode(): void {
   searchInput.placeholder = tracks
     ? 'Search tracks…'
     : 'Search the mediatheque…';
+  searchTrigger.placeholder = searchInput.placeholder;
+  renderSearchTrigger();
   syncAlbumViewVisibility();
+}
+
+/** Reflect the applied query in the header trigger and the mobile icon. */
+function renderSearchTrigger(): void {
+  const tracks = state.searchMode === 'tracks';
+  const base = tracks ? 'Search tracks' : 'Search the mediatheque';
+  const hasQuery = state.q.length > 0;
+  const label = hasQuery ? `${base} (current query: ${state.q})` : base;
+
+  searchTrigger.value = state.q;
+  searchTrigger.setAttribute('aria-label', label);
+  searchTriggerButton.setAttribute('aria-label', label);
+  searchTriggerButton.classList.toggle('has-query', hasQuery);
+  searchActiveDot.hidden = !hasQuery;
+}
+
+/** Render the compact operator legend from the parser's shared field list. */
+function renderSearchOperatorSummary(): void {
+  searchOperatorFields.replaceChildren(
+    ...SEARCH_FIELDS.map((field) => el('code', { text: `${field}:` })),
+  );
 }
 
 function setSearchMode(mode: SearchMode): void {
   if (state.searchMode === mode) return;
 
   state.searchMode = mode;
-  searchSessionActive = false;
   albumAbort?.abort();
   trackAbort?.abort();
   renderSearchMode();
@@ -765,7 +801,6 @@ function applyFacetSelection(): void {
   });
   if (state.q === query) return;
 
-  window.clearTimeout(searchTimer);
   state.q = query;
   searchInput.value = query;
   pushFilterState();
@@ -774,6 +809,7 @@ function applyFacetSelection(): void {
   renderSeries();
   renderModeControls();
   renderActiveFilters();
+  renderSearchTrigger();
   void loadResults(true);
 }
 
@@ -932,7 +968,6 @@ async function reloadLibrary(): Promise<void> {
   if (tracksMode) trackAbort = controller;
   else albumAbort = controller;
   requestSequence += 1;
-  searchSessionActive = false;
   loadMoreButton.disabled = true;
   updateRefreshControl();
 
@@ -1596,7 +1631,6 @@ function syncUrl(options: SyncUrlOptions = {}): void {
   }
 
   if (options.push) {
-    searchSessionActive = false;
     history.pushState(nextState, '', url);
   } else {
     history.replaceState(nextState, '', url);
@@ -1608,15 +1642,13 @@ function syncUrl(options: SyncUrlOptions = {}): void {
 function pushFilterState(): boolean {
   const url = buildFilterUrl();
   if (url === currentUrl() && albumFromHistoryState() === null) return false;
-  searchSessionActive = false;
   history.pushState(null, '', url);
   lastSyncedUrl = currentUrl();
   return true;
 }
 
 function handlePopState(): void {
-  window.clearTimeout(searchTimer);
-  searchSessionActive = false;
+  if (searchDialog.open) closeSearchDialog();
 
   const url = currentUrl();
   const filtersChanged = url !== lastSyncedUrl;
@@ -2170,7 +2202,6 @@ function navigateToSearch(value: string): void {
   const query = value.trim();
   if (!query) return;
 
-  window.clearTimeout(searchTimer);
   state.q = query;
   syncSelectionsFromQuery();
   searchInput.value = query;
@@ -2180,6 +2211,7 @@ function navigateToSearch(value: string): void {
   renderRegions();
   renderSeries();
   renderActiveFilters();
+  renderSearchTrigger();
   window.scrollTo({ top: 0 });
   void loadResults(true);
 }
@@ -2790,6 +2822,7 @@ function clearFilters(): void {
   renderRegions();
   renderSeries();
   renderActiveFilters();
+  renderSearchTrigger();
   void loadResults(true);
 }
 
@@ -3557,43 +3590,80 @@ function renderTrackSkeletons(count = SKELETON_COUNT): void {
 /* Events                                                              */
 /* ------------------------------------------------------------------ */
 
-function applySearchValue(value: string, mode: 'live' | 'commit'): void {
+/**
+ * Apply a committed query. The search dialog is the only editor, so every
+ * application is deliberate and gets its own history entry.
+ */
+function applySearchValue(value: string): void {
   const trimmed = value.trim();
-  if (trimmed === state.q) {
-    if (mode === 'commit') searchSessionActive = false;
-    return;
-  }
+  if (trimmed === state.q) return;
 
   state.q = trimmed;
+  searchInput.value = trimmed;
   syncSelectionsFromQuery();
-
-  if (mode === 'commit') {
-    // Replace the transient live entry; otherwise start a new entry.
-    if (searchSessionActive) syncUrl();
-    else pushFilterState();
-    searchSessionActive = false;
-  } else if (searchSessionActive) {
-    syncUrl();
-  } else {
-    searchSessionActive = pushFilterState();
-  }
+  pushFilterState();
 
   renderFacets();
   renderRegions();
   renderSeries();
   renderActiveFilters();
+  renderSearchTrigger();
   void loadResults(true);
 }
 
-function applySearch(): void {
-  window.clearTimeout(searchTimer);
-  applySearchValue(searchInput.value, 'live');
+/**
+ * Overlay the header row on desktop: from the brand's right edge to the
+ * search field's right edge. Narrow or wrapped layouts fall back to the
+ * full-width sheet defined in CSS.
+ */
+function positionSearchDialog(): void {
+  const fieldRect = searchFieldWrap.getBoundingClientRect();
+  const brandRect = brand.getBoundingClientRect();
+  const stacked =
+    window.matchMedia('(max-width: 980px)').matches ||
+    fieldRect.top > brandRect.top + 8;
+
+  if (stacked) {
+    searchDialog.style.removeProperty('--search-dialog-top');
+    searchDialog.style.removeProperty('--search-dialog-left');
+    searchDialog.style.removeProperty('--search-dialog-width');
+    return;
+  }
+
+  const left = brandRect.right + 12;
+  const width = Math.max(280, fieldRect.right - left);
+  const top = Math.max(0, siteHeader.getBoundingClientRect().top + 6);
+
+  searchDialog.style.setProperty('--search-dialog-top', `${top}px`);
+  searchDialog.style.setProperty('--search-dialog-left', `${left}px`);
+  searchDialog.style.setProperty('--search-dialog-width', `${width}px`);
 }
 
-/** Enter/blur: apply pending text immediately and close the live session. */
-function commitSearch(): void {
-  window.clearTimeout(searchTimer);
-  applySearchValue(searchInput.value, 'commit');
+function openSearchDialog(): void {
+  if (searchDialog.open) return;
+
+  searchDialogInvoker =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  searchInput.value = state.q;
+  positionSearchDialog();
+  searchDialog.showModal();
+  searchInput.focus();
+  searchInput.select();
+}
+
+/** Close with the draft discarded; the header keeps the applied query. */
+function closeSearchDialog(): void {
+  if (!searchDialog.open) return;
+  suppressSearchOpen = searchDialogInvoker === searchTrigger;
+  searchDialog.close();
+}
+
+/** Submit the draft: apply it, then close the dialog. */
+function submitSearch(): void {
+  applySearchValue(searchInput.value);
+  closeSearchDialog();
 }
 
 function bindEvents(): void {
@@ -3607,17 +3677,64 @@ function bindEvents(): void {
     });
   }
 
-  searchInput.addEventListener('input', () => {
-    window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(applySearch, SEARCH_DEBOUNCE_MS);
+  searchTrigger.addEventListener('pointerdown', () => {
+    searchTriggerPointerDown = true;
+  });
+  searchTrigger.addEventListener('pointerup', () => {
+    searchTriggerPointerDown = false;
+  });
+  searchTrigger.addEventListener('pointercancel', () => {
+    searchTriggerPointerDown = false;
+  });
+  searchTrigger.addEventListener('focus', () => {
+    // Pointer focus opens on click; keyboard focus opens immediately.
+    if (searchTriggerPointerDown) return;
+    if (suppressSearchOpen || searchDialog.open) return;
+    openSearchDialog();
+  });
+  searchTrigger.addEventListener('blur', () => {
+    suppressSearchOpen = false;
+  });
+  searchTrigger.addEventListener('click', () => {
+    searchTriggerPointerDown = false;
+    if (searchDialog.open) return;
+    suppressSearchOpen = false;
+    openSearchDialog();
+  });
+  searchTrigger.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== '/') {
+      return;
+    }
+    event.preventDefault();
+    suppressSearchOpen = false;
+    openSearchDialog();
+  });
+  searchTriggerButton.addEventListener('click', openSearchDialog);
+
+  searchForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitSearch();
   });
   searchInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commitSearch();
-    }
+    // A search input otherwise consumes Escape to clear its text.
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    closeSearchDialog();
   });
-  searchInput.addEventListener('blur', commitSearch);
+  searchDialogClose.addEventListener('click', closeSearchDialog);
+  searchDialog.addEventListener('cancel', () => {
+    if (searchDialogInvoker === searchTrigger) suppressSearchOpen = true;
+  });
+  searchDialog.addEventListener('close', () => {
+    searchInput.value = state.q;
+    searchDialogInvoker = null;
+  });
+  searchDialog.addEventListener('click', (event) => {
+    if (event.target === searchDialog) closeSearchDialog();
+  });
+  window.addEventListener('resize', () => {
+    if (searchDialog.open) positionSearchDialog();
+  });
 
   modeAlbumsButton.addEventListener('click', () => setSearchMode('albums'));
   modeTracksButton.addEventListener('click', () => setSearchMode('tracks'));
@@ -3766,6 +3883,7 @@ function bindEvents(): void {
       renderRegions();
       renderSeries();
       renderActiveFilters();
+      renderSearchTrigger();
       void loadResults(true);
       return;
     }
@@ -3857,7 +3975,7 @@ function bindEvents(): void {
 
     if (event.key === '/') {
       event.preventDefault();
-      searchInput.focus();
+      openSearchDialog();
       return;
     }
     if (event.key === '?') {
@@ -3889,6 +4007,7 @@ async function boot(): Promise<void> {
 
 renderViewSwitch();
 buildSortMenu();
+renderSearchOperatorSummary();
 readUrlState();
 lastSyncedUrl = currentUrl();
 bindEvents();
