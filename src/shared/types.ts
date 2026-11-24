@@ -28,6 +28,18 @@ export interface AlbumSummary {
   comments: string[];
 }
 
+/** A PDF booklet found in the album folder. */
+export interface AlbumPdf {
+  /** Original filename, including its .pdf extension. */
+  name: string;
+  /** Display label: the filename with its final extension removed. */
+  label: string;
+}
+
+export interface AlbumPdfsResponse {
+  pdfs: AlbumPdf[];
+}
+
 /** A genre, region, or series and the number of albums/tracks carrying it. */
 export interface GenreFacet {
   /** Normalised, lowercase key used in URLs and filter parameters. */

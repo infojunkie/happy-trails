@@ -1,3 +1,4 @@
+import type { AlbumPdf } from '../shared/types.js';
 import { config } from './config.js';
 import { DsmClient, type FileStream } from './dsm.js';
 
@@ -6,8 +7,8 @@ const MISSING_TTL_MS = 2 * 60_000;
 const MAX_CACHE_ENTRIES = 1000;
 const ERROR_LOG_INTERVAL_MS = 60_000;
 
-interface AvailabilityEntry {
-  available: boolean;
+interface PdfListEntry {
+  pdfs: AlbumPdf[];
   expiresAt: number;
 }
 
@@ -28,10 +29,30 @@ export function albumFolderPathFor(filePath: string): string | null {
   return sharePath.slice(0, separator);
 }
 
-/** Path to the album's `Artwork.pdf` in the FileStation namespace. */
-export function artworkPathFor(filePath: string): string | null {
-  const folder = albumFolderPathFor(filePath);
-  return folder ? `${folder}/Artwork.pdf` : null;
+/** Whether a single path segment is a PDF booklet filename. */
+export function isPdfFilename(name: string): boolean {
+  return (
+    name.length > '.pdf'.length &&
+    !name.includes('/') &&
+    !name.includes('\\') &&
+    !name.includes('\0') &&
+    /\.pdf$/i.test(name)
+  );
+}
+
+/** The pill label for a PDF: its filename with only the final extension removed. */
+export function pdfLabelFor(name: string): string {
+  return name.replace(/\.pdf$/i, '');
+}
+
+const PDF_NAME_COLLATOR = new Intl.Collator('en', {
+  numeric: true,
+  sensitivity: 'base',
+});
+
+/** Natural, case-insensitive filename comparison for the PDF pills. */
+export function comparePdfNames(left: string, right: string): number {
+  return PDF_NAME_COLLATOR.compare(left, right);
 }
 
 /** Common Synology album-art filenames, in preference order. */
@@ -55,14 +76,14 @@ interface OriginalCoverEntry {
 }
 
 /**
- * Locates and streams `Artwork.pdf` from an album folder through the optional
- * Synology service account. Availability is cached briefly so opening the same
- * album repeatedly does not query the NAS every time.
+ * Lists and streams the PDF booklets in an album folder through the optional
+ * Synology service account. The folder listing is cached briefly so opening
+ * the same album repeatedly does not query the NAS every time.
  */
 export class ArtworkService {
   private readonly dsm: DsmClient | null;
-  private readonly availability = new Map<string, AvailabilityEntry>();
-  private readonly pending = new Map<string, Promise<boolean>>();
+  private readonly pdfLists = new Map<string, PdfListEntry>();
+  private readonly pendingLists = new Map<string, Promise<AlbumPdf[]>>();
   private readonly originalCovers = new Map<string, OriginalCoverEntry>();
   private lastErrorLog = 0;
 
@@ -75,44 +96,45 @@ export class ArtworkService {
     );
   }
 
-  async hasArtwork(filePath: string): Promise<boolean> {
+  async listArtworks(filePath: string): Promise<AlbumPdf[]> {
     const dsm = this.dsm;
-    if (!dsm) return false;
+    if (!dsm) return [];
 
-    const path = artworkPathFor(filePath);
-    if (!path) return false;
+    const folder = albumFolderPathFor(filePath);
+    if (!folder) return [];
 
     const now = Date.now();
-    const cached = this.availability.get(path);
+    const cached = this.pdfLists.get(folder);
     if (cached && cached.expiresAt > now) {
-      this.availability.delete(path);
-      this.availability.set(path, cached);
-      return cached.available;
+      this.pdfLists.delete(folder);
+      this.pdfLists.set(folder, cached);
+      return cached.pdfs;
     }
-    if (cached) this.availability.delete(path);
+    if (cached) this.pdfLists.delete(folder);
 
-    const inFlight = this.pending.get(path);
+    const inFlight = this.pendingLists.get(folder);
     if (inFlight) return inFlight;
 
-    const load = this.check(dsm, path).finally(() => {
-      this.pending.delete(path);
+    const load = this.loadPdfList(dsm, folder).finally(() => {
+      this.pendingLists.delete(folder);
     });
-    this.pending.set(path, load);
+    this.pendingLists.set(folder, load);
     return load;
   }
 
   async openArtwork(
     filePath: string,
+    filename: string,
     range?: string,
   ): Promise<FileStream | null> {
     const dsm = this.dsm;
-    if (!dsm) return null;
+    if (!dsm || !isPdfFilename(filename)) return null;
 
-    const path = artworkPathFor(filePath);
-    if (!path) return null;
+    const folder = albumFolderPathFor(filePath);
+    if (!folder) return null;
 
     try {
-      return await dsm.openFile(path, range);
+      return await dsm.openFile(`${folder}/${filename}`, range);
     } catch (error) {
       this.logError(error);
       throw error;
@@ -195,30 +217,37 @@ export class ArtworkService {
     }
   }
 
-  private async check(dsm: DsmClient, path: string): Promise<boolean> {
-    let available = false;
+  private async loadPdfList(
+    dsm: DsmClient,
+    folder: string,
+  ): Promise<AlbumPdf[]> {
+    let pdfs: AlbumPdf[] = [];
     try {
-      available = await dsm.fileExists(path);
+      const files = await dsm.listFiles(folder);
+      pdfs = files
+        .filter((file) => !file.isdir && isPdfFilename(file.name))
+        .map((file) => ({ name: file.name, label: pdfLabelFor(file.name) }))
+        .sort((left, right) => comparePdfNames(left.name, right.name));
     } catch (error) {
       this.logError(error);
     }
 
-    this.store(path, available);
-    return available;
+    this.storePdfList(folder, pdfs);
+    return pdfs;
   }
 
-  private store(path: string, available: boolean): void {
-    this.availability.delete(path);
-    this.availability.set(path, {
-      available,
+  private storePdfList(folder: string, pdfs: AlbumPdf[]): void {
+    this.pdfLists.delete(folder);
+    this.pdfLists.set(folder, {
+      pdfs,
       expiresAt:
-        Date.now() + (available ? AVAILABLE_TTL_MS : MISSING_TTL_MS),
+        Date.now() + (pdfs.length > 0 ? AVAILABLE_TTL_MS : MISSING_TTL_MS),
     });
 
-    while (this.availability.size > MAX_CACHE_ENTRIES) {
-      const oldest = this.availability.keys().next().value;
+    while (this.pdfLists.size > MAX_CACHE_ENTRIES) {
+      const oldest = this.pdfLists.keys().next().value;
       if (oldest === undefined) break;
-      this.availability.delete(oldest);
+      this.pdfLists.delete(oldest);
     }
   }
 
@@ -227,7 +256,7 @@ export class ArtworkService {
     if (now - this.lastErrorLog < ERROR_LOG_INTERVAL_MS) return;
     this.lastErrorLog = now;
     console.error(
-      '[artwork] failed to load Artwork.pdf:',
+      '[artwork] FileStation request failed:',
       error instanceof Error ? error.message : error,
     );
   }

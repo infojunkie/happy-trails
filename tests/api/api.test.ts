@@ -96,7 +96,13 @@ before(async () => {
   });
   artwork = await runFixture({
     artworkFiles: new Map([
-      ['covers/abbey.jpg', Buffer.from('%PDF-1.4 fixture artwork')],
+      [
+        'covers/abbey.jpg',
+        new Map([
+          ['Artwork.pdf', Buffer.from('%PDF-1.4 fixture artwork')],
+          ['Booklet.pdf', Buffer.from('%PDF-1.4 fixture booklet')],
+        ]),
+      ],
     ]),
   });
 });
@@ -776,49 +782,70 @@ test('GET /api/albums/:key/cover handles invalid, missing, and present covers', 
   assert.equal(covers.context.coverCalls.length, before);
 });
 
-test('artwork endpoints report and stream Artwork.pdf', async () => {
+test('artwork endpoints list and stream every PDF in the album folder', async () => {
   const invalid = await fetch(
-    `${artwork.server.baseUrl}/api/albums/nope/artwork`,
-    { method: 'HEAD' },
+    `${artwork.server.baseUrl}/api/albums/nope/artworks`,
   );
   assert.equal(invalid.status, 400);
 
   const abbey = await findAlbum(artwork.server.baseUrl, 'Abbey Road');
-  const artworkUrl = `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(abbey.key)}/artwork`;
-  const head = await fetch(artworkUrl, { method: 'HEAD' });
-  assert.equal(head.status, 200);
-  assert.equal(head.headers.get('content-type'), 'application/pdf');
-  assert.equal(
-    head.headers.get('content-disposition'),
-    'inline; filename="Artwork.pdf"',
-  );
-  assert.match(head.headers.get('cache-control') ?? '', /max-age=300/);
-
-  const download = await fetch(artworkUrl, {
-    headers: { Range: 'bytes=0-3' },
+  const listUrl = `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(abbey.key)}/artworks`;
+  const list = await fetch(listUrl);
+  assert.equal(list.status, 200);
+  assert.match(list.headers.get('content-type') ?? '', /^application\/json/);
+  assert.match(list.headers.get('cache-control') ?? '', /max-age=300/);
+  assert.deepEqual(await list.json(), {
+    pdfs: [
+      { name: 'Artwork.pdf', label: 'Artwork' },
+      { name: 'Booklet.pdf', label: 'Booklet' },
+    ],
   });
+
+  const download = await fetch(
+    `${listUrl}/${encodeURIComponent('Booklet.pdf')}`,
+    { headers: { Range: 'bytes=0-3' } },
+  );
   assert.equal(download.status, 200);
   assert.equal(download.headers.get('content-type'), 'application/pdf');
-  assert.equal(await download.text(), '%PDF-1.4 fixture artwork');
+  assert.equal(
+    download.headers.get('content-disposition'),
+    `inline; filename="Booklet.pdf"; filename*=UTF-8''Booklet.pdf`,
+  );
+  assert.match(download.headers.get('cache-control') ?? '', /max-age=3600/);
+  assert.equal(await download.text(), '%PDF-1.4 fixture booklet');
   assert.deepEqual(artwork.context.artworkRangeCalls, ['bytes=0-3']);
+  assert.deepEqual(artwork.context.artworkDownloadCalls, ['Booklet.pdf']);
+
+  // Invalid and traversal-shaped filenames never reach FileStation.
+  for (const name of [
+    'nope.txt',
+    '..%2Fsecret.pdf',
+    '..%2F..%2Fetc%2Fpasswd',
+    '.pdf',
+  ]) {
+    const bad = await fetch(`${listUrl}/${name}`);
+    assert.equal(bad.status, 400, name);
+  }
+  assert.deepEqual(artwork.context.artworkDownloadCalls, ['Booklet.pdf']);
+
+  const missing = await fetch(
+    `${listUrl}/${encodeURIComponent('Missing.pdf')}`,
+  );
+  assert.equal(missing.status, 404);
 
   const kindOfBlue = await findAlbum(artwork.server.baseUrl, 'Kind of Blue');
-  const missingHead = await fetch(
-    `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(kindOfBlue.key)}/artwork`,
-    { method: 'HEAD' },
+  const empty = await fetch(
+    `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(kindOfBlue.key)}/artworks`,
   );
-  assert.equal(missingHead.status, 404);
-  const missingGet = await fetch(
-    `${artwork.server.baseUrl}/api/albums/${encodeURIComponent(kindOfBlue.key)}/artwork`,
-  );
-  assert.equal(missingGet.status, 404);
+  assert.equal(empty.status, 200);
+  assert.deepEqual(await empty.json(), { pdfs: [] });
 
   const unconfigured = await findAlbum(main.server.baseUrl, 'Abbey Road');
   const unavailable = await fetch(
-    `${main.server.baseUrl}/api/albums/${encodeURIComponent(unconfigured.key)}/artwork`,
-    { method: 'HEAD' },
+    `${main.server.baseUrl}/api/albums/${encodeURIComponent(unconfigured.key)}/artworks`,
   );
-  assert.equal(unavailable.status, 404);
+  assert.equal(unavailable.status, 200);
+  assert.deepEqual(await unavailable.json(), { pdfs: [] });
 });
 
 test('original cover endpoint streams the full-resolution file', async () => {

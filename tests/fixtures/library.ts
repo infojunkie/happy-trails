@@ -2,6 +2,11 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { Request } from 'express';
 import type { AppDependencies } from '../../src/server/app.js';
+import {
+  comparePdfNames,
+  isPdfFilename,
+  pdfLabelFor,
+} from '../../src/server/artwork.js';
 import type { AlbumRow, TrackIndexRow, TrackRow } from '../../src/server/db.js';
 import { normalizeAlbumName } from '../../src/server/search.js';
 import type {
@@ -499,8 +504,8 @@ export interface FixtureOptions {
   audioStreamContentType?: string;
   streamError?: Error | null;
   coverImages?: Map<string, CoverImage>;
-  /** Representative track paths whose album folder contains Artwork.pdf. */
-  artworkFiles?: Map<string, Buffer>;
+  /** Representative track path → PDF filename → bytes for the album folder. */
+  artworkFiles?: Map<string, Map<string, Buffer>>;
   /** Full-resolution covers keyed by the representative track path. */
   originalCoverImages?: Map<string, { body: Buffer; contentType: string }>;
   ready?: boolean;
@@ -532,6 +537,7 @@ export interface FixtureContext {
   }>;
   coverCalls: string[];
   artworkCalls: string[];
+  artworkDownloadCalls: string[];
   artworkRangeCalls: Array<string | undefined>;
   originalCoverCalls: string[];
   originalCoverRangeCalls: Array<string | undefined>;
@@ -642,6 +648,7 @@ export async function createFixtureContext(
   const streamCalls: FixtureContext['streamCalls'] = [];
   const coverCalls: string[] = [];
   const artworkCalls: string[] = [];
+  const artworkDownloadCalls: string[] = [];
   const artworkRangeCalls: Array<string | undefined> = [];
   const originalCoverCalls: string[] = [];
   const originalCoverRangeCalls: Array<string | undefined> = [];
@@ -676,13 +683,19 @@ export async function createFixtureContext(
       },
     },
     artwork: {
-      hasArtwork: async (filePath) => {
+      listArtworks: async (filePath) => {
         artworkCalls.push(filePath);
-        return options.artworkFiles?.has(filePath) ?? false;
+        const files = options.artworkFiles?.get(filePath);
+        if (!files) return [];
+        return [...files.keys()]
+          .filter((name) => isPdfFilename(name))
+          .sort(comparePdfNames)
+          .map((name) => ({ name, label: pdfLabelFor(name) }));
       },
-      openArtwork: async (filePath, range) => {
+      openArtwork: async (filePath, filename, range) => {
+        artworkDownloadCalls.push(filename);
         artworkRangeCalls.push(range);
-        const body = options.artworkFiles?.get(filePath);
+        const body = options.artworkFiles?.get(filePath)?.get(filename);
         if (!body) return null;
         return {
           stream: Readable.from(body),
@@ -811,6 +824,7 @@ export async function createFixtureContext(
     streamCalls,
     coverCalls,
     artworkCalls,
+    artworkDownloadCalls,
     artworkRangeCalls,
     originalCoverCalls,
     originalCoverRangeCalls,

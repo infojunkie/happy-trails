@@ -1,5 +1,6 @@
 import type {
   AboutResponse,
+  AlbumPdfsResponse,
   AlbumSummary,
   AlbumsResponse,
   GenresResponse,
@@ -143,15 +144,8 @@ export const api = {
     );
   },
 
-  artworkAvailable: async (key: string): Promise<boolean> => {
-    try {
-      const response = await fetch(
-        `/api/albums/${encodeURIComponent(key)}/artwork`,
-        { method: 'HEAD', headers: { Accept: 'application/pdf' } },
-      );
-      return response.ok;
-    } catch {
-      return false;
-    }
-  },
+  artworks: (key: string): Promise<AlbumPdfsResponse> =>
+    getJson<AlbumPdfsResponse>(
+      `/api/albums/${encodeURIComponent(key)}/artworks`,
+    ),
 };

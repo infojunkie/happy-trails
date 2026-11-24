@@ -26,6 +26,12 @@ export interface CoverImage {
   contentType: string;
 }
 
+/** A regular file returned by a FileStation folder listing. */
+export interface FileEntry {
+  name: string;
+  isdir: boolean;
+}
+
 /** A FileStation download, streamed so large PDFs are not buffered in memory. */
 export interface FileStream {
   stream: Readable;
@@ -112,6 +118,12 @@ type FileInfoResult =
   | { kind: 'auth' }
   | { kind: 'error'; message: string };
 
+type FileListResult =
+  | { kind: 'list'; files: FileEntry[] }
+  | { kind: 'missing' }
+  | { kind: 'auth' }
+  | { kind: 'error'; message: string };
+
 type FileStreamResult =
   | { kind: 'file'; file: FileStream }
   | { kind: 'missing' }
@@ -146,6 +158,15 @@ interface FileInfoEntry {
 
 interface FileInfoPayload extends ErrorPayload {
   data?: { files?: unknown };
+}
+
+interface FileListEntry {
+  name?: unknown;
+  isdir?: unknown;
+}
+
+interface FileListPayload extends ErrorPayload {
+  data?: { files?: unknown; total?: unknown };
 }
 
 function jsonBody(buffer: Buffer): unknown {
@@ -238,6 +259,28 @@ export class DsmClient {
       }
     }
     return false;
+  }
+
+  /**
+   * List regular files in a FileStation folder. Returns an empty array when
+   * the folder does not exist. Album folders are small, but the request is
+   * paged so an unexpectedly large folder is still listed completely.
+   */
+  async listFiles(folderPath: string): Promise<FileEntry[]> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await this.ensureSession();
+      const result = await this.requestFileList(session, folderPath);
+
+      if (result.kind === 'list') return result.files;
+      if (result.kind === 'missing') return [];
+
+      this.session = null;
+      if (attempt === 1) {
+        if (result.kind === 'error') throw new DsmError(result.message);
+        return [];
+      }
+    }
+    return [];
   }
 
   /**
@@ -525,6 +568,81 @@ export class DsmClient {
       };
     }
     return entry.isdir === false ? { kind: 'exists' } : { kind: 'missing' };
+  }
+
+  private async requestFileList(
+    session: Session,
+    folderPath: string,
+  ): Promise<FileListResult> {
+    const files: FileEntry[] = [];
+    const pageSize = 1000;
+    const maxPages = 10;
+    let offset = 0;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const url = this.endpoint('/webapi/entry.cgi');
+      url.searchParams.set('api', 'SYNO.FileStation.List');
+      url.searchParams.set('version', '2');
+      url.searchParams.set('method', 'list');
+      url.searchParams.set('folder_path', folderPath);
+      url.searchParams.set('filetype', 'file');
+      url.searchParams.set('offset', String(offset));
+      url.searchParams.set('limit', String(pageSize));
+      url.searchParams.set('SynoToken', session.token);
+
+      const response = await this.request(url, {
+        Accept: 'application/json',
+        ...(session.cookie ? { Cookie: session.cookie } : {}),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        return { kind: 'auth' };
+      }
+      if (response.status < 200 || response.status >= 300) {
+        return {
+          kind: 'error',
+          message: `FileStation returned HTTP ${response.status}`,
+        };
+      }
+
+      const payload = jsonBody(response.body) as FileListPayload | null;
+      if (payload?.success !== true) {
+        const code = errorCode(payload);
+        if (code === 408) {
+          return files.length > 0
+            ? { kind: 'list', files }
+            : { kind: 'missing' };
+        }
+        if (code !== undefined && AUTH_ERROR_CODES.has(code)) {
+          return { kind: 'auth' };
+        }
+        return {
+          kind: 'error',
+          message: `FileStation rejected the folder listing${code === undefined ? '' : ` (code ${code})`}`,
+        };
+      }
+
+      const rawFiles = payload.data?.files;
+      const entries = Array.isArray(rawFiles) ? rawFiles : [];
+      for (const raw of entries) {
+        const entry = raw as FileListEntry;
+        if (typeof entry.name !== 'string' || entry.name.length === 0) {
+          continue;
+        }
+        files.push({ name: entry.name, isdir: entry.isdir === true });
+      }
+
+      offset += entries.length;
+      const total =
+        typeof payload.data?.total === 'number'
+          ? payload.data.total
+          : undefined;
+      if (entries.length < pageSize) break;
+      if (total !== undefined && offset >= total) break;
+      if (entries.length === 0) break;
+    }
+
+    return { kind: 'list', files };
   }
 
   private async requestFileStream(

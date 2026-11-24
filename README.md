@@ -163,9 +163,10 @@ design and current status.
   `http(s)` URLs inside comments are clickable and open in a new tab.
 - Album covers from Synology AudioStation, proxied and cached by the server.
   Albums without covers keep the generated gradient/initials cover.
-- An **Artwork** button in the album dialog when the album folder contains
-  `Artwork.pdf`. The server finds it through Synology FileStation and streams
-  the PDF to the browser, which opens it with its normal PDF viewer.
+- A pill for every PDF in the album folder (for example **Artwork** and
+  **Booklet**), labelled with the filename minus its extension. The server
+  lists the folder through Synology FileStation and streams each PDF to the
+  browser, which opens it with its normal PDF viewer.
 - Sign in with your own Synology account, then **Play** hands an album to
   Audio Station: the server replaces the Audio Station web-player queue with
   the album's tracks and opens Audio Station. Each track row also has a small
@@ -723,15 +724,17 @@ the client requests them lazily as cards become visible.
 
 Album booklet PDFs use Synology FileStation. The representative media path is
 `/volume1/music/...`; FileStation addresses the same file as `/music/...`, so
-the server strips the volume prefix and asks `SYNO.FileStation.List`
-(`getinfo`) for `Artwork.pdf` in that folder. The dialog checks with a `HEAD`
-request and only renders the **Artwork** button when the file exists. The
-button opens `GET /api/albums/:key/artwork`, which streams the file through
+the server strips the volume prefix and lists that folder with
+`SYNO.FileStation.List` (`list`). Every regular file whose name ends in `.pdf`
+(case-insensitive) becomes a pill in the album dialog, labelled with its
+filename minus the final extension and sorted naturally. Each pill opens
+`GET /api/albums/:key/artworks/:filename`, which streams the file through
 `SYNO.FileStation.Download` (`mode=open`) and forwards browser range requests,
 so the browser's own PDF viewer can open and seek in even very large booklets
-without buffering them in server memory. Availability is cached briefly in
-memory; missing files are retried sooner than present ones. The service
-account needs read access to the music share.
+without buffering them in server memory. Filenames are validated as single
+path segments and the `Content-Disposition` header is sanitized. The folder
+listing is cached briefly in memory; empty listings are retried sooner than
+non-empty ones. The service account needs read access to the music share.
 
 ### Places and map geolocation
 
@@ -931,7 +934,7 @@ check.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, artwork button visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, album PDF pill visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
 - Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts`; backend tests cover the album-mode flattening order and pagination.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.
@@ -1260,24 +1263,25 @@ has no representative path; `400` for an invalid key. The lightbox falls back
 to `/api/albums/:key/cover` when this endpoint returns an error. The configured
 DSM service account needs FileStation read access to the music share.
 
-### `HEAD /api/albums/:key/artwork`
+### `GET /api/albums/:key/artworks`
 
-Reports whether the album folder contains `Artwork.pdf`. Returns `200` with
-`Content-Type: application/pdf` when present, `404` when absent, DSM/FileStation
-is not configured, or the album has no representative path, and `400` for an
-invalid album key. The five-minute browser cache matches the server's short
-availability cache.
+Returns `{ "pdfs": [{ "name": "Artwork.pdf", "label": "Artwork" }, ...] }` for
+every PDF in the album folder, sorted naturally by filename. `label` is the
+filename with its final extension removed. Returns `200` with an empty array
+when the album has no representative path, the folder has no PDFs, or DSM is
+not configured, and `400` for an invalid album key. The response uses a
+five-minute private browser cache.
 
-### `GET /api/albums/:key/artwork`
+### `GET /api/albums/:key/artworks/:filename`
 
-Streams the album's `Artwork.pdf` with
-`Content-Disposition: inline; filename="Artwork.pdf"` and
-`Content-Type: application/pdf`, so the browser opens it in its default PDF
-viewer. `Range` requests are forwarded to FileStation; a `206` response includes
-`Content-Range`. Returns `404` when the PDF is absent or FileStation is not
-configured, `400` for an invalid album key, and `502` when Synology fails while
-opening the file. Files are relayed as streams, so large booklets are not
-buffered in memory.
+Streams the named PDF with `Content-Type: application/pdf` and
+`Content-Disposition: inline` (ASCII fallback plus an RFC 5987 filename), so the
+browser opens it in its default PDF viewer. `filename` must be a single path
+segment ending in `.pdf`; traversal-shaped names return `400`. `Range` requests
+are forwarded to FileStation; a `206` response includes `Content-Range`.
+Returns `404` when the PDF is absent or FileStation is not configured and `502`
+when Synology fails while opening the file. Files are relayed as streams, so
+large booklets are not buffered in memory.
 
 ### Session endpoints
 
@@ -1337,7 +1341,7 @@ happy-trails/
 │   │   ├── about.ts      package.json metadata for the Help dialog
 │   │   ├── app.ts        Express routes and static files
 │   │   ├── artists.ts    Configurable multi-artist parser
-│   │   ├── artwork.ts    FileStation Artwork.pdf and original-cover lookup/streaming
+│   │   ├── artwork.ts    FileStation PDF listing and original-cover lookup/streaming
 │   │   ├── config.ts     Environment configuration
 │   │   ├── covers.ts     Bounded cover cache and cover lookup
 │   │   ├── db.ts         Pool and SQL queries

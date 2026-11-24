@@ -87,10 +87,12 @@ test('keyboard focus and the slash shortcut open the search dialog', async ({
   // The focused trigger reopens with Enter or slash.
   await page.keyboard.press('Enter');
   await expect(page.locator('#search-dialog')).toBeVisible();
+  await expect(page.locator('#search')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('#search-dialog')).toBeHidden();
   await page.keyboard.press('/');
   await expect(page.locator('#search-dialog')).toBeVisible();
+  await expect(page.locator('#search')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('#search-dialog')).toBeHidden();
 

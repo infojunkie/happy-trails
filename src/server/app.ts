@@ -15,7 +15,7 @@ import {
   type TracksResponse,
 } from '../shared/types.js';
 import { about } from './about.js';
-import { artwork } from './artwork.js';
+import { artwork, isPdfFilename } from './artwork.js';
 import { isPlayableAudioExtension } from './audio.js';
 import { parseArtists, parseComposers } from './artists.js';
 import { createTrackMatcher, splitTrackTags } from './trackSearch.js';
@@ -44,6 +44,21 @@ const FORWARDED_AUDIO_HEADERS = [
   'etag',
 ] as const;
 
+/**
+ * Inline Content-Disposition for a user-supplied PDF filename. The quoted
+ * fallback is ASCII-only; the RFC 5987 form preserves Unicode names.
+ */
+function inlinePdfDisposition(filename: string): string {
+  const fallback = filename
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `inline; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 /** Works both for src/server/*.ts (tsx) and dist/server/*.js (built). */
 const publicDir = path.resolve(currentDir, '../../public');
@@ -67,7 +82,7 @@ export interface AppDependencies {
   covers: Pick<typeof covers, 'getCover'>;
   artwork: Pick<
     typeof artwork,
-    'hasArtwork' | 'openArtwork' | 'openOriginalCover'
+    'listArtworks' | 'openArtwork' | 'openOriginalCover'
   >;
   userSessions: Pick<
     typeof userSessions,
@@ -604,7 +619,7 @@ export function createApp(
     file.stream.pipe(res);
   });
 
-  app.head('/api/albums/:key/artwork', async (req, res) => {
+  app.get('/api/albums/:key/artworks', async (req, res) => {
     const decoded = decodeAlbumKey(req.params.key);
     if (!decoded) {
       res.status(400).end();
@@ -615,29 +630,31 @@ export function createApp(
       decoded.album,
       decoded.artist,
     );
+
+    // The dialog fetches this list every time it opens; cache it briefly.
+    res.setHeader('Cache-Control', 'private, max-age=300');
     if (!coverPath) {
-      res.status(404).end();
+      res.json({ pdfs: [] });
       return;
     }
 
-    // The button appears when the album folder contains an Artwork.pdf.
-    res.setHeader('Cache-Control', 'private, max-age=300');
     try {
-      if (!(await dependencies.artwork.hasArtwork(coverPath))) {
-        res.status(404).end();
-        return;
-      }
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'inline; filename="Artwork.pdf"');
-      res.status(200).end();
+      const pdfs = await dependencies.artwork.listArtworks(coverPath);
+      res.json({ pdfs });
     } catch {
       res.status(502).end();
     }
   });
 
-  app.get('/api/albums/:key/artwork', async (req, res) => {
+  app.get('/api/albums/:key/artworks/:filename', async (req, res) => {
     const decoded = decodeAlbumKey(req.params.key);
     if (!decoded) {
+      res.status(400).end();
+      return;
+    }
+
+    const filename = req.params.filename;
+    if (!filename || !isPdfFilename(filename)) {
       res.status(400).end();
       return;
     }
@@ -655,7 +672,11 @@ export function createApp(
       typeof req.headers.range === 'string' ? req.headers.range : undefined;
     let file;
     try {
-      file = await dependencies.artwork.openArtwork(coverPath, range);
+      file = await dependencies.artwork.openArtwork(
+        coverPath,
+        filename,
+        range,
+      );
     } catch (error) {
       console.error('[artwork] could not open PDF:', error);
       res.status(502).end();
@@ -670,7 +691,7 @@ export function createApp(
 
     res.status(file.status);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="Artwork.pdf"');
+    res.setHeader('Content-Disposition', inlinePdfDisposition(filename));
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const passthroughHeaders = [

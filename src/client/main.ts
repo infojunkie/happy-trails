@@ -19,6 +19,7 @@ import {
   isSortKey,
   isSortOrder,
   type AboutResponse,
+  type AlbumPdf,
   type AlbumSummary,
   type FilterMode,
   type GenreFacet,
@@ -2945,7 +2946,7 @@ async function openAlbum(
   let currentTracks: TracksResponse | null = cached ?? null;
   let loading = !cached;
   let currentError: string | undefined;
-  let artworkAvailable = false;
+  let albumPdfs: AlbumPdf[] = [];
 
   const render = (focusClose: boolean): void => {
     if (sequence !== dialogSequence) return;
@@ -2955,18 +2956,23 @@ async function openAlbum(
       loading,
       currentError,
       focusClose,
-      artworkAvailable,
+      albumPdfs,
     );
   };
 
   render(true);
   if (!dialog.open) dialog.showModal();
 
-  void api.artworkAvailable(album.key).then((available) => {
-    if (sequence !== dialogSequence || !available) return;
-    artworkAvailable = true;
-    render(false);
-  });
+  void api
+    .artworks(album.key)
+    .then((response) => {
+      if (sequence !== dialogSequence || response.pdfs.length === 0) return;
+      albumPdfs = response.pdfs;
+      render(false);
+    })
+    .catch(() => {
+      // PDF pills are optional; the album dialog still renders.
+    });
 
   if (cached) return;
 
@@ -3014,7 +3020,7 @@ function renderDialog(
   loading: boolean,
   error?: string,
   focusClose = true,
-  artworkAvailable = false,
+  albumPdfs: AlbumPdf[] = [],
 ): void {
   const closeButton = el(
     'button',
@@ -3103,14 +3109,7 @@ function renderDialog(
       button.addEventListener('click', () => {
         if (state.dialogShowAllTracks === showAll) return;
         state.dialogShowAllTracks = showAll;
-        renderDialog(
-          album,
-          tracks,
-          loading,
-          error,
-          false,
-          artworkAvailable,
-        );
+        renderDialog(album, tracks, loading, error, false, albumPdfs);
         dialog
           .querySelector<HTMLButtonElement>('.track-filter-option.is-active')
           ?.focus();
@@ -3186,19 +3185,19 @@ function renderDialog(
     }
   }
 
-  if (artworkAvailable) {
+  for (const pdf of albumPdfs) {
     actions.push(
       el(
         'a',
         {
           class: 'dialog-artwork',
-          href: `/api/albums/${encodeURIComponent(album.key)}/artwork`,
+          href: `/api/albums/${encodeURIComponent(album.key)}/artworks/${encodeURIComponent(pdf.name)}`,
           target: '_blank',
           rel: 'noopener',
-          title: 'Open the album artwork PDF',
+          title: `Open ${pdf.name}`,
         },
         el('span', { 'aria-hidden': 'true', text: '▤' }),
-        el('span', { text: 'Artwork' }),
+        el('span', { text: pdf.label }),
       ),
     );
   }
@@ -3726,6 +3725,9 @@ function bindEvents(): void {
     if (searchDialogInvoker === searchTrigger) suppressSearchOpen = true;
   });
   searchDialog.addEventListener('close', () => {
+    // A close event can be queued while the user reopens the dialog; ignore
+    // the stale event so it cannot clobber the new session's invoker.
+    if (searchDialog.open) return;
     searchInput.value = state.q;
     searchDialogInvoker = null;
   });

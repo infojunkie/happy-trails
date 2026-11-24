@@ -290,22 +290,29 @@ test.describe('mobile album dialog track tags', () => {
   });
 });
 
-test('album dialog shows Artwork only when the folder has Artwork.pdf', async ({
+test('album dialog lists every PDF in the folder as a pill', async ({
   page,
 }) => {
   await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
   await expect(page.locator('.album-card').first()).toBeVisible();
   await openAlbum(page, 'Abbey Road');
 
-  const artwork = page.locator('#album-dialog .dialog-artwork');
-  await expect(artwork).toBeVisible();
-  await expect(artwork).toContainText('Artwork');
-  await expect(artwork).toHaveAttribute(
+  const pills = page.locator('#album-dialog .dialog-artwork');
+  await expect(pills).toHaveCount(2);
+  await expect(pills.nth(0)).toContainText('Artwork');
+  await expect(pills.nth(1)).toContainText('Booklet');
+  await expect(pills.nth(0)).toHaveAttribute(
     'href',
-    /^\/api\/albums\/[^/]+\/artwork$/,
+    /^\/api\/albums\/[^/]+\/artworks\/Artwork\.pdf$/,
   );
-  await expect(artwork).toHaveAttribute('target', '_blank');
-  await expect(artwork).toHaveAttribute('rel', 'noopener');
+  await expect(pills.nth(1)).toHaveAttribute(
+    'href',
+    /^\/api\/albums\/[^/]+\/artworks\/Booklet\.pdf$/,
+  );
+  for (const pill of [pills.nth(0), pills.nth(1)]) {
+    await expect(pill).toHaveAttribute('target', '_blank');
+    await expect(pill).toHaveAttribute('rel', 'noopener');
+  }
 
   await page.locator('#album-dialog .dialog-close').click();
   await expect
