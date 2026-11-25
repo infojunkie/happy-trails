@@ -105,7 +105,9 @@ test('album dialog shows merged tracks, composer lines, and artist punctuation',
   await expect(page.locator('.dialog-artist')).toHaveText('The Beatles');
   await expect(page.locator('.dialog-genres .chip')).toHaveText(['Rock', 'Pop']);
   await expect(page.locator('.source-heading')).toContainText(['Main album', 'Bonus Tracks']);
-  await expect(page.locator('#album-dialog .track-play')).toHaveCount(0);
+  await expect(
+    page.locator('#album-dialog .track-play').first(),
+  ).toBeVisible();
   await expect(
     page.locator('#album-dialog .track-filter-option'),
   ).toHaveCount(0);
@@ -431,19 +433,10 @@ test('track filter defaults to matching tracks and updates album Play', async ({
   );
 });
 
-test('sign-in reveals Play links and sign-out removes them', async ({ page }) => {
+test('Play links stay visible across sign-in and sign-out', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('.album-card').first()).toBeVisible();
   await expect(page.locator('#session-button')).toHaveText('Sign in');
-  await expect(page.locator('.album-play')).toHaveCount(0);
-
-  await page.locator('#session-button').click();
-  await expect(page.locator('#login-dialog')).toBeVisible();
-  await page.locator('#login-username').fill('alice');
-  await page.locator('#login-password').fill('secret');
-  await page.locator('#login-submit').click();
-  await expect(page.locator('#login-dialog')).toBeHidden();
-  await expect(page.locator('#session-button')).toHaveText('alice');
   await expect(page.locator('.album-play').first()).toBeVisible();
   const href = await page.locator('.album-play').first().getAttribute('href');
   expect(href).toMatch(/^\/play\//);
@@ -457,6 +450,7 @@ test('sign-in reveals Play links and sign-out removes them', async ({ page }) =>
     .first()
     .click();
   await expect(page.locator('#album-dialog')).toBeVisible();
+  await expect(page.locator('#album-dialog .dialog-play')).toBeVisible();
   const trackPlay = page.locator('#album-dialog .track-play').first();
   await expect(trackPlay).toBeVisible();
   await expect(trackPlay).toHaveAttribute('href', /^\/play\/track\/\d+$/);
@@ -466,6 +460,15 @@ test('sign-in reveals Play links and sign-out removes them', async ({ page }) =>
     .poll(() => page.evaluate(() => window.history.state?.album ?? null))
     .toBeNull();
 
+  await page.locator('#session-button').click();
+  await expect(page.locator('#login-dialog')).toBeVisible();
+  await page.locator('#login-username').fill('alice');
+  await page.locator('#login-password').fill('secret');
+  await page.locator('#login-submit').click();
+  await expect(page.locator('#login-dialog')).toBeHidden();
+  await expect(page.locator('#session-button')).toHaveText('alice');
+  await expect(page.locator('.album-play').first()).toBeVisible();
+
   await page.reload();
   await expect(page.locator('.album-card').first()).toBeVisible();
   await expect(page.locator('#session-button')).toHaveText('alice');
@@ -473,5 +476,5 @@ test('sign-in reveals Play links and sign-out removes them', async ({ page }) =>
 
   await page.locator('#session-button').click();
   await expect(page.locator('#session-button')).toHaveText('Sign in');
-  await expect(page.locator('.album-play')).toHaveCount(0);
+  await expect(page.locator('.album-play').first()).toBeVisible();
 });

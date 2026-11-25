@@ -46,8 +46,10 @@ design and current status.
   (metadata, artwork, timeline, and media keys), and a play queue. While
   playing, the player holds a best-effort screen wake lock (when
   `SCREEN_WAKE_LOCK_ENABLED` is on and the browser allows it), which keeps the
-  page from being hidden at a track boundary on Android. Play controls and the
-  footer are only shown while signed in. Album Play queues the album; a
+  page from being hidden at a track boundary on Android. Play controls are
+  always shown; clicking one while signed out opens the sign-in dialog and
+  continues to playback after a successful login. The footer appears once a
+  session is established and playback starts. Album Play queues the album; a
   track Play queues the whole album and starts at the clicked track. The queue supports
   removing, reordering, clearing, and click-to-play, advances automatically with
   a preloaded next track, and survives a page reload paused (the restored queue
@@ -178,7 +180,8 @@ design and current status.
   Audio Station: the server replaces the Audio Station web-player queue with
   the album's tracks and opens Audio Station. Each track row also has a small
   blue play control that queues just that track. No audio player lives in this
-  app. Play controls are hidden until the app session is authenticated.
+  app. Play controls are always visible; when signed out, clicking one opens
+  the sign-in dialog and continues to playback after a successful login.
 - Shareable URL state
   (`?q=genre%3A%22Jazz%22+region%3A%22France%22&sort=artist&order=asc&view=tracks`).
   Facet selections are encoded as `genre:` / `region:` / `serie:` terms in `q`,
@@ -842,10 +845,11 @@ editing, and persistence are described in
 [docs/native-playback.md](docs/native-playback.md).
 
 Play controls on album cards, the album dialog, and track rows start native
-playback. They, and the footer, are only shown while signed in; the stream
-endpoint independently returns `401` without a session. Album Play queues the
-whole album; a track Play also queues the whole album but starts at the clicked
-track.
+playback. They are always shown; while signed out, clicking one opens the
+sign-in dialog and starts the pending playback after a successful login. The
+footer appears once signed in and playing. The stream endpoint independently
+returns `401` without a session. Album Play queues the whole album; a track Play
+also queues the whole album but starts at the clicked track.
 Ctrl/Cmd-click (or a middle-click) on a Play link opens the Audio Station
 handoff instead. The album dialog also shows a secondary **Audio Station** link
 when the fallback is enabled, and an unplayable track's error state links to
@@ -864,10 +868,9 @@ restarting the server) drops the session. Accounts with two-factor
 authentication are not supported.
 
 Play links point at `GET /play/:key` in a new tab. The card Play chips and the
-dialog Play button are only rendered while the app session is authenticated;
-signing out removes them. Without a signed-in app session, the route queues
-nothing and redirects to `/?login=1&play=…`; the app opens the sign-in dialog
-and continues to playback after a successful sign-in. The dialog Play button
+dialog Play button are always rendered. Without a signed-in app session, the
+route queues nothing and redirects to `/?login=1&play=…`; the app opens the
+sign-in dialog and continues to playback after a successful sign-in. The dialog Play button
 follows the **Matching tracks / Show all** toggle: matching mode passes the
 current search as `q` and queues only matching tracks, while Show all queues the
 whole album. With a session, the route resolves the album's source titles to
@@ -958,7 +961,7 @@ check.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, sign-in/Play visibility, album PDF pill visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, Play controls and sign-in continuation, album PDF pill visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
 - Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts`; backend tests cover the album-mode flattening order and pagination.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.

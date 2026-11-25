@@ -423,10 +423,45 @@ test('manual track or album playback clears the Play all source', async ({
     .toBe(false);
 });
 
-test('Play all is hidden while signed out', async ({ page }) => {
+test('Play all is visible while signed out and plays after sign-in', async ({
+  page,
+}) => {
+  await routeAudio(page);
   await page.goto('/?view=tracks');
   await expect(page.locator('.track-result').first()).toBeVisible();
-  await expect(page.locator('#play-all')).toBeHidden();
+  await expect(page.locator('#play-all')).toBeVisible();
+
+  await page.locator('#play-all').click();
+  await expect(page.locator('#login-dialog')).toBeVisible();
+  await page.locator('#login-username').fill('alice');
+  await page.locator('#login-password').fill('secret');
+  await page.locator('#login-submit').click();
+
+  await expect(page.locator('#login-dialog')).toBeHidden();
+  await expect(page.locator('#player')).toBeVisible();
+  await expect(page.locator('#player-queue-count')).toHaveText('48');
+  await expect.poll(() => audioPlaying(page)).toBe(true);
+});
+
+test('album Play while signed out signs in and then starts playback', async ({
+  page,
+}) => {
+  await routeAudio(page);
+  await page.goto(`/?q=${encodeURIComponent('album:"abbey road"')}`);
+  const card = albumCard(page, 'Abbey Road').first();
+  await expect(card).toBeVisible();
+  await card.locator('.album-play').click();
+
+  await expect(page.locator('#login-dialog')).toBeVisible();
+  await page.locator('#login-username').fill('alice');
+  await page.locator('#login-password').fill('secret');
+  await page.locator('#login-submit').click();
+
+  await expect(page.locator('#login-dialog')).toBeHidden();
+  await expect(page.locator('#player')).toBeVisible();
+  await expect(page.locator('#player-title')).toHaveText('Come Together');
+  await expect(page.locator('#player-queue-count')).toHaveText('5');
+  await expect.poll(() => audioPlaying(page)).toBe(true);
 });
 
 test('album Play streams through the footer player', async ({ page }) => {

@@ -1163,7 +1163,6 @@ function ensurePlayerAuthenticated(): boolean {
 function playbackActionsAvailable(): boolean {
   return (
     state.playbackEnabled &&
-    state.session.authenticated &&
     (state.nativePlaybackEnabled || state.audioStationFallbackEnabled)
   );
 }
