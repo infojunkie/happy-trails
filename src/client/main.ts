@@ -3700,10 +3700,22 @@ function bindEvents(): void {
     suppressSearchOpen = false;
     openSearchDialog();
   });
+  // Typing while the header field is focused (for example after a dismissal)
+  // reopens the dialog with the edit applied and the caret preserved.
+  searchTrigger.addEventListener('input', (event) => {
+    if (searchDialog.open) return;
+    if (event instanceof InputEvent && event.isComposing) return;
+
+    const draft = searchTrigger.value;
+    const caret = searchTrigger.selectionStart ?? draft.length;
+    searchTrigger.value = state.q;
+    suppressSearchOpen = false;
+    openSearchDialog();
+    searchInput.value = draft;
+    searchInput.setSelectionRange(caret, caret);
+  });
   searchTrigger.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== '/') {
-      return;
-    }
+    if (event.key !== 'Enter' && event.key !== '/') return;
     event.preventDefault();
     suppressSearchOpen = false;
     openSearchDialog();

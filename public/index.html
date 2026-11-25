@@ -65,14 +65,13 @@
             id="search-trigger"
             class="search-trigger"
             type="text"
-            readonly
             autocomplete="off"
             spellcheck="false"
             aria-label="Search the mediatheque"
             aria-haspopup="dialog"
             aria-controls="search-dialog"
             aria-keyshortcuts="/"
-            title='album:"exact phrase" artist:name track:title genre:name region:name serie:name composer:name source:label — supports AND, OR, and parentheses'
+            title="Search"
           />
           <kbd class="search-hint" aria-hidden="true">/</kbd>
         </div>
@@ -104,9 +103,8 @@
           ?
         </button>
         <span id="search-syntax" class="visually-hidden">
-          Search syntax: use field colon value, quote multi-word values, and
-          combine terms with AND or OR. Fields are album, artist, track,
-          genre, region, serie, composer, and source. A plain sequence of
+          FIELDS: all, album, artist, track, genre, region, serie, source,
+          composer — COMBINE: AND, OR, "…", ( ). A plain sequence of
           keywords searches all fields as one phrase. Use the Albums and
           Tracks buttons in the header to switch between album and track
           results.
@@ -528,7 +526,7 @@
               spellcheck="false"
               enterkeyhint="search"
               aria-describedby="search-syntax"
-              title='album:"exact phrase" artist:name track:title genre:name region:name serie:name composer:name source:label — supports AND, OR, and parentheses'
+              title="Search"
             />
             <button
               id="search-dialog-close"

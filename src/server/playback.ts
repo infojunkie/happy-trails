@@ -29,8 +29,8 @@ export class PlaybackService {
   constructor() {
     console.log(
       config.nativePlaybackEnabled
-        ? '[playback] Native streaming enabled'
-        : '[playback] Native streaming disabled (NATIVE_PLAYBACK_ENABLED=false or DSM_URL is not configured)',
+        ? '[playback] native streaming enabled'
+        : '[playback] native streaming disabled (NATIVE_PLAYBACK_ENABLED=false or DSM_URL is not configured)',
     );
     console.log(
       this.enabled

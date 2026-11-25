@@ -103,6 +103,50 @@ test('keyboard focus and the slash shortcut open the search dialog', async ({
   await expect(page.locator('#search')).toBeFocused();
 });
 
+test('typing in the focused header field opens the dialog with the edit', async ({
+  page,
+}) => {
+  await page.goto('/?q=beatles');
+  await expect(page.locator('.album-card').first()).toBeVisible();
+  await expect(page.locator('#search-trigger')).toHaveValue('beatles');
+
+  // Focus opens the dialog; Escape returns focus to the header field.
+  await page.locator('#search-trigger').focus();
+  await expect(page.locator('#search-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#search-dialog')).toBeHidden();
+  await expect(page.locator('#search-trigger')).toBeFocused();
+
+  // Typing at the end reopens the dialog with the character inserted.
+  await page.locator('#search-trigger').press('End');
+  await page.keyboard.type('m');
+  await expect(page.locator('#search-dialog')).toBeVisible();
+  const input = page.locator('#search');
+  await expect(input).toHaveValue('beatlesm');
+  await expect(input).toBeFocused();
+  expect(
+    await input.evaluate((element) =>
+      (element as HTMLInputElement).selectionStart,
+    ),
+  ).toBe('beatlesm'.length);
+
+  // Later characters land in the dialog's input.
+  await page.keyboard.type('iles');
+  await expect(input).toHaveValue('beatlesmiles');
+
+  // Submitting applies the drafted query.
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#search-dialog')).toBeHidden();
+  await expect(page.locator('#search-trigger')).toHaveValue('beatlesmiles');
+
+  // Focus returns to the header after submit; typing reopens with the edit.
+  await expect(page.locator('#search-trigger')).toBeFocused();
+  await page.locator('#search-trigger').press('End');
+  await page.keyboard.type('!');
+  await expect(page.locator('#search-dialog')).toBeVisible();
+  await expect(page.locator('#search')).toHaveValue('beatlesmiles!');
+});
+
 test('the open dialog follows a breakpoint change', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('.album-card').first()).toBeVisible();

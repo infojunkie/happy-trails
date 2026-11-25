@@ -113,12 +113,14 @@ design and current status.
   `-M-`). Whitespace is still a word separator, so `The Beatles` and
   `TheBeatles` remain different. Track-level artists are searchable through
   `artist:` in both modes. The search box is compact: desktop keeps the applied
-  query in a trigger field, while phones show only a magnifier button. Clicking,
-  tapping, or focusing it opens a search dialog; it submits on Enter or the
-  phone keyboard's Go/Search key, and Escape, the backdrop, or the close button
-  discard an unsubmitted draft. The dialog is full-width on phones and spans
-  from the brand to the search box over the header row on desktop, with a
-  footer summarizing the recognized fields and operators.
+  query in an editable field, while phones show only a magnifier button.
+  Clicking, tapping, or focusing it opens a search dialog, and typing in the
+  focused field opens the dialog with the edit carried over at the caret. The
+  dialog submits on Enter or the phone keyboard's Go/Search key, and Escape,
+  the backdrop, or the close button discard an unsubmitted draft. The dialog is
+  full-width on phones and spans from the brand to the search box over the
+  header row on desktop, with a footer summarizing the recognized fields and
+  operators.
 - Fielded search syntax: `album:"abbey road" artist:beatles`,
   `track:"come together"`, `genre:"Jazz" region:"Brazil"`, `composer:jobim`,
   `serie:"Rock Candy"`, `source:"Bonus Tracks"`, combined with `AND`, `OR`,
