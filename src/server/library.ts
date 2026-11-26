@@ -80,6 +80,7 @@ export class Library {
       lastCheckedAt: this.lastCheckedAt?.toISOString() ?? null,
       refreshing: this.rebuilding,
       checkIntervalMs: config.checkIntervalMs,
+      coverflowIntervalMs: config.coverflowIntervalMs,
       // The API clamps every limit to maxPageSize, so expose the effective
       // value; the client uses it for paging and the Play all queue window.
       pageSize: Math.min(config.defaultPageSize, config.maxPageSize),

@@ -375,6 +375,8 @@ export const config = {
   statementTimeoutMs: integerFromEnv('DB_STATEMENT_TIMEOUT_MS', 30_000, 1),
   defaultPageSize: integerFromEnv('PAGE_SIZE', 48, 1),
   maxPageSize: integerFromEnv('MAX_PAGE_SIZE', 200, 1),
+  /** How long each album stays visible in the full-screen Cover Flow. */
+  coverflowIntervalMs: integerFromEnv('COVERFLOW_INTERVAL_MS', 6_000, 500),
   /**
    * Number of recent searches the browser keeps in localStorage. Set to 0 to
    * disable search history.

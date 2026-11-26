@@ -511,6 +511,8 @@ export interface FixtureOptions {
   ready?: boolean;
   /** Results per page exposed by /api/status and used by the fixture app. */
   pageSize?: number;
+  /** Full-screen Cover Flow interval exposed by /api/status. */
+  coverflowIntervalMs?: number;
   searchHistoryLimit?: number;
   extraRows?: AlbumRow[];
   /** Origins allowed to select an origin-based playback redirect target. */
@@ -585,6 +587,7 @@ export async function createFixtureContext(
     lastCheckedAt: '2026-01-01T00:00:00.000Z',
     refreshing: false,
     checkIntervalMs: 60_000,
+    coverflowIntervalMs: options.coverflowIntervalMs ?? 6_000,
     pageSize: options.pageSize ?? 48,
     searchHistoryLimit: options.searchHistoryLimit ?? 50,
     error: options.ready === false ? 'Fixture library is unavailable' : null,

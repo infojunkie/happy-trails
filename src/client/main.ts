@@ -121,6 +121,8 @@ interface State {
   trackTotal: number;
   /** Results per page and Play all queue window, from /api/status. */
   pageSize: number;
+  /** Full-screen Cover Flow album duration, from /api/status. */
+  coverflowIntervalMs: number;
   /** Recent searches kept in localStorage; 0 disables history. */
   searchHistoryLimit: number;
   playbackEnabled: boolean;
@@ -170,6 +172,7 @@ const state: State = {
   tracks: [],
   trackTotal: 0,
   pageSize: 0,
+  coverflowIntervalMs: 6_000,
   searchHistoryLimit: 50,
   playbackEnabled: false,
   nativePlaybackEnabled: false,
@@ -226,6 +229,10 @@ const playAllLabel = $('#play-all-label');
 const albumGrid = $('#album-grid');
 const coverflowEl = $('#album-coverflow');
 const coverflowCaption = $('#coverflow-caption');
+const coverflowWrap = $('.album-coverflow-wrap');
+const coverflowFullscreenButton = $<HTMLButtonElement>(
+  '#coverflow-fullscreen',
+);
 const mapViewEl = $('#album-map-view');
 const mapEl = $('#album-map');
 const mapEmptyNote = $('#album-map-empty');
@@ -597,6 +604,7 @@ function syncAlbumViewVisibility(): void {
   viewSwitch.hidden = tracks;
   albumGrid.hidden = tracks || flow || mapView;
   coverflowEl.hidden = !flow;
+  coverflowFullscreenButton.hidden = !flow;
   mapViewEl.hidden = !mapView;
   if (!mapView) mapUnplacedSection.hidden = true;
   if (mapView) {
@@ -604,7 +612,10 @@ function syncAlbumViewVisibility(): void {
     loadMoreButton.hidden = true;
     void ensureAlbumMap();
   }
-  if (!flow) disposeCoverflow();
+  if (!flow) {
+    exitCoverflowFullscreen();
+    disposeCoverflow();
+  }
   if (!mapView) albumMap?.hide();
 }
 
@@ -1790,6 +1801,7 @@ function renderStats(status: StatusResponse): void {
   state.totalAlbums = status.albumCount;
   state.totalTracks = status.trackCount;
   state.pageSize = status.pageSize;
+  state.coverflowIntervalMs = status.coverflowIntervalMs;
   state.searchHistoryLimit = status.searchHistoryLimit;
   statsEl.textContent = `${formatCount(status.albumCount)} albums · ${formatCount(status.trackCount)} tracks`;
   statsEl.title = status.lastRefreshed
@@ -1920,6 +1932,239 @@ function coverAccent(key: string): string {
   return hslToHex(hashString(key) % 360, 42, 38);
 }
 
+/* ------------------------------------------------------------------ */
+/* Cover Flow full screen and slideshow                                */
+/* ------------------------------------------------------------------ */
+
+/** Start loading the next page when this close to the loaded end. */
+const COVERFLOW_PREFETCH_AHEAD = 3;
+/** Inline card cap outside full screen; full screen lets the viewport decide. */
+const COVERFLOW_CARD_SIZE = 360;
+/**
+ * Effectively no cap in full screen. The component still limits the card to
+ * 32% of the width and 57% of the height, so it always fits the viewport.
+ */
+const COVERFLOW_FULLSCREEN_CARD_SIZE = 100_000;
+
+/** The card cap for the current mode. */
+function coverflowCardSizeLimit(): number {
+  return isCoverflowFullscreen()
+    ? COVERFLOW_FULLSCREEN_CARD_SIZE
+    : COVERFLOW_CARD_SIZE;
+}
+
+let coverflowExpanded = false;
+let coverflowSlideshowActive = false;
+let coverflowSlideshowTimer: number | null = null;
+
+function isCoverflowNativeFullscreen(): boolean {
+  return document.fullscreenElement === coverflowWrap;
+}
+
+function isCoverflowFullscreen(): boolean {
+  return isCoverflowNativeFullscreen() || coverflowExpanded;
+}
+
+function syncCoverflowFullscreenButton(): void {
+  const active = isCoverflowFullscreen();
+  coverflowFullscreenButton.textContent = active
+    ? 'Exit full screen'
+    : 'Full screen';
+  coverflowFullscreenButton.title = active
+    ? 'Exit full screen'
+    : 'Enter full screen';
+  coverflowFullscreenButton.setAttribute(
+    'aria-label',
+    active ? 'Exit full screen' : 'Enter full screen',
+  );
+}
+
+function clearCoverflowSlideTimer(): void {
+  if (coverflowSlideshowTimer !== null) {
+    window.clearTimeout(coverflowSlideshowTimer);
+    coverflowSlideshowTimer = null;
+  }
+}
+
+function canRunCoverflowSlideshow(): boolean {
+  return (
+    coverflowSlideshowActive &&
+    state.searchMode === 'albums' &&
+    state.albumView === 'coverflow' &&
+    isCoverflowFullscreen() &&
+    !document.hidden &&
+    !dialog.open &&
+    coverflow !== null &&
+    state.albums.length > 0
+  );
+}
+
+function scheduleCoverflowSlide(): void {
+  clearCoverflowSlideTimer();
+  if (!canRunCoverflowSlideshow()) return;
+  coverflowSlideshowTimer = window.setTimeout(() => {
+    coverflowSlideshowTimer = null;
+    void advanceCoverflowSlide();
+  }, state.coverflowIntervalMs);
+}
+
+/** Schedule only when nothing is pending, so appended pages do not reset it. */
+function ensureCoverflowSlideTimer(): void {
+  if (coverflowSlideshowTimer === null) scheduleCoverflowSlide();
+}
+
+function maybePrefetchCoverflow(): void {
+  if (
+    !canRunCoverflowSlideshow() ||
+    albumsLoading ||
+    state.albums.length >= state.total
+  ) {
+    return;
+  }
+  const index = coverflow?.state.selectedIndex ?? 0;
+  if (index >= state.albums.length - COVERFLOW_PREFETCH_AHEAD) {
+    void loadAlbums(false);
+  }
+}
+
+async function advanceCoverflowSlide(): Promise<void> {
+  if (!canRunCoverflowSlideshow() || coverflow === null) return;
+  if (albumsLoading) {
+    // A prefetch is in flight; try again after the current album's interval.
+    scheduleCoverflowSlide();
+    return;
+  }
+
+  const flow = coverflow;
+  const index = flow.state.selectedIndex;
+  if (index < 0) return;
+
+  if (index + 1 < state.albums.length) {
+    flow.next();
+    maybePrefetchCoverflow();
+    scheduleCoverflowSlide();
+    return;
+  }
+
+  // At the end of the loaded pages: fetch the next page, then advance.
+  if (state.albums.length < state.total) {
+    const before = state.albums.length;
+    await loadAlbums(false);
+    if (flow !== coverflow || !canRunCoverflowSlideshow()) return;
+    if (
+      state.albums.length > before &&
+      flow.state.selectedIndex + 1 < state.albums.length
+    ) {
+      flow.next();
+      maybePrefetchCoverflow();
+    }
+    scheduleCoverflowSlide();
+    return;
+  }
+
+  // The whole query has been traversed; loop back to the first album.
+  const first = state.albums[0];
+  if (first) flow.select(first.key, true);
+  scheduleCoverflowSlide();
+}
+
+function startCoverflowSlideshow(): void {
+  if (
+    state.searchMode !== 'albums' ||
+    state.albumView !== 'coverflow' ||
+    !isCoverflowFullscreen()
+  ) {
+    return;
+  }
+  coverflowSlideshowActive = true;
+  scheduleCoverflowSlide();
+}
+
+function stopCoverflowSlideshow(): void {
+  coverflowSlideshowActive = false;
+  clearCoverflowSlideTimer();
+}
+
+function setCoverflowExpanded(value: boolean): void {
+  coverflowExpanded = value;
+  coverflowWrap.classList.toggle('is-expanded', value);
+  document.body.classList.toggle('coverflow-expanded', value);
+  syncCoverflowFullscreenButton();
+  if (value) {
+    refreshCoverflowCardSize();
+    startCoverflowSlideshow();
+  } else {
+    if (!isCoverflowNativeFullscreen()) stopCoverflowSlideshow();
+    refreshCoverflowCardSize();
+  }
+}
+
+/**
+ * Recreate the carousel so it picks up the full-screen card cap (the size is
+ * fixed per instance). The selected album and the pending timer are preserved
+ * by the callers.
+ */
+function refreshCoverflowCardSize(): void {
+  if (!coverflow) return;
+  const selectedKey = state.albums[coverflow.state.selectedIndex]?.key;
+  disposeCoverflow();
+  renderCoverflow(selectedKey);
+}
+
+function toggleCoverflowFullscreen(): void {
+  if (isCoverflowNativeFullscreen()) {
+    void document.exitFullscreen();
+    return;
+  }
+  if (coverflowExpanded) {
+    setCoverflowExpanded(false);
+    return;
+  }
+  if (state.searchMode !== 'albums' || state.albumView !== 'coverflow') return;
+
+  const request = coverflowWrap.requestFullscreen?.();
+  if (request) {
+    request.catch(() => setCoverflowExpanded(true));
+  } else {
+    setCoverflowExpanded(true);
+  }
+}
+
+function exitCoverflowFullscreen(): void {
+  if (isCoverflowNativeFullscreen()) void document.exitFullscreen();
+  if (coverflowExpanded) setCoverflowExpanded(false);
+  stopCoverflowSlideshow();
+}
+
+function handleCoverflowFullscreenChange(): void {
+  if (isCoverflowNativeFullscreen()) {
+    coverflowExpanded = false;
+    coverflowWrap.classList.remove('is-expanded');
+    document.body.classList.remove('coverflow-expanded');
+    syncCoverflowFullscreenButton();
+    refreshCoverflowCardSize();
+    startCoverflowSlideshow();
+    return;
+  }
+  if (!coverflowExpanded) stopCoverflowSlideshow();
+  refreshCoverflowCardSize();
+  syncCoverflowFullscreenButton();
+}
+
+function handleCoverflowVisibilityChange(): void {
+  if (document.hidden) {
+    clearCoverflowSlideTimer();
+  } else {
+    ensureCoverflowSlideTimer();
+  }
+}
+
+/** Pause the slideshow while an album dialog is open, then resume on close. */
+function openCoverflowAlbum(album: AlbumSummary): void {
+  clearCoverflowSlideTimer();
+  void openAlbum(album);
+}
+
 function coverflowItems(): CoverflowItem[] {
   return state.albums.map((album) => ({
     id: album.key,
@@ -1946,7 +2191,7 @@ function renderCoverflowCaption(album: AlbumSummary | undefined): void {
     'aria-haspopup': 'dialog',
     'aria-label': `Open ${album.album} by ${album.artist}`,
   });
-  title.addEventListener('click', () => void openAlbum(album));
+  title.addEventListener('click', () => openCoverflowAlbum(album));
 
   const meta: Array<Node | string> = [
     ...artistNodes(album.artists, album.artist),
@@ -1991,10 +2236,11 @@ function renderAlbumSkeletons(count = SKELETON_COUNT): void {
   renderSkeletons(count);
 }
 
-function renderCoverflow(): void {
+function renderCoverflow(selectedKey?: string): void {
   coverflowEl.removeAttribute('aria-busy');
   if (state.albums.length === 0) {
     disposeCoverflow();
+    stopCoverflowSlideshow();
     return;
   }
 
@@ -2002,26 +2248,35 @@ function renderCoverflow(): void {
   if (coverflow) {
     coverflow.setItems(items);
     renderCoverflowCaption(state.albums[coverflow.state.selectedIndex]);
+    ensureCoverflowSlideTimer();
     return;
   }
 
   coverflowEl.replaceChildren();
   coverflow = new Coverflow(coverflowEl, {
     items,
+    ...(selectedKey ? { selectedId: selectedKey } : {}),
     label: 'Album covers',
     reflection: true,
-    maxCardSize: 360,
-    onSelect: (item) => {
+    maxCardSize: coverflowCardSizeLimit(),
+    onSelect: (item, _index, reason) => {
       renderCoverflowCaption(
         state.albums.find((candidate) => candidate.key === item.id),
       );
+      // Manual browsing restarts the countdown; API advances and appended
+      // pages leave the pending timer alone.
+      if (reason !== 'api' && reason !== 'items') {
+        scheduleCoverflowSlide();
+        maybePrefetchCoverflow();
+      }
     },
     onAction: (item) => {
       const album = state.albums.find((candidate) => candidate.key === item.id);
-      if (album) void openAlbum(album);
+      if (album) openCoverflowAlbum(album);
     },
   });
   renderCoverflowCaption(state.albums[coverflow.state.selectedIndex]);
+  ensureCoverflowSlideTimer();
 }
 
 function renderAlbums(): void {
@@ -3906,6 +4161,31 @@ function bindEvents(): void {
     if (searchDialog.open) positionSearchDialog();
   });
 
+  coverflowFullscreenButton.addEventListener(
+    'click',
+    toggleCoverflowFullscreen,
+  );
+  document.addEventListener(
+    'fullscreenchange',
+    handleCoverflowFullscreenChange,
+  );
+  document.addEventListener(
+    'visibilitychange',
+    handleCoverflowVisibilityChange,
+  );
+  document.addEventListener('keydown', (event) => {
+    if (
+      event.key !== 'Escape' ||
+      !coverflowExpanded ||
+      isCoverflowNativeFullscreen()
+    ) {
+      return;
+    }
+    // A modal dialog owns Escape while it is open.
+    if (document.querySelector('dialog[open]')) return;
+    setCoverflowExpanded(false);
+  });
+
   modeAlbumsButton.addEventListener('click', () => setSearchMode('albums'));
   modeTracksButton.addEventListener('click', () => setSearchMode('tracks'));
   playAllButton.addEventListener('click', () => void playAllSearchResults());
@@ -4121,6 +4401,8 @@ function bindEvents(): void {
     if (event.target === dialog) dialog.close();
   });
   dialog.addEventListener('close', () => {
+    // Resume the full-screen Cover Flow slideshow paused by openCoverflowAlbum.
+    ensureCoverflowSlideTimer();
     dialogSequence += 1;
     if (suppressDialogCloseHistory) {
       suppressDialogCloseHistory = false;

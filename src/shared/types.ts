@@ -157,6 +157,8 @@ export interface StatusResponse {
   /** True while a change-triggered rebuild is running. */
   refreshing: boolean;
   checkIntervalMs: number;
+  /** How long each album stays visible in the full-screen Cover Flow. */
+  coverflowIntervalMs: number;
   /**
    * Results per page: the default `limit` for album/track/playback queries
    * and the visible Play all queue window. Effective value of `PAGE_SIZE`

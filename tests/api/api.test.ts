@@ -130,6 +130,7 @@ test('GET /api/status exposes library and playback state', async () => {
   assert.equal(body.refreshing, false);
   assert.ok(body.checkIntervalMs > 0);
   assert.equal(body.pageSize, 48);
+  assert.equal(body.coverflowIntervalMs, 6_000);
   assert.equal(body.searchHistoryLimit, 50);
   assert.equal(body.error, null);
   assert.equal(body.playbackEnabled, true);

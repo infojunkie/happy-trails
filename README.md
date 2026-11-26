@@ -72,7 +72,14 @@ design and current status.
   Flow adds a 3D carousel with drag, wheel, and arrow-key navigation,
   reflections, and click/Enter activation that opens the album dialog. The
   caption below the flow matches the grid: the album title opens the dialog
-  and each artist name runs an artist search. The choice is remembered in
+  and each artist name runs an artist search. In full screen the covers scale
+  up to the largest size the component's viewport fit allows (32% of the width
+  or 57% of the height). Its **Full screen** button starts an automatic
+  slideshow: each album stays for `COVERFLOW_INTERVAL_MS`, later result pages
+  load before the current album ends, and the query loops back to the first
+  album after the last. Opening an
+  album pauses the slideshow; closing the dialog resumes it. Exiting
+  full-screen stops it. The choice is remembered in
   `localStorage` (`happy-trails.album-view`) and recorded in the URL as
   `layout=coverflow` or `layout=map` (grid is the unparameterized default), so
   Back/Forward restore it; the switch is hidden in Tracks mode.
@@ -466,6 +473,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `LIBRARY_CHECK_MS` | `60000` | Delay before checking the `music` table for changes; a detected change triggers a silent rebuild. The next check is scheduled after the previous check and any rebuild finish, so a rebuild longer than this interval delays the next check rather than overlapping it. `LIBRARY_REFRESH_MS` is accepted as a legacy fallback. |
 | `PAGE_SIZE` | `48` | Results per page for the Albums and Tracks views, the default `limit` for API requests that omit it, and the visible Play all queue window. The client reads the effective value from `/api/status`. |
 | `MAX_PAGE_SIZE` | `200` | Upper bound for any API `limit`; `PAGE_SIZE` is clamped to it. |
+| `COVERFLOW_INTERVAL_MS` | `6000` | Time each album stays visible in the full-screen Cover Flow slideshow, in milliseconds (minimum 500). Exposed to the browser through `/api/status`. |
 | `SEARCH_HISTORY_LIMIT` | `50` | Recent searches kept in the browser's localStorage. Set to `0` to disable search history; values above 200 are capped. |
 | `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
@@ -988,7 +996,7 @@ check.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
 - Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`/`NOT`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, Play controls and sign-in continuation, album PDF pill visibility, recent-search recall and limits, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, Play controls and sign-in continuation, album PDF pill visibility, recent-search recall and limits, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, the full-screen Cover Flow slideshow (auto-advance, lazy page loading, looping, dialog pause/resume, and exit-stops), and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
 - Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts` and recent-search sanitizing, deduplication, and limits in `src/client/searchHistory.ts`; backend tests cover the album-mode flattening order and pagination.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.
@@ -1029,7 +1037,8 @@ whether the Refresh control is enabled. `albumCount` counts albums visible in
 the Albums view (loose-track collections are excluded); `trackCount` counts
 every indexed track. `pageSize` is the effective `PAGE_SIZE` (clamped by
 `MAX_PAGE_SIZE`), which the client uses for paging and the Play all queue
-window. `lastCheckedAt` and `refreshing` describe the change-detection loop. `playbackEnabled` is true when a DSM URL is
+window. `coverflowIntervalMs` is the full-screen Cover Flow album duration.
+`lastCheckedAt` and `refreshing` describe the change-detection loop. `playbackEnabled` is true when a DSM URL is
 configured, i.e. when users can sign in and use the Play links.
 `screenWakeLockEnabled` controls whether the native player may hold a screen
 wake lock while it is playing.
@@ -1045,6 +1054,7 @@ wake lock while it is playing.
   "refreshing": false,
   "checkIntervalMs": 60000,
   "pageSize": 48,
+  "coverflowIntervalMs": 6000,
   "error": null,
   "playbackEnabled": true,
   "nativePlaybackEnabled": true,
