@@ -330,6 +330,43 @@ test('series checkboxes write an any query and clear resets them', async ({
   await expect(rockCandy.locator('input[type="checkbox"]')).toBeChecked();
 });
 
+test('random sort hides Order and reshuffles with a new seed', async ({
+  page,
+}) => {
+  await selectSortField(page, 'random');
+  await expect(page.locator('#sort-button-text')).toHaveText('Random');
+  const firstSeed = new URL(page.url()).searchParams.get('seed');
+  expect(firstSeed).toBeTruthy();
+  expect(new URL(page.url()).searchParams.get('sort')).toBe('random');
+
+  // The Order section is hidden while Random is active; re-selecting Random
+  // reshuffles with a new seed.
+  await page.locator('#sort-button').click();
+  await expect(page.locator('#sort-panel')).toBeVisible();
+  await expect(page.locator('#sort-order-group')).toBeHidden();
+  await page.locator('#sort-field-options .sort-option[data-key="random"]').click();
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('seed'))
+    .not.toBe(firstSeed);
+
+  // Back restores the previous shuffle, not just the sort mode.
+  await page.goBack();
+  await expect(page.locator('#sort-button-text')).toHaveText('Random');
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('seed'))
+    .toBe(firstSeed);
+
+  // A normal sort restores the Order section and drops the seed.
+  await selectSortField(page, 'added');
+  await expect(page.locator('#sort-button-text')).toHaveText(
+    'Added on · Descending',
+  );
+  await expect(page).not.toHaveURL(/sort=random/);
+  await expect(page).not.toHaveURL(/seed=/);
+  await page.locator('#sort-button').click();
+  await expect(page.locator('#sort-order-group')).toBeVisible();
+});
+
 test('fielded, quoted, and boolean search expressions work', async ({
   page,
 }) => {

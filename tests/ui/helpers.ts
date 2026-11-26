@@ -61,7 +61,7 @@ export async function expandFacet(
 /** Choose a Sort by option from the custom sort menu. */
 export async function selectSortField(
   page: Page,
-  field: 'added' | 'released' | 'artist' | 'album',
+  field: 'added' | 'released' | 'artist' | 'album' | 'random',
 ): Promise<void> {
   await page.locator('#sort-button').click();
   await page

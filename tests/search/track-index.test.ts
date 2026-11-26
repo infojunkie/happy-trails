@@ -19,6 +19,7 @@ function tracks(query = '', overrides: Record<string, unknown> = {}) {
     q: query,
     sort: 'added',
     order: 'desc',
+    seed: 0,
     offset: 0,
     limit: 1000,
     ...overrides,
@@ -30,6 +31,7 @@ function albums(query = '') {
     q: query,
     sort: 'added',
     order: 'desc',
+    seed: 0,
     offset: 0,
     limit: 1000,
   });
@@ -342,6 +344,7 @@ test('loose-track folders keep Tracks results but not Albums entries', async () 
     q: '',
     sort: 'added' as const,
     order: 'desc' as const,
+    seed: 0,
     offset: 0,
     limit: 1000,
   };

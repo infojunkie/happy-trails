@@ -33,6 +33,8 @@ export interface AlbumsQuery {
   q: string;
   sort: SortKey;
   order: SortOrder;
+  /** Random-sort seed; ignored by the other sort fields. */
+  seed: number;
   offset: number;
   limit: number;
 }
@@ -47,6 +49,8 @@ export interface TracksQuery {
   q: string;
   sort: SortKey;
   order: SortOrder;
+  /** Random-sort seed; ignored by the other sort fields. */
+  seed: number;
   offset: number;
   limit: number;
 }
@@ -59,6 +63,27 @@ export interface TracksResult {
 
 /** Collation used by the legacy in-memory index for all user-visible sorts. */
 const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
+
+/**
+ * Deterministic 32-bit rank for a random sort. The same (id, seed) always
+ * produces the same rank, so OFFSET pagination and Play all refills are
+ * stable. MySQL/JS-safe integer arithmetic throughout.
+ */
+function seededRank(id: number, seed: number): number {
+  let value = (id ^ seed) >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x7feb352d) >>> 0;
+  value = Math.imul(value ^ (value >>> 15), 0x846ca68b) >>> 0;
+  return (value ^ (value >>> 16)) >>> 0;
+}
+
+/** Register the random-sort SQL function on a fresh connection. */
+function registerRandomRank(db: DatabaseSync): void {
+  db.function(
+    'random_rank',
+    { deterministic: true },
+    (id, seed) => seededRank(Number(id), Number(seed)),
+  );
+}
 
 const SCHEMA_SQL = `
   PRAGMA journal_mode = MEMORY;
@@ -349,35 +374,80 @@ function sortDirection(order: SortOrder): 'ASC' | 'DESC' {
   return order === 'asc' ? 'ASC' : 'DESC';
 }
 
+interface OrderClause {
+  sql: string;
+  /** Bound values for placeholders in `sql`, in positional order. */
+  params: number[];
+}
+
 /**
  * Album listing order. Missing dates/years always sort last; the remaining
  * terms are stable tie-breakers and match an index for deep pagination.
+ * Random order is a stable seeded hash so OFFSET pages never overlap.
  */
-function albumOrderBy(sort: SortKey, order: SortOrder): string {
+function albumOrderBy(
+  sort: SortKey,
+  order: SortOrder,
+  seed: number,
+): OrderClause {
+  if (sort === 'random') {
+    return { sql: 'random_rank(a.id, ?) ASC, a.id ASC', params: [seed] };
+  }
   const direction = sortDirection(order);
   switch (sort) {
     case 'added':
-      return `(a.latest IS NULL) ASC, a.latest ${direction}, a.album_rank ASC, a.artist_rank ASC`;
+      return {
+        sql: `(a.latest IS NULL) ASC, a.latest ${direction}, a.album_rank ASC, a.artist_rank ASC`,
+        params: [],
+      };
     case 'released':
-      return `(a.year IS NULL) ASC, a.year ${direction}, a.album_rank ASC, a.artist_rank ASC`;
+      return {
+        sql: `(a.year IS NULL) ASC, a.year ${direction}, a.album_rank ASC, a.artist_rank ASC`,
+        params: [],
+      };
     case 'artist':
-      return `a.artist_rank ${direction}, a.album_rank ASC, a.key_rank ASC`;
+      return {
+        sql: `a.artist_rank ${direction}, a.album_rank ASC, a.key_rank ASC`,
+        params: [],
+      };
     case 'album':
-      return `a.album_rank ${direction}, a.artist_rank ASC, a.key_rank ASC`;
+      return {
+        sql: `a.album_rank ${direction}, a.artist_rank ASC, a.key_rank ASC`,
+        params: [],
+      };
   }
 }
 
-function trackOrderBy(sort: SortKey, order: SortOrder): string {
+function trackOrderBy(
+  sort: SortKey,
+  order: SortOrder,
+  seed: number,
+): OrderClause {
+  if (sort === 'random') {
+    return { sql: 'random_rank(t.id, ?) ASC, t.id ASC', params: [seed] };
+  }
   const direction = sortDirection(order);
   switch (sort) {
     case 'added':
-      return `(t.date IS NULL) ASC, t.date ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+      return {
+        sql: `(t.date IS NULL) ASC, t.date ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`,
+        params: [],
+      };
     case 'released':
-      return `(t.year IS NULL) ASC, t.year ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+      return {
+        sql: `(t.year IS NULL) ASC, t.year ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`,
+        params: [],
+      };
     case 'artist':
-      return `t.artist_rank ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+      return {
+        sql: `t.artist_rank ${direction}, t.album_rank ASC, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`,
+        params: [],
+      };
     case 'album':
-      return `t.album_rank ${direction}, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`;
+      return {
+        sql: `t.album_rank ${direction}, t.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC`,
+        params: [],
+      };
   }
 }
 
@@ -385,20 +455,42 @@ function trackOrderBy(sort: SortKey, order: SortOrder): string {
  * Albums-mode playback flattens matching albums into their tracks. Albums keep
  * the normal album sort order, and each album's tracks keep disc/track order.
  */
-function albumTrackOrderBy(sort: SortKey, order: SortOrder): string {
-  const direction = sortDirection(order);
+function albumTrackOrderBy(
+  sort: SortKey,
+  order: SortOrder,
+  seed: number,
+): OrderClause {
   const tracks =
     't.disc ASC NULLS LAST, t.track ASC NULLS LAST, t.id ASC';
   const key = 'a.key_rank ASC';
+  if (sort === 'random') {
+    return {
+      sql: `random_rank(a.id, ?) ASC, a.id ASC, ${tracks}`,
+      params: [seed],
+    };
+  }
+  const direction = sortDirection(order);
   switch (sort) {
     case 'added':
-      return `(a.latest IS NULL) ASC, a.latest ${direction}, a.album_rank ASC, a.artist_rank ASC, ${key}, ${tracks}`;
+      return {
+        sql: `(a.latest IS NULL) ASC, a.latest ${direction}, a.album_rank ASC, a.artist_rank ASC, ${key}, ${tracks}`,
+        params: [],
+      };
     case 'released':
-      return `(a.year IS NULL) ASC, a.year ${direction}, a.album_rank ASC, a.artist_rank ASC, ${key}, ${tracks}`;
+      return {
+        sql: `(a.year IS NULL) ASC, a.year ${direction}, a.album_rank ASC, a.artist_rank ASC, ${key}, ${tracks}`,
+        params: [],
+      };
     case 'artist':
-      return `a.artist_rank ${direction}, a.album_rank ASC, ${key}, ${tracks}`;
+      return {
+        sql: `a.artist_rank ${direction}, a.album_rank ASC, ${key}, ${tracks}`,
+        params: [],
+      };
     case 'album':
-      return `a.album_rank ${direction}, a.artist_rank ASC, ${key}, ${tracks}`;
+      return {
+        sql: `a.album_rank ${direction}, a.artist_rank ASC, ${key}, ${tracks}`,
+        params: [],
+      };
   }
 }
 
@@ -978,6 +1070,7 @@ export class SqliteIndex {
     trackArtistNames.length = 0;
 
     const db = new DatabaseSync(databasePath);
+    registerRandomRank(db);
     try {
       db.exec(SCHEMA_SQL);
       db.exec('BEGIN');
@@ -1383,6 +1476,7 @@ export class SqliteIndex {
     databaseBytes: number,
   ): SqliteIndex {
     const db = new DatabaseSync(databasePath);
+    registerRandomRank(db);
     return new SqliteIndex(
       db,
       databasePath,
@@ -1460,15 +1554,21 @@ export class SqliteIndex {
       .get(...boundParams);
     const total = Number(countRow?.total ?? 0);
 
+    const order = albumOrderBy(query.sort, query.order, query.seed);
     const rows = this.db
       .prepare(
         `${withSql}SELECT ${ALBUM_SUMMARY_COLUMNS}
          FROM albums a
          ${whereSql}
-         ORDER BY ${albumOrderBy(query.sort, query.order)}
+         ORDER BY ${order.sql}
          LIMIT ? OFFSET ?`,
       )
-      .all(...boundParams, query.limit, query.offset) as unknown as DbAlbumRow[];
+      .all(
+        ...boundParams,
+        ...order.params,
+        query.limit,
+        query.offset,
+      ) as unknown as DbAlbumRow[];
 
     const albums: AlbumSummary[] = rows.map(mapAlbumRow);
 
@@ -1722,6 +1822,7 @@ export class SqliteIndex {
       .get(...boundParams);
     const total = Number(countRow?.total ?? 0);
 
+    const order = trackOrderBy(query.sort, query.order, query.seed);
     const rows = this.db
       .prepare(
         `${withSql}SELECT
@@ -1734,10 +1835,15 @@ export class SqliteIndex {
          FROM tracks t
          JOIN albums al ON al.id = t.album_id
          ${whereSql}
-         ORDER BY ${trackOrderBy(query.sort, query.order)}
+         ORDER BY ${order.sql}
          LIMIT ? OFFSET ?`,
       )
-      .all(...boundParams, query.limit, query.offset) as unknown as DbTrackRow[];
+      .all(
+        ...boundParams,
+        ...order.params,
+        query.limit,
+        query.offset,
+      ) as unknown as DbTrackRow[];
 
     const tracks: TrackSummary[] = rows.map(mapTrackSummaryRow);
 
@@ -1766,6 +1872,7 @@ export class SqliteIndex {
       .get(...params);
     const total = Number(countRow?.total ?? 0);
 
+    const order = albumTrackOrderBy(query.sort, query.order, query.seed);
     const rows = this.db
       .prepare(
         `${withSql}SELECT
@@ -1778,10 +1885,15 @@ export class SqliteIndex {
          FROM albums a
          JOIN tracks t ON t.album_id = a.id
          ${whereSql}
-         ORDER BY ${albumTrackOrderBy(query.sort, query.order)}
+         ORDER BY ${order.sql}
          LIMIT ? OFFSET ?`,
       )
-      .all(...params, query.limit, query.offset) as unknown as DbTrackRow[];
+      .all(
+        ...params,
+        ...order.params,
+        query.limit,
+        query.offset,
+      ) as unknown as DbTrackRow[];
 
     return {
       total,

@@ -17,6 +17,7 @@ function source(overrides: Partial<QueueSourceState> = {}): QueueSourceState {
       q: 'beatles',
       sort: 'added',
       order: 'desc',
+      seed: 0,
     },
     nextOffset: 48,
     total: 100,
@@ -28,21 +29,21 @@ function source(overrides: Partial<QueueSourceState> = {}): QueueSourceState {
 
 test('createQueueSource marks a short first page exhausted', () => {
   const full = createQueueSource(
-    { mode: 'tracks', q: '', sort: 'added', order: 'desc' },
+    { mode: 'tracks', q: '', sort: 'added', order: 'desc', seed: 0 },
     { requested: 48, received: 48, total: 100, libraryVersion: 3 },
   );
   assert.equal(full.nextOffset, 48);
   assert.equal(full.exhausted, false);
 
   const short = createQueueSource(
-    { mode: 'albums', q: 'beatles', sort: 'artist', order: 'desc' },
+    { mode: 'albums', q: 'beatles', sort: 'artist', order: 'desc', seed: 0 },
     { requested: 48, received: 20, total: 20, libraryVersion: 3 },
   );
   assert.equal(short.nextOffset, 20);
   assert.equal(short.exhausted, true);
 
   const empty = createQueueSource(
-    { mode: 'tracks', q: 'nothing', sort: 'album', order: 'desc' },
+    { mode: 'tracks', q: 'nothing', sort: 'album', order: 'desc', seed: 0 },
     { requested: 48, received: 0, total: 0, libraryVersion: 3 },
   );
   assert.equal(empty.exhausted, true);

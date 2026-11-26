@@ -18,6 +18,7 @@ import {
   isFilterMode,
   isSortKey,
   isSortOrder,
+  MAX_RANDOM_SEED,
   type AboutResponse,
   type AlbumPdf,
   type AlbumSummary,
@@ -110,6 +111,8 @@ interface State {
   q: string;
   sort: SortKey;
   order: SortOrder;
+  /** Random-sort seed; ignored by the other sort fields. */
+  seed: number;
   searchMode: SearchMode;
   albumView: AlbumView;
   albums: AlbumSummary[];
@@ -159,6 +162,7 @@ const state: State = {
   q: '',
   sort: 'added',
   order: 'desc',
+  seed: 0,
   searchMode: 'albums',
   albumView: loadAlbumView(),
   albums: [],
@@ -212,6 +216,7 @@ const sortButtonText = $('#sort-button-text');
 const sortPanel = $('#sort-panel');
 const sortFieldOptions = $('#sort-field-options');
 const sortOrderOptions = $('#sort-order-options');
+const sortOrderGroup = $('#sort-order-group');
 const modeAlbumsButton = $<HTMLButtonElement>('#mode-albums');
 const modeTracksButton = $<HTMLButtonElement>('#mode-tracks');
 const statsEl = $('#library-stats');
@@ -399,6 +404,7 @@ const SORT_FIELD_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
   { key: 'released', label: 'Released on' },
   { key: 'artist', label: 'Artist name' },
   { key: 'album', label: 'Album name' },
+  { key: 'random', label: 'Random' },
 ];
 
 const SORT_ORDER_OPTIONS: ReadonlyArray<{ key: SortOrder; label: string }> = [
@@ -410,11 +416,16 @@ const sortFieldButtons = new Map<SortKey, HTMLButtonElement>();
 const sortOrderButtons = new Map<SortOrder, HTMLButtonElement>();
 
 function sortButtonLabel(): string {
+  if (state.sort === 'random') return 'Random';
   const field =
     SORT_FIELD_OPTIONS.find((option) => option.key === state.sort)?.label ??
     'Added on';
   const order = state.order === 'asc' ? 'Ascending' : 'Descending';
   return `${field} · ${order}`;
+}
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * (MAX_RANDOM_SEED + 1));
 }
 
 function updateSortOptionButton(button: HTMLButtonElement, selected: boolean): void {
@@ -425,6 +436,7 @@ function updateSortOptionButton(button: HTMLButtonElement, selected: boolean): v
 
 function updateSortControl(): void {
   sortButtonText.textContent = sortButtonLabel();
+  sortOrderGroup.hidden = state.sort === 'random';
   for (const [key, button] of sortFieldButtons) {
     updateSortOptionButton(button, key === state.sort);
   }
@@ -440,8 +452,14 @@ function closeSortPanel(): void {
 
 function selectSort(sort: SortKey): void {
   closeSortPanel();
-  if (sort === state.sort) return;
-  state.sort = sort;
+  if (sort === state.sort) {
+    // Re-selecting Random reshuffles with a fresh seed.
+    if (sort !== 'random') return;
+    state.seed = randomSeed();
+  } else {
+    state.sort = sort;
+    if (sort === 'random') state.seed = randomSeed();
+  }
   updateSortControl();
   pushFilterState();
   void loadResults(true);
@@ -1000,6 +1018,7 @@ async function reloadLibrary(): Promise<void> {
           q: state.q,
           sort: state.sort,
           order: state.order,
+          seed: state.seed,
           offset: 0,
           limit: state.pageSize,
         },
@@ -1014,6 +1033,7 @@ async function reloadLibrary(): Promise<void> {
           q: state.q,
           sort: state.sort,
           order: state.order,
+          seed: state.seed,
           offset: 0,
           limit: state.pageSize,
         },
@@ -1273,6 +1293,7 @@ async function playAllSearchResults(): Promise<void> {
     q: state.q,
     sort: state.sort,
     order: state.order,
+    seed: state.seed,
   };
   const token = ++playAllToken;
   playAllStarting = true;
@@ -1558,6 +1579,11 @@ function applyFilterParams(
   state.sort = isSortKey(sort) ? sort : 'added';
   const order = params.get('order');
   state.order = isSortOrder(order) ? order : 'desc';
+  const seed = Number(params.get('seed') ?? '');
+  state.seed =
+    Number.isSafeInteger(seed) && seed >= 0 && seed <= MAX_RANDOM_SEED
+      ? seed
+      : 0;
   state.searchMode = params.get('view') === 'tracks' ? 'tracks' : 'albums';
   const layout = params.get('layout');
   state.albumView = isAlbumView(layout)
@@ -1628,7 +1654,11 @@ function buildFilterUrl(): string {
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
   if (state.sort !== 'added') params.set('sort', state.sort);
-  if (state.order !== 'desc') params.set('order', state.order);
+  if (state.sort === 'random') {
+    params.set('seed', String(state.seed));
+  } else if (state.order !== 'desc') {
+    params.set('order', state.order);
+  }
   if (state.searchMode === 'tracks') params.set('view', 'tracks');
   if (state.albumView !== 'grid') params.set('layout', state.albumView);
   const query = params.toString();
@@ -1796,6 +1826,7 @@ async function loadAlbums(reset: boolean): Promise<number | null> {
         q: state.q,
         sort: state.sort,
         order: state.order,
+        seed: state.seed,
         offset: reset ? 0 : state.albums.length,
         limit: state.pageSize,
       },
@@ -2047,6 +2078,7 @@ async function loadTrackResults(reset: boolean): Promise<number | null> {
         q: state.q,
         sort: state.sort,
         order: state.order,
+        seed: state.seed,
         offset: reset ? 0 : state.tracks.length,
         limit: state.pageSize,
       },

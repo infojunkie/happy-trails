@@ -204,13 +204,19 @@ export interface AboutResponse {
   homepageUrl: string | null;
 }
 
-/** Sort field; the UI labels these Added on, Released on, Artist name, Album name. */
-export const SORT_KEYS = ['added', 'released', 'artist', 'album'] as const;
+/**
+ * Sort field; the UI labels these Added on, Released on, Artist name, Album
+ * name, and Random. Random ignores the order and uses a seed.
+ */
+export const SORT_KEYS = ['added', 'released', 'artist', 'album', 'random'] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 
-/** Sort direction for every sort field. */
+/** Sort direction for the non-random sort fields. */
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 export type SortOrder = (typeof SORT_ORDERS)[number];
+
+/** Largest accepted random seed; keeps the value in an unsigned 32-bit range. */
+export const MAX_RANDOM_SEED = 0xffff_ffff;
 
 /** Scope of a Play all source: per-track matches or all tracks of matching albums. */
 export type PlaybackTrackMode = 'albums' | 'tracks';

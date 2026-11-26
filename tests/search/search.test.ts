@@ -25,6 +25,7 @@ function query(overrides: Partial<AlbumsQuery> = {}) {
     q: '',
     sort: 'added',
     order: 'desc',
+    seed: 0,
     offset: 0,
     limit: 1000,
     ...overrides,

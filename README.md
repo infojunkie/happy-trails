@@ -159,9 +159,12 @@ design and current status.
   enables when a newer snapshot is available and reloads the current view; it
   never triggers a rebuild itself.
 - A two-section **Sort** menu: **Sort by** (Added on, Released on, Artist
-  name, Album name) and **Order** (Ascending / Descending), each with a check mark on the active choice. Changing one
-  preserves the other. The default is Added on + Descending. Missing years and
-  track dates always sort last.
+  name, Album name, Random) and **Order** (Ascending / Descending), each with a
+  check mark on the active choice. Changing one preserves the other. The
+  default is Added on + Descending. Missing years and track dates always sort
+  last. **Random** hides the Order section and uses a seed stored in the URL
+  (`sort=random&seed=…`), so Load more, Back/Forward, shared links, and Play all
+  keep the same shuffle; selecting Random again reshuffles.
 - Album dialog with the full track list and duration.
   Composer tags appear as a separate italic **Composer** line when they differ
   from the track and album artists; each composer name is a link that runs a
@@ -700,9 +703,11 @@ terms: **any** joins the terms with `OR`, **all** with `AND`, and the genre and
 region groups are combined with `AND`. Sorting uses precomputed dense ranks
 that reproduce the old `Intl.Collator` ordering, including its
 case/accent-insensitive ties; artist and album name ranks also ignore
-punctuation. Filtering, searching, and pagination are single
-SQLite queries; the current dataset answers typical searches in a few
-milliseconds.
+punctuation. Random sorting orders by a deterministic hash of the row id and
+seed, so successive pages and Play all refills stay in one shuffle; it cannot
+use an index and sorts the whole result set. Filtering, searching, and
+pagination are single SQLite queries; the current dataset answers typical
+searches in a few milliseconds.
 
 ### Change detection and refresh
 
@@ -1085,8 +1090,9 @@ filter in Tracks mode. A facet whose every album is hidden has
 | Parameter | Description |
 | --- | --- |
 | `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `track:`, `genre:`, `region:`, `serie:`, `composer:`, and `source:` fields with quoted phrases, `AND`/`OR`, and `NOT(...)`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
-| `sort` | `added` (default), `released`, `artist`, or `album`. |
-| `order` | `desc` (default) or `asc`. Missing years/dates sort last in both directions. |
+| `sort` | `added` (default), `released`, `artist`, `album`, or `random`. |
+| `order` | `desc` (default) or `asc`. Missing years/dates sort last in both directions. Ignored by `random`. |
+| `seed` | Unsigned 32-bit shuffle seed for `sort=random` (default `0`); ignored for other sorts. The same seed returns the same order across pages. |
 | `offset` | Default `0`. |
 | `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 
@@ -1193,8 +1199,9 @@ Track-level counterpart to `/api/albums`, used by the Tracks result list.
 | Parameter | Description |
 | --- | --- |
 | `q` | The same search syntax. Bare terms match the track title, artists, source title, composer, album title, the track's own genre/region tags, and album series names. `artist:` matches the track or album artist; `genre:` and `region:` are exact per-track tag filters; `serie:` is an exact album-level filter. |
-| `sort` | `added` (default; per-track upload date), `released`, `artist`, or `album`. |
-| `order` | `desc` (default) or `asc`. |
+| `sort` | `added` (default; per-track upload date), `released`, `artist`, `album`, or `random`. |
+| `order` | `desc` (default) or `asc`. Ignored by `random`. |
+| `seed` | Unsigned 32-bit shuffle seed for `sort=random` (default `0`). |
 | `offset` | Default `0`. |
 | `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 
@@ -1240,8 +1247,9 @@ Flat, track-level pages for the Play all queue source.
 | --- | --- |
 | `mode` | Required. `tracks` returns tracks matching the query per track; `albums` selects matching albums and returns **all** tracks of those albums. |
 | `q` | The same search syntax as `/api/albums` or `/api/tracks`. |
-| `sort` | `added` (default), `released`, `artist`, or `album`. In Albums mode the album sort is applied first, then each album's disc/track order. |
-| `order` | `desc` (default) or `asc`. |
+| `sort` | `added` (default), `released`, `artist`, `album`, or `random`. In Albums mode the album sort is applied first, then each album's disc/track order; with `random`, albums shuffle and each album's tracks stay in disc/track order. |
+| `order` | `desc` (default) or `asc`. Ignored by `random`. |
+| `seed` | Unsigned 32-bit shuffle seed for `sort=random` (default `0`); refills reuse it. |
 | `offset` | Default `0`. Track-level offset. |
 | `limit` | Default `PAGE_SIZE` (48), maximum `MAX_PAGE_SIZE` (200). |
 

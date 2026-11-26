@@ -19,11 +19,22 @@ test('a file-backed index builds, queries, and removes its file on close', async
       q: 'track:"so what"',
       sort: 'added',
       order: 'desc',
+      seed: 0,
       offset: 0,
       limit: 10,
     });
     assert.equal(result.total, 1);
     assert.equal(result.tracks[0]?.title, 'So What');
+
+    const random = context.index.queryTracks({
+      q: '',
+      sort: 'random',
+      order: 'desc',
+      seed: 99,
+      offset: 0,
+      limit: 5,
+    });
+    assert.equal(random.tracks.length, 5);
   } finally {
     context.close();
     assert.equal(fs.existsSync(file), false);
@@ -54,11 +65,23 @@ test('a persisted index file can be reopened by another connection', async () =>
         q: 'track:"so what"',
         sort: 'added',
         order: 'desc',
+        seed: 0,
         offset: 0,
         limit: 10,
       });
       assert.equal(result.total, 1);
       assert.equal(result.tracks[0]?.title, 'So What');
+
+      // The reopened connection must register the random-sort function too.
+      const random = opened.queryTracks({
+        q: '',
+        sort: 'random',
+        order: 'desc',
+        seed: 99,
+        offset: 0,
+        limit: 5,
+      });
+      assert.equal(random.tracks.length, 5);
     } finally {
       opened.close();
     }

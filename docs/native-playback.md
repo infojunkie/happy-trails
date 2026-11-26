@@ -189,7 +189,7 @@ apply to the fallback redirect.
 - A **Play all** button sits beside the result summary. In Albums mode it
   queues every track of every matching album (album order, then disc/track);
   in Tracks mode it queues the matching tracks.
-- `GET /api/playback/tracks?mode=albums|tracks&q=&sort=&order=&offset=&limit=` returns
+- `GET /api/playback/tracks?mode=albums|tracks&q=&sort=&order=&seed=&offset=&limit=` returns
   flat, track-level pages for both modes. Albums mode flattens the album query
   on the server instead of fetching each album separately.
 - The player keeps a visible window equal to the page size (`PAGE_SIZE`, read
@@ -197,7 +197,7 @@ apply to the fallback redirect.
   and refills when fewer than 12 tracks remain after the current one. It fetches
   exactly enough to restore the window, trims items before the current track
   only after a page commits, and persists the source cursor with the queue.
-- The source remembers the original `q`, `sort`, `order`, and `mode`; changing the
+- The source remembers the original `q`, `sort`, `order`, `seed`, and `mode`; changing the
   visible search does not change refills. Pressing Play all again, playing a
   track/album, clearing the queue, or signing out replaces/clears it.
 - Refill failures leave the queue and cursor intact and retry on a later

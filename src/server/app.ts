@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   isSortKey,
   isSortOrder,
+  MAX_RANDOM_SEED,
   type AlbumsResponse,
   type GenresResponse,
   type SessionResponse,
@@ -417,6 +418,7 @@ export function createApp(
     const sort = isSortKey(sortParam) ? sortParam : 'added';
     const orderParam = stringParam(req.query.order);
     const order = isSortOrder(orderParam) ? orderParam : 'desc';
+    const seed = integerParam(req.query.seed, 0, 0, MAX_RANDOM_SEED);
     const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
     const limit = integerParam(
       req.query.limit,
@@ -428,6 +430,7 @@ export function createApp(
       q,
       sort,
       order,
+      seed,
       offset,
       limit,
     });
@@ -452,6 +455,7 @@ export function createApp(
     const sort = isSortKey(sortParam) ? sortParam : 'added';
     const orderParam = stringParam(req.query.order);
     const order = isSortOrder(orderParam) ? orderParam : 'desc';
+    const seed = integerParam(req.query.seed, 0, 0, MAX_RANDOM_SEED);
     const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
     const limit = integerParam(
       req.query.limit,
@@ -463,6 +467,7 @@ export function createApp(
       q,
       sort,
       order,
+      seed,
       offset,
       limit,
     });
@@ -496,6 +501,7 @@ export function createApp(
     const sort = isSortKey(sortParam) ? sortParam : 'added';
     const orderParam = stringParam(req.query.order);
     const order = isSortOrder(orderParam) ? orderParam : 'desc';
+    const seed = integerParam(req.query.seed, 0, 0, MAX_RANDOM_SEED);
     const offset = integerParam(req.query.offset, 0, 0, MAX_OFFSET);
     const limit = integerParam(
       req.query.limit,
@@ -503,7 +509,7 @@ export function createApp(
       1,
       dependencies.config.maxPageSize,
     );
-    const request = { q, sort, order, offset, limit };
+    const request = { q, sort, order, seed, offset, limit };
     const result =
       mode === 'albums'
         ? dependencies.library.queryAlbumTracks(request)

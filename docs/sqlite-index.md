@@ -571,14 +571,21 @@ a rank, allowing the same tie-breaking chain as before:
 | `released` | `(year IS NULL), year, album_rank, artist_rank` |
 | `artist` | `artist_rank, album_rank, key_rank` |
 | `album` | `album_rank, artist_rank, key_rank` |
+| `random` | `random_rank(id, seed), id` |
 
-Each field supports `order=asc` and `order=desc`; missing years and track dates
-sort last in both directions. The `(column IS NULL)` expression is the first
-term, and matching expression indexes (`(year IS NULL), year DESC, …` and
-`(year IS NULL), year ASC, …`, and the same for `latest`/`date`) keep deep
+The first four fields support `order=asc` and `order=desc`; missing years and
+track dates sort last in both directions. The `(column IS NULL)` expression is
+the first term, and matching expression indexes (`(year IS NULL), year DESC, …`
+and `(year IS NULL), year ASC, …`, and the same for `latest`/`date`) keep deep
 `OFFSET` pagination index-backed. The opposite-direction name indexes
 (`artist_rank DESC`, `album_rank DESC`) are created alongside the ascending
 ones.
+
+`random` ignores `order`. The connection registers a deterministic
+`random_rank(id, seed)` SQL function (a 32-bit integer mix); the same seed
+returns the same order for every page, so `OFFSET` pagination and Play all
+refills never overlap. It has no index and sorts the full matching set, which
+is cheap for albums but measurably slower for a 410k-track Tracks-mode query.
 
 ### Album details
 

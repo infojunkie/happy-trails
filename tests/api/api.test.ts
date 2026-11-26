@@ -438,6 +438,74 @@ test('sort fields and orders produce the requested direction', async () => {
   assert.equal(invalidOrder.total, descending.total);
 });
 
+test('random sorting is seeded and stable across pages', async () => {
+  const first = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=random&seed=42&limit=5',
+  );
+  const second = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=random&seed=42&offset=5&limit=5',
+  );
+  const full = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=random&seed=42&limit=20',
+  );
+  assert.deepEqual(
+    [...first.albums, ...second.albums].map((album) => album.key),
+    full.albums.slice(0, 10).map((album) => album.key),
+  );
+
+  const other = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=random&seed=43&limit=20',
+  );
+  assert.notDeepEqual(
+    full.albums.map((album) => album.key),
+    other.albums.map((album) => album.key),
+  );
+  assert.deepEqual(
+    full.albums.map((album) => album.key).sort(),
+    other.albums.map((album) => album.key).sort(),
+  );
+
+  // Order is ignored for a seeded shuffle.
+  const ascending = await albums(
+    main.server.baseUrl,
+    '/api/albums?sort=random&seed=42&order=asc&limit=20',
+  );
+  assert.deepEqual(
+    ascending.albums.map((album) => album.key),
+    full.albums.map((album) => album.key),
+  );
+
+  const tracksFirst = await trackSearch(
+    main.server.baseUrl,
+    '/api/tracks?sort=random&seed=7&limit=5',
+  );
+  const tracksSecond = await trackSearch(
+    main.server.baseUrl,
+    '/api/tracks?sort=random&seed=7&offset=5&limit=5',
+  );
+  const tracksFull = await trackSearch(
+    main.server.baseUrl,
+    '/api/tracks?sort=random&seed=7&limit=10',
+  );
+  assert.deepEqual(
+    [...tracksFirst.tracks, ...tracksSecond.tracks].map((track) => track.id),
+    tracksFull.tracks.map((track) => track.id),
+  );
+
+  const playback = await trackSearch(
+    main.server.baseUrl,
+    '/api/playback/tracks?mode=tracks&sort=random&seed=7&limit=10',
+  );
+  assert.deepEqual(
+    playback.tracks.map((track) => track.id),
+    tracksFull.tracks.map((track) => track.id),
+  );
+});
+
 test('GET /api/tracks lists, searches, sorts, and paginates', async () => {
   const all = await trackSearch(main.server.baseUrl, '/api/tracks');
   assert.ok(all.total > 0);

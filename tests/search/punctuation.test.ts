@@ -74,6 +74,7 @@ test('punctuation is ignored for search but entries stay separate', async () => 
     q: '',
     sort: 'added' as const,
     order: 'desc' as const,
+    seed: 0,
     offset: 0,
     limit: 100,
   };
@@ -113,6 +114,7 @@ test('punctuation is ignored when sorting album and artist names', async () => {
   const index = await buildIndex();
   const list = {
     q: '',
+    seed: 0,
     offset: 0,
     limit: 100,
   };

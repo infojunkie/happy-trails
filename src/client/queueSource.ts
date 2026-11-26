@@ -1,6 +1,7 @@
 import {
   isSortKey,
   isSortOrder,
+  MAX_RANDOM_SEED,
   type PlaybackTrackMode,
   type SortKey,
   type SortOrder,
@@ -17,6 +18,8 @@ export interface QueueSourceDescriptor {
   q: string;
   sort: SortKey;
   order: SortOrder;
+  /** Random-sort seed; ignored by the other sort fields. */
+  seed: number;
 }
 
 /** Serializable cursor for one Play all source. */
@@ -131,6 +134,14 @@ export function isStoredQueueSource(
   if (typeof descriptor.q !== 'string') return false;
   if (!isSortKey(descriptor.sort)) return false;
   if (!isSortOrder(descriptor.order)) return false;
+  if (
+    typeof descriptor.seed !== 'number' ||
+    !Number.isSafeInteger(descriptor.seed) ||
+    descriptor.seed < 0 ||
+    descriptor.seed > MAX_RANDOM_SEED
+  ) {
+    return false;
+  }
   if (
     typeof record.nextOffset !== 'number' ||
     !Number.isSafeInteger(record.nextOffset) ||

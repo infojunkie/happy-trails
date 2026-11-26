@@ -64,6 +64,8 @@ export interface AlbumRequest {
   q: string;
   sort: SortKey;
   order: SortOrder;
+  /** Random-sort seed; ignored by the other sort fields. */
+  seed: number;
   offset: number;
   limit: number;
 }
@@ -91,6 +93,7 @@ export const api = {
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
     params.set('order', request.order);
+    params.set('seed', String(request.seed));
     params.set('offset', String(request.offset));
     params.set('limit', String(request.limit));
     return getJson<AlbumsResponse>(
@@ -107,6 +110,7 @@ export const api = {
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
     params.set('order', request.order);
+    params.set('seed', String(request.seed));
     params.set('offset', String(request.offset));
     params.set('limit', String(request.limit));
     return getJson<TrackSearchResponse>(
@@ -124,6 +128,7 @@ export const api = {
     if (request.q) params.set('q', request.q);
     params.set('sort', request.sort);
     params.set('order', request.order);
+    params.set('seed', String(request.seed));
     params.set('offset', String(request.offset));
     params.set('limit', String(request.limit));
     return getJson<TrackSearchResponse>(
