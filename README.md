@@ -126,14 +126,23 @@ design and current status.
 - Fielded search syntax: `album:"abbey road" artist:beatles`,
   `track:"come together"`, `genre:"Jazz" region:"Brazil"`, `composer:jobim`,
   `serie:"Rock Candy"`, `source:"Bonus Tracks"`, combined with `AND`, `OR`,
-  implicit AND, and parentheses. Quoted values are matched as contiguous
+  `NOT(...)`, implicit AND, and parentheses. `NOT(...)` excludes a
+  parenthesized expression and requires the parentheses, so a literal word
+  `NOT` stays searchable. Quoted values are matched as contiguous
   phrases. A query made only of plain keywords is treated as one phrase; use
   `AND` to combine independent words. The `?` button beside the search control
   opens a collapsible **Help** dialog with **Keyboard shortcuts**, **Search
   syntax**, and **About Happy Trails** sections, including clickable examples,
   package author/contributor links, and a bug/feedback link.
+- Recent searches: the search dialog remembers the last
+  `SEARCH_HISTORY_LIMIT` explicit searches (default 50) in the browser's
+  localStorage. `↑` recalls older entries and `↓` moves newer; `↓` past the
+  newest restores the draft that was in the input. Dialog submissions,
+  artist/composer links, help examples, and filter chips are remembered;
+  facet selections and Back/Forward restores are not.
 - Keyboard shortcuts: `/` opens the search dialog and `?` opens the help
-  dialog. With the player open, `Space` toggles playback, `←`/`→` seek,
+  dialog. In the search dialog, `↑`/`↓` browse recent searches. With the
+  player open, `Space` toggles playback, `←`/`→` seek,
   `Shift`+`←`/`→` skip tracks, `↑`/`↓` adjust volume, `M` mutes, and `R`
   restarts the current track. The help dialog lists these plus the Cover Flow
   and map keys.
@@ -454,6 +463,7 @@ All variables are optional; see [`.env.example`](.env.example).
 | `LIBRARY_CHECK_MS` | `60000` | Delay before checking the `music` table for changes; a detected change triggers a silent rebuild. The next check is scheduled after the previous check and any rebuild finish, so a rebuild longer than this interval delays the next check rather than overlapping it. `LIBRARY_REFRESH_MS` is accepted as a legacy fallback. |
 | `PAGE_SIZE` | `48` | Results per page for the Albums and Tracks views, the default `limit` for API requests that omit it, and the visible Play all queue window. The client reads the effective value from `/api/status`. |
 | `MAX_PAGE_SIZE` | `200` | Upper bound for any API `limit`; `PAGE_SIZE` is clamped to it. |
+| `SEARCH_HISTORY_LIMIT` | `50` | Recent searches kept in the browser's localStorage. Set to `0` to disable search history; values above 200 are capped. |
 | `ARTIST_SEPARATOR_WORDS` | `feat., com, part., avec, with, et, e, con, vs., mit` | Additional comma-separated words that separate multiple artists; appended to the defaults. One-letter words match case-sensitively. |
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
@@ -813,6 +823,18 @@ genre/people names that are not places (`Americana`, `Berber`, `Turkestan`,
 track metadata; the audit lists them with their place parts to support that
 cleanup.
 
+### Recent searches
+
+The search dialog keeps the last `SEARCH_HISTORY_LIMIT` explicit searches
+(default 50) in the browser's localStorage under
+`happy-trails.search-history`, newest first. Queries submitted from the dialog,
+artist/composer links, help examples, and filter chips are recorded; facet
+selections, URL restores, and Back/Forward are not. Duplicates are removed
+case-insensitively, keeping the most recent casing, and each query is capped at
+200 characters. In the dialog, `↑` recalls older entries and `↓` moves newer;
+`↓` past the newest restores the draft that was in the input. The list is
+stored only in that browser. Set `SEARCH_HISTORY_LIMIT=0` to disable it.
+
 ### Navigation history
 
 Every committed search, facet change, match-mode change, sort change, view-mode
@@ -959,10 +981,10 @@ check.
 
 - API tests start the real Express app via `createApp()` with an injected fixture index.
 - Stream tests cover native playback auth, `Range`/`HEAD` forwarding, MIME normalization, missing tracks, unsupported ranges, disabled playback, and DSM failure mapping.
-- Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
+- Search tests cover bare and fielded terms, quoted phrases, `AND`/`OR`/`NOT`, parentheses, aliases, accent folding, composer search, genre/region modes, combinations, the album and track indexes, `track:`-in-Albums matching, and file-backed index creation/cleanup plus the worker handoff (`persist`/`open`).
 - Artwork tests cover the `/volumeN/share` to `/share` path conversion used by FileStation.
-- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, Play controls and sign-in continuation, album PDF pill visibility, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
-- Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts`; backend tests cover the album-mode flattening order and pagination.
+- UI tests use a fixture server with expanded sample data, so facet counts, artist punctuation, composer links, Play controls and sign-in continuation, album PDF pill visibility, recent-search recall and limits, the Albums/Tracks switch, compact track rows, Back/Forward search/mode/dialog restoration, help popups, and the sticky error banner are checked against stable data. The player tests cover album and track-started album queues, transport controls, seeking, queue reorder/removal, volume/mute, keyboard shortcuts, unsupported-format warnings, reload persistence, playback continuing while album dialogs open, and Play all in both modes including page-size-based refills after the visible query changes.
+- Pure client tests cover the Play all window/cursor arithmetic in `src/client/queueSource.ts` and recent-search sanitizing, deduplication, and limits in `src/client/searchHistory.ts`; backend tests cover the album-mode flattening order and pagination.
 - Assertions use set relationships (unions/intersections), field membership, ordering, pagination slices, and UI-versus-API totals instead of fixed catalogue result counts.
 - Playwright is configured in `playwright.config.ts` with Chromium, Firefox, and WebKit projects; it starts `tests/fixtures/ui-server.ts` on port 4173 and builds the client before running. The player tests use a silent synthetic WAV, so local runs do not produce sound.
 - `.github/workflows/ci.yml` runs lint, typecheck, backend tests, and Playwright tests on every push and pull request.
@@ -1062,7 +1084,7 @@ filter in Tracks mode. A facet whose every album is hidden has
 
 | Parameter | Description |
 | --- | --- |
-| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `track:`, `genre:`, `region:`, `serie:`, `composer:`, and `source:` fields with quoted phrases and `AND`/`OR`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
+| `q` | Search expression, up to 200 characters. Supports plain keyword phrases and `album:`, `artist:`, `track:`, `genre:`, `region:`, `serie:`, `composer:`, and `source:` fields with quoted phrases, `AND`/`OR`, and `NOT(...)`; see [Search syntax](#search-syntax). Genre and region facets are expressed here too. |
 | `sort` | `added` (default), `released`, `artist`, or `album`. |
 | `order` | `desc` (default) or `asc`. Missing years/dates sort last in both directions. |
 | `offset` | Default `0`. |
@@ -1140,9 +1162,12 @@ A query made only of unquoted keywords is treated as one contiguous phrase:
 `abbey road` behaves like `"abbey road"`. Use `abbey AND road` to search the
 words independently. For expressions containing fields, operators, or quotes,
 adjacent terms are implicitly ANDed. Operators are case-insensitive; `AND`
-binds more tightly than `OR`; parentheses group expressions. Matching is
-case-, accent-, ligature-, and punctuation-insensitive, including quoted
-phrases. Spaces remain word separators.
+binds more tightly than `OR`; parentheses group expressions. `NOT(...)`
+excludes everything matching the parenthesized expression; the parentheses are
+required so a literal word `NOT` stays searchable. `NOT` can be nested and
+combined like any other primary. Matching is case-, accent-, ligature-, and
+punctuation-insensitive, including quoted phrases. Spaces remain word
+separators.
 
 ```text
 album:"abbey road"
@@ -1153,11 +1178,13 @@ serie:"Rock Candy"
 (album:road OR album:street) artist:beatles
 source:"Vanilla Tapes"
 track:"Freddie Freeloader"
+NOT(album:"abbey road")
+artist:beatles NOT(genre:"Jazz")
 ```
 
 Unknown field names are treated as ordinary text, so titles containing colons
-still work. An incomplete or malformed expression falls back to the previous
-all-field token search. `NOT`/negation is not supported.
+still work. An incomplete or malformed expression, including a `NOT` without
+its closing parenthesis, falls back to the previous all-field token search.
 
 ### `GET /api/tracks`
 

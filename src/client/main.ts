@@ -36,6 +36,11 @@ import { artistSegments, foldSearch, regionKey } from '../shared/text.js';
 import { api } from './api.js';
 import { $, el } from './dom.js';
 import {
+  parseSearchHistory,
+  rememberSearch,
+  SEARCH_HISTORY_KEY,
+} from './searchHistory.js';
+import {
   buildFacetQuery,
   facetTerm,
   parseFacetQuery,
@@ -113,6 +118,8 @@ interface State {
   trackTotal: number;
   /** Results per page and Play all queue window, from /api/status. */
   pageSize: number;
+  /** Recent searches kept in localStorage; 0 disables history. */
+  searchHistoryLimit: number;
   playbackEnabled: boolean;
   nativePlaybackEnabled: boolean;
   audioStationFallbackEnabled: boolean;
@@ -159,6 +166,7 @@ const state: State = {
   tracks: [],
   trackTotal: 0,
   pageSize: 0,
+  searchHistoryLimit: 50,
   playbackEnabled: false,
   nativePlaybackEnabled: false,
   audioStationFallbackEnabled: false,
@@ -194,6 +202,7 @@ const searchDialog = $<HTMLDialogElement>('#search-dialog');
 const searchForm = $<HTMLFormElement>('#search-form');
 const searchDialogClose = $<HTMLButtonElement>('#search-dialog-close');
 const searchOperatorFields = $('#search-operator-fields');
+const searchHistoryHint = $('#search-history-hint');
 const searchFieldWrap = $('.search-field');
 const brand = $('.brand');
 const siteHeader = $('.site-header');
@@ -285,6 +294,14 @@ let suppressSearchOpen = false;
 let searchTriggerPointerDown = false;
 /** Element focused when the search dialog opened, for native focus restore. */
 let searchDialogInvoker: HTMLElement | null = null;
+/** Recent searches, newest first, loaded when the dialog opens. */
+let searchHistory: string[] = [];
+/** Navigation view built on the first Up; may omit a duplicate of the draft. */
+let searchHistoryEntries: string[] = [];
+/** Index into `searchHistoryEntries`; -1 means the draft is shown. */
+let searchHistoryIndex = -1;
+/** The draft restored by pressing Down past the newest history entry. */
+let searchHistoryDraft = '';
 let albumAbort: AbortController | null = null;
 let trackAbort: AbortController | null = null;
 let playerRestored = false;
@@ -942,6 +959,7 @@ async function pollStatus(): Promise<void> {
       status.audioStationFallbackEnabled === true;
     state.screenWakeLockEnabled = status.screenWakeLockEnabled === true;
     state.pageSize = status.pageSize;
+    state.searchHistoryLimit = status.searchHistoryLimit;
     syncPlayerConfig();
     if (status.ready) renderStats(status);
     updateRefreshControl();
@@ -1742,6 +1760,7 @@ function renderStats(status: StatusResponse): void {
   state.totalAlbums = status.albumCount;
   state.totalTracks = status.trackCount;
   state.pageSize = status.pageSize;
+  state.searchHistoryLimit = status.searchHistoryLimit;
   statsEl.textContent = `${formatCount(status.albumCount)} albums · ${formatCount(status.trackCount)} tracks`;
   statsEl.title = status.lastRefreshed
     ? `Library indexed ${formatDateTime(status.lastRefreshed)}`
@@ -2202,6 +2221,7 @@ function navigateToSearch(value: string): void {
   const query = value.trim();
   if (!query) return;
 
+  rememberSearchQuery(query);
   state.q = query;
   syncSelectionsFromQuery();
   searchInput.value = query;
@@ -3637,8 +3657,70 @@ function positionSearchDialog(): void {
   searchDialog.style.setProperty('--search-dialog-width', `${width}px`);
 }
 
+/** Read the stored history; null means storage is unavailable. */
+function loadStoredSearchHistory(): string[] | null {
+  try {
+    return parseSearchHistory(
+      localStorage.getItem(SEARCH_HISTORY_KEY),
+      state.searchHistoryLimit,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function storeSearchHistory(history: string[]): void {
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history));
+  } catch {
+    // localStorage may be unavailable; the in-memory list still works.
+  }
+}
+
+/** Record an explicit search: dialog submission or a link/filter search. */
+function rememberSearchQuery(query: string): void {
+  if (state.searchHistoryLimit <= 0) return;
+  const stored = loadStoredSearchHistory();
+  const history = rememberSearch(
+    stored ?? searchHistory,
+    query,
+    state.searchHistoryLimit,
+  );
+  searchHistory = history;
+  storeSearchHistory(history);
+}
+
+function showSearchHistoryEntry(value: string | undefined): void {
+  const entry = value ?? '';
+  searchInput.value = entry;
+  searchInput.setSelectionRange(entry.length, entry.length);
+}
+
+/**
+ * The newest entry is usually the query that was just submitted, which is also
+ * the draft. Hide that duplicate so the first Up shows the previous search
+ * instead of changing nothing.
+ */
+function searchHistoryForDraft(
+  history: readonly string[],
+  draft: string,
+): string[] {
+  const key = draft.trim().toLowerCase();
+  return history.filter(
+    (entry, index) => index !== 0 || entry.toLowerCase() !== key,
+  );
+}
+
 function openSearchDialog(): void {
   if (searchDialog.open) return;
+
+  const storedHistory = loadStoredSearchHistory();
+  if (storedHistory) searchHistory = storedHistory;
+  searchHistoryEntries = [];
+  searchHistoryIndex = -1;
+  searchHistoryDraft = state.q;
+  searchHistoryHint.hidden =
+    searchHistoryForDraft(searchHistory, state.q).length === 0;
 
   searchDialogInvoker =
     document.activeElement instanceof HTMLElement
@@ -3654,13 +3736,17 @@ function openSearchDialog(): void {
 /** Close with the draft discarded; the header keeps the applied query. */
 function closeSearchDialog(): void {
   if (!searchDialog.open) return;
+  searchHistoryEntries = [];
+  searchHistoryIndex = -1;
   suppressSearchOpen = searchDialogInvoker === searchTrigger;
   searchDialog.close();
 }
 
-/** Submit the draft: apply it, then close the dialog. */
+/** Submit the draft: remember it, apply it, then close the dialog. */
 function submitSearch(): void {
-  applySearchValue(searchInput.value);
+  const value = searchInput.value;
+  rememberSearchQuery(value);
+  applySearchValue(value);
   closeSearchDialog();
 }
 
@@ -3725,11 +3811,50 @@ function bindEvents(): void {
     event.preventDefault();
     submitSearch();
   });
+  searchInput.addEventListener('input', () => {
+    // Editing starts a fresh draft; the next Up captures it.
+    searchHistoryEntries = [];
+    searchHistoryIndex = -1;
+  });
   searchInput.addEventListener('keydown', (event) => {
-    // A search input otherwise consumes Escape to clear its text.
-    if (event.key !== 'Escape') return;
+    if (event.isComposing) return;
+    if (event.key === 'Escape') {
+      // A search input otherwise consumes Escape to clear its text.
+      event.preventDefault();
+      closeSearchDialog();
+      return;
+    }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+    if (searchHistory.length === 0) return;
+
     event.preventDefault();
-    closeSearchDialog();
+    if (event.key === 'ArrowUp') {
+      if (searchHistoryIndex === -1) {
+        searchHistoryDraft = searchInput.value;
+        searchHistoryEntries = searchHistoryForDraft(
+          searchHistory,
+          searchHistoryDraft,
+        );
+        if (searchHistoryEntries.length === 0) return;
+        searchHistoryIndex = 0;
+      } else if (searchHistoryIndex < searchHistoryEntries.length - 1) {
+        searchHistoryIndex += 1;
+      }
+      showSearchHistoryEntry(searchHistoryEntries[searchHistoryIndex]);
+      return;
+    }
+    if (searchHistoryIndex > 0) {
+      searchHistoryIndex -= 1;
+      showSearchHistoryEntry(searchHistoryEntries[searchHistoryIndex]);
+      return;
+    }
+    if (searchHistoryIndex === 0) {
+      searchHistoryIndex = -1;
+      showSearchHistoryEntry(searchHistoryDraft);
+    }
   });
   searchDialogClose.addEventListener('click', closeSearchDialog);
   searchDialog.addEventListener('cancel', () => {

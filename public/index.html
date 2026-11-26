@@ -104,7 +104,7 @@
         </button>
         <span id="search-syntax" class="visually-hidden">
           FIELDS: all, album, artist, track, genre, region, serie, source,
-          composer — COMBINE: AND, OR, "…", ( ). A plain sequence of
+          composer — COMBINE: AND, OR, NOT, "…", ( ). A plain sequence of
           keywords searches all fields as one phrase. Use the Albums and
           Tracks buttons in the header to switch between album and track
           results.
@@ -550,8 +550,14 @@
             <span class="search-operator-codes">
               <code>AND</code>
               <code>OR</code>
+              <code>NOT</code>
               <code>"…"</code>
               <code>( )</code>
+            </span>
+            <span id="search-history-hint" class="search-operator-hint" hidden>
+              <span class="search-operator-separator" aria-hidden="true">·</span>
+              <span class="search-operator-label">History</span>
+              <code>↑↓</code>
             </span>
           </p>
         </form>
@@ -596,6 +602,11 @@
               <dd>Open this help dialog.</dd>
               <dt><kbd>Enter</kbd></dt>
               <dd>Run the search from the search dialog.</dd>
+              <dt><kbd>↑</kbd> / <kbd>↓</kbd> in the search dialog</dt>
+              <dd>
+                Browse recent searches; Down past the newest restores your
+                draft.
+              </dd>
               <dt><kbd>Esc</kbd></dt>
               <dd>Close the open dialog, full-screen map, or play queue.</dd>
               <dt><kbd>Space</kbd></dt>
@@ -683,6 +694,11 @@
               </li>
               <li><code>OR</code> matches either side.</li>
               <li>
+                <code>NOT(...)</code> excludes everything matching the
+                parenthesized expression. The parentheses are required, so a
+                literal word <code>NOT</code> stays searchable.
+              </li>
+              <li>
                 <code>abbey road</code> is a phrase; use
                 <code>abbey AND road</code> for independent words.
               </li>
@@ -753,6 +769,14 @@
               >
                 <code>genre:"Jazz" region:"Brazil"</code>
                 <span>genre and region tags</span>
+              </button>
+              <button
+                type="button"
+                class="syntax-example"
+                data-search-example='artist:beatles NOT(album:"abbey road")'
+              >
+                <code>artist:beatles NOT(album:"abbey road")</code>
+                <span>exclude a parenthesized expression</span>
               </button>
             </div>
 

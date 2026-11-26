@@ -5,7 +5,7 @@
  *
  *   expression := andExpr (OR andExpr)*
  *   andExpr    := primary ((AND)? primary)*
- *   primary    := '(' expression ')' | term
+ *   primary    := NOT '(' expression ')' | '(' expression ')' | term
  *   term       := [field ':'] (quoted | word)
  *   quoted     := '"' ... '"'
  *
@@ -14,6 +14,8 @@
  * treated as one quoted phrase. Unknown field names are treated as ordinary
  * text so titles containing colons still work. A malformed expression is
  * reported as null and the caller falls back to the pre-syntax search behavior.
+ * NOT is recognized only when followed by an opening parenthesis, so a literal
+ * word "NOT" stays searchable.
  */
 
 import type { SearchField } from '../shared/searchFields.js';
@@ -39,7 +41,16 @@ export interface SearchOrNode {
   right: SearchNode;
 }
 
-export type SearchNode = SearchTermNode | SearchAndNode | SearchOrNode;
+export interface SearchNotNode {
+  kind: 'not';
+  expr: SearchNode;
+}
+
+export type SearchNode =
+  | SearchTermNode
+  | SearchAndNode
+  | SearchOrNode
+  | SearchNotNode;
 
 /**
  * Album-index columns holding the folded text for each substring-searchable
@@ -82,8 +93,22 @@ type Token =
       quoted: boolean;
     }
   | { type: 'op'; op: 'AND' | 'OR' }
+  | { type: 'not' }
   | { type: 'lparen' }
   | { type: 'rparen' };
+
+/**
+ * Whether the next non-whitespace character is an opening parenthesis. NOT is
+ * only an operator in `NOT(...)`; elsewhere it stays a searchable word.
+ */
+function nextNonSpaceIsOpenParen(input: string, from: number): boolean {
+  for (let cursor = from; cursor < input.length; cursor += 1) {
+    const character = input[cursor];
+    if (character === undefined) return false;
+    if (!/\s/.test(character)) return character === '(';
+  }
+  return false;
+}
 
 function tokenize(input: string): Token[] | null {
   const tokens: Token[] = [];
@@ -168,6 +193,10 @@ function tokenize(input: string): Token[] | null {
         tokens.push({ type: 'op', op: upper });
         continue;
       }
+      if (upper === 'NOT' && nextNonSpaceIsOpenParen(input, index)) {
+        tokens.push({ type: 'not' });
+        continue;
+      }
     }
 
     tokens.push({
@@ -224,7 +253,11 @@ class Parser {
         left = { kind: 'and', left, right };
         continue;
       }
-      if (token?.type === 'term' || token?.type === 'lparen') {
+      if (
+        token?.type === 'term' ||
+        token?.type === 'lparen' ||
+        token?.type === 'not'
+      ) {
         const right = this.parsePrimary();
         if (!right) return null;
         left = { kind: 'and', left, right };
@@ -237,6 +270,16 @@ class Parser {
   private parsePrimary(): SearchNode | null {
     const token = this.peek();
     if (!token) return null;
+
+    if (token.type === 'not') {
+      this.index += 1;
+      if (this.peek()?.type !== 'lparen') return null;
+      this.index += 1;
+      const node = this.parseOr();
+      if (!node || this.peek()?.type !== 'rparen') return null;
+      this.index += 1;
+      return { kind: 'not', expr: node };
+    }
 
     if (token.type === 'lparen') {
       this.index += 1;

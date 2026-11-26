@@ -79,6 +79,28 @@ test('boolean expressions are evaluated per track', () => {
   );
 });
 
+test('NOT negates a parenthesized expression per track', () => {
+  const all = tracks.map((track) => track.title);
+  const harrison = matches('composer:harrison');
+  const either = matches('composer:harrison OR artist:clapton');
+
+  assert.deepEqual(
+    matches('NOT(composer:harrison)'),
+    all.filter((title) => !harrison.includes(title)),
+  );
+  assert.deepEqual(matches('NOT(NOT(composer:harrison))'), harrison);
+  assert.deepEqual(
+    matches('NOT(composer:harrison OR artist:clapton)'),
+    all.filter((title) => !either.includes(title)),
+  );
+  assert.deepEqual(
+    matches('artist:beatles NOT(composer:harrison)'),
+    all.filter((title) => !harrison.includes(title)),
+  );
+  // A bare NOT stays a searchable word.
+  assert.deepEqual(matches('NOT'), []);
+});
+
 test('serie and label match the album series exactly', () => {
   const track = tracks[0];
   assert.ok(track);

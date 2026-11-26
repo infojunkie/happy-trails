@@ -2297,6 +2297,12 @@ body.map-expanded {
   opacity: 0.5;
 }
 
+.search-operator-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .search-help-dialog {
   width: min(600px, calc(100vw - 28px));
   max-height: min(86vh, 820px);

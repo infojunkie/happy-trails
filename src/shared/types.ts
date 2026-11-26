@@ -163,6 +163,12 @@ export interface StatusResponse {
    * clamped by `MAX_PAGE_SIZE`.
    */
   pageSize: number;
+  /**
+   * Number of recent search queries the browser keeps in localStorage.
+   * 0 disables search history. Effective value of `SEARCH_HISTORY_LIMIT`,
+   * capped at 200.
+   */
+  searchHistoryLimit: number;
   error: string | null;
   /** True when a Synology DSM URL is configured, so users can sign in to play. */
   playbackEnabled: boolean;

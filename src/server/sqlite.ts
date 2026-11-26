@@ -651,6 +651,11 @@ function buildAlbumFilter(q: string): AlbumFilter {
         return `(${nodeSql(node.left)} AND ${nodeSql(node.right)})`;
       case 'or':
         return `(${nodeSql(node.left)} OR ${nodeSql(node.right)})`;
+      case 'not':
+        // SQL NOT of a NULL comparison stays NULL, which WHERE treats as
+        // false. Treat unknown as non-matching before negating so a negated
+        // field still includes rows whose column is NULL.
+        return `NOT (COALESCE(${nodeSql(node.expr)}, 0))`;
     }
   };
 
@@ -1696,6 +1701,11 @@ export class SqliteIndex {
           return `(${nodeSql(node.left)} AND ${nodeSql(node.right)})`;
         case 'or':
           return `(${nodeSql(node.left)} OR ${nodeSql(node.right)})`;
+        case 'not':
+          // SQL NOT of a NULL comparison stays NULL, which WHERE treats as
+          // false. Treat unknown as non-matching before negating so a negated
+          // field still includes rows whose column is NULL.
+          return `NOT (COALESCE(${nodeSql(node.expr)}, 0))`;
       }
     };
 

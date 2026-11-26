@@ -366,6 +366,18 @@ test('fielded, quoted, and boolean search expressions work', async ({
   await expectSummaryFor(page);
 });
 
+test('NOT excludes matching albums from the result set', async ({ page }) => {
+  const q = 'NOT(album:"abbey road")';
+  await submitSearch(page, q);
+  await expectSummaryFor(page, { q });
+  await expect(
+    page.locator('.album-card .album-title', { hasText: /^Abbey Road$/ }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('.album-card .album-title', { hasText: /^Kind of Blue$/ }),
+  ).toBeVisible();
+});
+
 test('help dialog lists shortcuts and search fields and runs examples', async ({
   page,
 }) => {
@@ -406,7 +418,7 @@ test('help dialog lists shortcuts and search fields and runs examples', async ({
   await expect(page.locator('.search-help-fields')).toContainText('serie:');
   await expect(page.locator('.search-help-fields')).toContainText('genre:');
   await expect(page.locator('.search-help-fields')).toContainText('region:');
-  await expect(page.locator('.syntax-example')).toHaveCount(7);
+  await expect(page.locator('.syntax-example')).toHaveCount(8);
 
   await sections.nth(2).locator('summary').click();
   await expect(sections.nth(2)).toHaveAttribute('open');

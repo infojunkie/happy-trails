@@ -180,6 +180,46 @@ test('track search composes boolean expressions', () => {
   ]);
 });
 
+test('NOT excludes matching tracks and composes with AND/OR', () => {
+  const all = tracks();
+  const allIds = all.tracks.map((track) => track.id);
+  const soWhat = tracks('track:"so what"');
+  const soWhatIds = new Set(soWhat.tracks.map((track) => track.id));
+  const notSoWhat = tracks('NOT(track:"so what")');
+
+  assert.equal(notSoWhat.total, all.total - soWhat.total);
+  assert.deepEqual(
+    notSoWhat.tracks.map((track) => track.id),
+    allIds.filter((id) => !soWhatIds.has(id)),
+  );
+
+  const either = tracks('composer:harrison OR artist:clapton');
+  const eitherIds = new Set(either.tracks.map((track) => track.id));
+  assert.deepEqual(
+    tracks('NOT(composer:harrison OR artist:clapton)').tracks.map(
+      (track) => track.id,
+    ),
+    allIds.filter((id) => !eitherIds.has(id)),
+  );
+
+  const harrison = tracks('composer:harrison');
+  const harrisonIds = new Set(harrison.tracks.map((track) => track.id));
+  assert.deepEqual(
+    tracks('NOT(NOT(composer:harrison))').tracks.map((track) => track.id),
+    harrison.tracks.map((track) => track.id),
+  );
+
+  const abbey = tracks('album:"abbey road"');
+  assert.deepEqual(
+    tracks('album:"abbey road" NOT(composer:harrison)').tracks.map(
+      (track) => track.id,
+    ),
+    abbey.tracks
+      .map((track) => track.id)
+      .filter((id) => !harrisonIds.has(id)),
+  );
+});
+
 test('short phrases fall back to substring scans', () => {
   const short = tracks('track:"so"');
   assert.ok(short.total > 0);

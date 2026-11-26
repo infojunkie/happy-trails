@@ -132,8 +132,61 @@ test('parser understands fielded terms, phrases, operators, and parentheses', ()
     value: 'abbey road',
     quoted: true,
   });
+  assert.deepEqual(parseSearchQuery('NOT(album:road)'), {
+    kind: 'not',
+    expr: {
+      kind: 'term',
+      field: 'album',
+      value: 'road',
+      quoted: false,
+    },
+  });
+  assert.deepEqual(parseSearchQuery('not (album:road OR artist:beatles)'), {
+    kind: 'not',
+    expr: {
+      kind: 'or',
+      left: {
+        kind: 'term',
+        field: 'album',
+        value: 'road',
+        quoted: false,
+      },
+      right: {
+        kind: 'term',
+        field: 'artist',
+        value: 'beatles',
+        quoted: false,
+      },
+    },
+  });
+  assert.equal(parseSearchQuery('NOT(NOT(album:road))')?.kind, 'not');
+  assert.equal(
+    parseSearchQuery('artist:beatles NOT(album:road)')?.kind,
+    'and',
+  );
+  assert.deepEqual(parseSearchQuery('"NOT(album:road)"'), {
+    kind: 'term',
+    field: 'all',
+    value: 'NOT(album:road)',
+    quoted: true,
+  });
+  // A bare NOT is a searchable word, not an operator.
+  assert.deepEqual(parseSearchQuery('NOT'), {
+    kind: 'term',
+    field: 'all',
+    value: 'NOT',
+    quoted: true,
+  });
+  assert.deepEqual(parseSearchQuery('album:NOT'), {
+    kind: 'term',
+    field: 'album',
+    value: 'NOT',
+    quoted: false,
+  });
   assert.equal(parseSearchQuery('album:'), null);
   assert.equal(parseSearchQuery('album:road OR (artist:beatles'), null);
+  assert.equal(parseSearchQuery('NOT(album:road'), null);
+  assert.equal(parseSearchQuery('NOT()'), null);
 });
 
 test('bare terms search all indexed fields', () => {
@@ -226,6 +279,48 @@ test('AND, OR, implicit AND, and parentheses compose as sets', () => {
   assert.deepEqual(
     keys(query({ q: 'artist:beatles OR artist:miles' }).albums),
     union(keys(artistBeatles.albums), keys(artistMiles.albums)),
+  );
+});
+
+test('NOT excludes matches and composes with AND/OR', () => {
+  const all = query();
+  const road = query({ q: 'album:road' });
+  const beatles = query({ q: 'artist:beatles' });
+  const notRoad = query({ q: 'NOT(album:road)' });
+
+  const roadKeys = new Set(keys(road.albums));
+  assert.equal(notRoad.total, all.total - road.total);
+  assert.deepEqual(
+    keys(notRoad.albums),
+    keys(all.albums).filter((key) => !roadKeys.has(key)),
+  );
+  for (const album of notRoad.albums) {
+    assert.doesNotMatch(album.album.toLowerCase(), /road/);
+  }
+
+  // NOT applies to the whole parenthesized expression.
+  const excluded = new Set([...roadKeys, ...keys(beatles.albums)]);
+  assert.deepEqual(
+    keys(query({ q: 'NOT(album:road OR artist:beatles)' }).albums),
+    keys(all.albums).filter((key) => !excluded.has(key)),
+  );
+
+  // Implicit AND with a positive term.
+  assert.deepEqual(
+    keys(query({ q: 'artist:beatles NOT(album:road)' }).albums),
+    keys(beatles.albums).filter((key) => !roadKeys.has(key)),
+  );
+
+  // Double negation restores the original set.
+  assert.deepEqual(
+    keys(query({ q: 'NOT(NOT(album:road))' }).albums),
+    keys(road.albums),
+  );
+
+  // OR with a negated expression.
+  assert.deepEqual(
+    keys(query({ q: 'NOT(album:road) OR artist:beatles' }).albums),
+    union(keys(notRoad.albums), keys(beatles.albums)),
   );
 });
 

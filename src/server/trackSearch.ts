@@ -109,6 +109,8 @@ function matchesNode(node: SearchNode, fields: TrackFields): boolean {
       return matchesNode(node.left, fields) && matchesNode(node.right, fields);
     case 'or':
       return matchesNode(node.left, fields) || matchesNode(node.right, fields);
+    case 'not':
+      return !matchesNode(node.expr, fields);
   }
 }
 

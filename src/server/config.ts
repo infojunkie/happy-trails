@@ -25,6 +25,9 @@ function integerFromEnv(name: string, fallback: number, min = 0): number {
   return Number.isFinite(value) && value >= min ? value : fallback;
 }
 
+/** Keep the browser's stored search history small. */
+const MAX_SEARCH_HISTORY_LIMIT = 200;
+
 function booleanFromEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name]?.trim().toLowerCase();
   if (!raw) return fallback;
@@ -372,6 +375,14 @@ export const config = {
   statementTimeoutMs: integerFromEnv('DB_STATEMENT_TIMEOUT_MS', 30_000, 1),
   defaultPageSize: integerFromEnv('PAGE_SIZE', 48, 1),
   maxPageSize: integerFromEnv('MAX_PAGE_SIZE', 200, 1),
+  /**
+   * Number of recent searches the browser keeps in localStorage. Set to 0 to
+   * disable search history.
+   */
+  searchHistoryLimit: Math.min(
+    integerFromEnv('SEARCH_HISTORY_LIMIT', 50, 0),
+    MAX_SEARCH_HISTORY_LIMIT,
+  ),
   /** Failed sign-ins allowed per client IP per window. */
   loginRateLimitMax: integerFromEnv('LOGIN_RATE_LIMIT_MAX', 20, 1),
   /** Failed sign-ins allowed per account per window. */
