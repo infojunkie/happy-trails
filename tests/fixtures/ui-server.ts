@@ -74,6 +74,7 @@ const context = await createFixtureContext({
       title_track: false,
     },
   ],
+  trackSeries: new Map([['World Sampler', 'Covers Collection']]),
 });
 const server = createApp(context.dependencies).listen(port, '127.0.0.1', () => {
   console.log(`[ui-fixture] listening on http://127.0.0.1:${port}`);

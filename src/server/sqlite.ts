@@ -21,6 +21,7 @@ import {
   genreKey,
   normalizeAlbumName,
   searchTokens,
+  type SeriesAllowlistEntry,
 } from './search.js';
 import {
   parseSearchQuery,
@@ -53,6 +54,12 @@ export interface TracksQuery {
   seed: number;
   offset: number;
   limit: number;
+}
+
+/** Test/site overrides for build-time series detection. */
+export interface BuildOptions {
+  seriesAllowlist?: readonly (string | SeriesAllowlistEntry)[];
+  seriesDenylist?: readonly string[];
 }
 
 export interface TracksResult {
@@ -198,6 +205,8 @@ const SCHEMA_SQL = `
     region_names    TEXT NOT NULL,
     genre_keys      TEXT NOT NULL,
     region_keys     TEXT NOT NULL,
+    track_series_names TEXT NOT NULL,
+    track_series_keys  TEXT NOT NULL,
     search_title    TEXT NOT NULL,
     search_artist   TEXT NOT NULL,
     search_source   TEXT NOT NULL,
@@ -582,6 +591,7 @@ interface DbTrackRow {
   album: string;
   genre_names: string;
   region_names: string;
+  track_series_names: string;
 }
 
 /** A facet value's folded display name, used for bare-term tag matching. */
@@ -624,6 +634,7 @@ function mapTrackSummaryRow(row: DbTrackRow): TrackSummary {
     playable: row.playable === 1,
     genres: parseStringArray(row.genre_names),
     regions: parseStringArray(row.region_names),
+    series: parseStringArray(row.track_series_names),
   };
 }
 
@@ -676,7 +687,7 @@ function buildAlbumFilter(q: string): AlbumFilter {
     }
 
     if (term.field === 'serie') {
-      const key = foldSearch(term.value).replace(/\s+/g, ' ').trim();
+      const key = seriesKey(term.value);
       if (!key || CONTROL_CHARS.test(key)) return '0';
       params.push(key);
       return `EXISTS (
@@ -785,6 +796,11 @@ function effectiveTrackArtist(row: TrackIndexRow): string {
 /** Increment a sparse facet count while loading the index. */
 function incrementCount(counts: Map<string, number>, key: string): void {
   counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+/** Folded, whitespace-normalised identity for a series display name. */
+function seriesKey(name: string): string {
+  return foldSearch(name).replace(/\s+/g, ' ').trim();
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -1031,6 +1047,7 @@ export class SqliteIndex {
     trackRows: TrackIndexRow[],
     version: number,
     databasePath = ':memory:',
+    options: BuildOptions = {},
   ): Promise<SqliteIndex> {
     const { accumulators, genreDisplayNames, regionDisplayNames } =
       await accumulateAlbums(rows);
@@ -1099,9 +1116,10 @@ export class SqliteIndex {
           id, album_id, title, artist, source_album,
           year, disc, track, duration, playable, date,
           genre_names, region_names, genre_keys, region_keys,
+          track_series_names, track_series_keys,
           search_title, search_artist, search_source, search_composer,
           artist_rank, album_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertAlbumArtist = db.prepare(
         'INSERT INTO album_artists(album_id, position, artist) VALUES (?, ?, ?)',
@@ -1135,15 +1153,29 @@ export class SqliteIndex {
       for (const [key, acc] of accumulators) {
         const values = detectSeries(
           acc.album,
-          config.seriesAllowlist,
-          config.seriesDenylist,
+          options.seriesAllowlist ?? config.seriesAllowlist,
+          options.seriesDenylist ?? config.seriesDenylist,
         );
         if (values.length === 0) continue;
         seriesByKey.set(key, values);
         for (const value of values) {
-          const serieKey = foldSearch(value);
-          if (!seriesDisplayNames.has(serieKey)) {
-            seriesDisplayNames.set(serieKey, value);
+          const key = seriesKey(value);
+          if (!seriesDisplayNames.has(key)) {
+            seriesDisplayNames.set(key, value);
+          }
+        }
+      }
+      // Track-only folder series exist without an album. Register their
+      // display names now so the series table is complete before album rows
+      // (which reference it) are inserted; their album_count stays zero.
+      for (const row of trackRows) {
+        for (const name of row.track_series ?? []) {
+          const key = seriesKey(name);
+          if (key && !seriesDisplayNames.has(key)) {
+            seriesDisplayNames.set(
+              key,
+              name.trim().replace(/\s+/g, ' '),
+            );
           }
         }
       }
@@ -1185,7 +1217,7 @@ export class SqliteIndex {
         const composers = [...acc.composers];
         const comments = [...acc.comments].sort(compareComments);
         const series = seriesByKey.get(key) ?? [];
-        const serieKeys = series.map((value) => foldSearch(value));
+        const serieKeys = series.map(seriesKey);
         const genreKeys = [...acc.genreKeys];
         const regionKeys = [...acc.regionKeys];
         // Album facet counts ignore loose-track collections; track facet
@@ -1323,7 +1355,8 @@ export class SqliteIndex {
         );
 
         // Per-track tags drive the row pills and the genre/region filters.
-        // Facet counts and series remain album-level (see docs/sqlite-index.md).
+        // Album series stay album-level; TRACKS_FOLDERS can add a track-only
+        // series to individual tracks.
         const trackGenreKeys = new Set<string>();
         const trackRegionKeys = new Set<string>();
         for (const tag of splitGenres(row.genre)) {
@@ -1336,6 +1369,10 @@ export class SqliteIndex {
         const regionNames = [...trackRegionKeys].map(
           (key) => regionDisplayNames.get(key) ?? key,
         );
+        const trackSerieNames = (row.track_series ?? [])
+          .map((name) => name.trim().replace(/\s+/g, ' '))
+          .filter(Boolean);
+        const trackSerieKeys = trackSerieNames.map(seriesKey).filter(Boolean);
 
         for (const genreKey of trackGenreKeys) {
           incrementCount(genreTrackCounts, genreKey);
@@ -1343,7 +1380,13 @@ export class SqliteIndex {
         for (const regionKey of trackRegionKeys) {
           incrementCount(regionTrackCounts, regionKey);
         }
-        for (const serieKey of seriesKeysByAlbumId.get(albumMeta.id) ?? []) {
+        // Count each series once per track, even when the folder series and
+        // an album series share the same name.
+        const trackSeriesKeys = new Set(
+          seriesKeysByAlbumId.get(albumMeta.id) ?? [],
+        );
+        for (const serieKey of trackSerieKeys) trackSeriesKeys.add(serieKey);
+        for (const serieKey of trackSeriesKeys) {
           incrementCount(seriesTrackCounts, serieKey);
         }
 
@@ -1363,6 +1406,8 @@ export class SqliteIndex {
           JSON.stringify(regionNames),
           JSON.stringify([...trackGenreKeys]),
           JSON.stringify([...trackRegionKeys]),
+          JSON.stringify(trackSerieNames),
+          JSON.stringify(trackSerieKeys),
           foldAlnum(row.title),
           searchArtist,
           foldAlnum(sourceAlbum),
@@ -1424,13 +1469,13 @@ export class SqliteIndex {
       insertMeta.run('track_count', String(indexedTracks));
       insertMeta.run('region_count', String(regionDisplayNames.size));
       insertMeta.run('built_at', new Date().toISOString());
-      insertMeta.run('schema_version', '14');
+      insertMeta.run('schema_version', '15');
 
       db.exec(TRIGGER_SQL);
       db.exec(`INSERT INTO album_search(album_search) VALUES ('rebuild')`);
       db.exec(`INSERT INTO track_search(track_search) VALUES ('rebuild')`);
       db.exec('COMMIT');
-      db.exec('PRAGMA user_version = 14');
+      db.exec('PRAGMA user_version = 15');
       db.exec('PRAGMA optimize');
 
       const pageCount = Number(
@@ -1696,7 +1741,7 @@ export class SqliteIndex {
 
       const addTrackTagKeys = (
         names: readonly SearchName[],
-        column: 'genre_keys' | 'region_keys',
+        column: 'genre_keys' | 'region_keys' | 'track_series_keys',
       ): void => {
         const keys = names
           .filter((item) => item.search.includes(phrase))
@@ -1729,6 +1774,7 @@ export class SqliteIndex {
 
       addTrackTagKeys(this.genreSearchNames, 'genre_keys');
       addTrackTagKeys(this.regionSearchNames, 'region_keys');
+      addTrackTagKeys(this.seriesSearchNames, 'track_series_keys');
       addSeriesKeys(this.seriesSearchNames);
 
       if (branches.length === 0) return '0';
@@ -1756,14 +1802,21 @@ export class SqliteIndex {
         )`;
       }
 
-      // Series is an album-level property.
+      // Series can come from the album ({...}/allowlist) or from the track's
+      // TRACKS_FOLDERS entry.
       if (term.field === 'serie') {
-        const key = foldSearch(term.value).replace(/\s+/g, ' ').trim();
+        const key = seriesKey(term.value);
         if (!key || CONTROL_CHARS.test(key)) return '0';
-        params.push(key);
-        return `EXISTS (
-          SELECT 1 FROM album_series ase
-           WHERE ase.album_id = t.album_id AND ase.serie_key = ?
+        params.push(key, key);
+        return `(
+          EXISTS (
+            SELECT 1 FROM album_series ase
+             WHERE ase.album_id = t.album_id AND ase.serie_key = ?
+          )
+          OR EXISTS (
+            SELECT 1 FROM json_each(t.track_series_keys) tag
+             WHERE tag.value = ?
+          )
         )`;
       }
 
@@ -1830,7 +1883,7 @@ export class SqliteIndex {
            COALESCE(NULLIF(trim(t.artist), ''), al.artist) AS artist,
            al.artist AS album_artist,
            t.source_album, t.year, t.track, t.disc, t.duration, t.playable,
-           t.genre_names, t.region_names,
+           t.genre_names, t.region_names, t.track_series_names,
            al.key AS album_key, al.album AS album
          FROM tracks t
          JOIN albums al ON al.id = t.album_id
@@ -1880,7 +1933,7 @@ export class SqliteIndex {
            COALESCE(NULLIF(trim(t.artist), ''), a.artist) AS artist,
            a.artist AS album_artist,
            t.source_album, t.year, t.track, t.disc, t.duration, t.playable,
-           t.genre_names, t.region_names,
+           t.genre_names, t.region_names, t.track_series_names,
            a.key AS album_key, a.album AS album
          FROM albums a
          JOIN tracks t ON t.album_id = a.id

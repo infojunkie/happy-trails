@@ -517,6 +517,24 @@ test('detectSeries allowlist matches anywhere, first in order, only without brac
   assert.deepEqual(detectSeries('Something Else', ['Millennium']), []);
 });
 
+test('allowlist entries separate the series name from the match substring', () => {
+  const allowlist = [
+    { name: 'Millennium Series', match: 'Millennium' },
+    { name: 'Rock Candy', match: 'Rock Candy Edition' },
+  ];
+  assert.deepEqual(detectSeries('The Millennium Edition', allowlist), [
+    'Millennium Series',
+  ]);
+  assert.deepEqual(
+    detectSeries('A Love Supreme [Rock Candy Edition]', allowlist),
+    ['Rock Candy'],
+  );
+  // The first matching entry still wins.
+  assert.deepEqual(detectSeries('Rock Candy Millennium', allowlist), [
+    'Millennium Series',
+  ]);
+});
+
 test('detectSeries denylist matches the album name anywhere and removes all series', () => {
   assert.deepEqual(detectSeries('X {Blue Note}', [], []), ['Blue Note']);
   assert.deepEqual(detectSeries('Live in Japan {Blue Note}', [], ['Japan']), []);

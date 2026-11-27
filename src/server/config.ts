@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { SeriesAllowlistEntry } from './search.js';
 
 // Load happy-trails/.env first, then the workspace-level .env one directory up
 // (which holds DSADDR/DSUSER/DSPASSWD for the existing Synology scripts).
@@ -142,15 +143,35 @@ function seriesDenylist(): string[] {
     : [];
 }
 
+/**
+ * Parse `SERIES_ALLOWLIST`: `|`-separated `Series Name=title substring`
+ * entries. Entries without "=" keep the old behaviour (name and match are the
+ * same). The split is on the last "=" so a series name may contain "=".
+ */
+export function parseSeriesAllowlist(
+  rawValue: string | undefined,
+): SeriesAllowlistEntry[] {
+  const raw = (rawValue ?? '').trim();
+  if (!raw) return [];
+  const entries: SeriesAllowlistEntry[] = [];
+  for (const rawEntry of raw.split('|')) {
+    const entry = rawEntry.trim();
+    if (!entry) continue;
+    const separator = entry.lastIndexOf('=');
+    const name = (separator >= 0 ? entry.slice(0, separator) : entry).trim();
+    const match = (separator >= 0 ? entry.slice(separator + 1) : entry).trim();
+    if (!match) continue;
+    entries.push({
+      name: (name || match).replace(/\s+/g, ' '),
+      match,
+    });
+  }
+  return entries;
+}
+
 /** Additional series names matched anywhere in an album title without {...}. */
-function seriesAllowlist(): string[] {
-  const raw = process.env.SERIES_ALLOWLIST?.trim();
-  return raw
-    ? raw
-        .split('|')
-        .map((value) => value.trim())
-        .filter(Boolean)
-    : [];
+function seriesAllowlist(): SeriesAllowlistEntry[] {
+  return parseSeriesAllowlist(process.env.SERIES_ALLOWLIST);
 }
 
 /**
@@ -168,15 +189,56 @@ export function parseFolderPrefixes(
     .filter(Boolean);
 }
 
+/** A TRACKS_FOLDERS entry: a folder prefix and its track-level series name. */
+export interface TrackFolder {
+  series: string;
+  prefix: string;
+}
+
+function folderBasename(folder: string): string {
+  const trimmed = folder.replace(/\/+$/, '');
+  const index = trimmed.lastIndexOf('/');
+  return index >= 0 ? trimmed.slice(index + 1) : trimmed;
+}
+
 /**
- * Folder prefixes holding loose tracks (covers collections, random tracks).
- * Tracks under them stay fully indexed so the Tracks view keeps working, but
- * their albums are flagged no-album and omitted from the Albums view.
+ * Parse `TRACKS_FOLDERS`: `|`-separated `Series Name=folder prefix` entries.
+ * Entries without "=" use the folder's basename as the series name. The split
+ * is on the last "="; trailing slashes are ignored.
  */
-export function parseLooseTracksFolders(
+export function parseTracksFolders(
   rawValue: string | undefined,
+): TrackFolder[] {
+  const raw = (rawValue ?? '').trim();
+  if (!raw) return [];
+  const folders: TrackFolder[] = [];
+  for (const rawEntry of raw.split('|')) {
+    const entry = rawEntry.trim();
+    if (!entry) continue;
+    const separator = entry.lastIndexOf('=');
+    const name = (separator >= 0 ? entry.slice(0, separator) : '').trim();
+    const folder = (separator >= 0 ? entry.slice(separator + 1) : entry).trim();
+    const prefix = folder.replace(/\/+$/, '');
+    if (!prefix) continue;
+    const series = (name || folderBasename(prefix))
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!series) continue;
+    folders.push({ series, prefix });
+  }
+  return folders;
+}
+
+/** Track-level series name from the first matching TRACKS_FOLDERS prefix. */
+export function trackSeriesForPath(
+  filePath: string | null | undefined,
+  folders: readonly TrackFolder[],
 ): string[] {
-  return parseFolderPrefixes(rawValue);
+  if (!filePath) return [];
+  for (const folder of folders) {
+    if (filePath.startsWith(`${folder.prefix}/`)) return [folder.series];
+  }
+  return [];
 }
 
 /** Folder prefixes excluded from the index and every view. */
@@ -407,12 +469,10 @@ export const config = {
   /** Additional series names matched anywhere in a title without {...}. */
   seriesAllowlist: seriesAllowlist(),
   /**
-   * Folder prefixes whose tracks keep their album metadata but do not create
-   * entries in the Albums view.
+   * Folders whose tracks keep their album metadata but do not create entries
+   * in the Albums view. Each track also gets the folder's series name.
    */
-  looseTracksFolders: parseLooseTracksFolders(
-    process.env.TRACKS_FOLDERS,
-  ),
+  tracksFolders: parseTracksFolders(process.env.TRACKS_FOLDERS),
   /**
    * Folder prefixes whose files are not indexed at all: no albums, tracks,
    * facets, dialogs, or playback. Ignored rows are removed before loose-track

@@ -1,5 +1,6 @@
 import { regionKey } from '../shared/text.js';
 import { parseArtists } from './artists.js';
+import { config, trackSeriesForPath } from './config.js';
 import type { TrackRow } from './db.js';
 import { isRegionTag } from './regions.js';
 import { foldAlnum, foldSearch, genreKey, searchTokens } from './search.js';
@@ -65,10 +66,26 @@ function trackFields(
   const { genres, regions } = splitTrackTags(track.genre);
   const genreTags = genres.map(genreKey);
   const regionTags = regions.map(regionKey);
+  const folderSeries = trackSeriesForPath(track.path, config.tracksFolders);
+  const folderSerieKeys = folderSeries
+    .map((name) => foldSearch(name).replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  let serieField = serieKeys;
+  for (const key of folderSerieKeys) {
+    const marker = `\u0000${key}\u0000`;
+    if (!serieField.includes(marker)) serieField += marker;
+  }
 
   return {
     all: foldAlnum(
-      [albumText, allArtists, composer, ...genres, ...regions].join(' '),
+      [
+        albumText,
+        allArtists,
+        composer,
+        ...genres,
+        ...regions,
+        ...folderSeries,
+      ].join(' '),
     ),
     album: foldAlnum(albumText),
     artist: foldAlnum(allArtists),
@@ -77,7 +94,7 @@ function trackFields(
       genreTags.length > 0 ? `\u0000${genreTags.join('\u0000')}\u0000` : '',
     region:
       regionTags.length > 0 ? `\u0000${regionTags.join('\u0000')}\u0000` : '',
-    serie: serieKeys,
+    serie: serieField,
     source: foldAlnum(source),
     composer: foldAlnum(composer),
   };

@@ -439,13 +439,18 @@ export const fixtureTracks = new Map<string, TrackRow[]>([
  * with hand-written dialog tracks reuse those titles, and the rest get
  * deterministic filler, so `sum(tracks per album) === track_count`.
  */
-function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
+function buildFixtureTrackRows(
+  rows: AlbumRow[],
+  trackSeries?: Map<string, string>,
+): TrackIndexRow[] {
   const tracks: TrackIndexRow[] = [];
   let generatedId = 1_000_000;
 
   for (const row of rows) {
     const merged = normalizeAlbumName(row.album ?? '');
     const key = `${merged}\u0000${row.artist}`;
+    const seriesName = trackSeries?.get(row.album ?? '');
+    const trackSeriesNames = seriesName ? [seriesName] : [];
     const explicit = (fixtureTracks.get(key) ?? []).filter(
       (track) => (track.source_album ?? '') === (row.album ?? ''),
     );
@@ -468,6 +473,7 @@ function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
               duration: source.duration,
               date: row.latest,
               format: source.format,
+              track_series: trackSeriesNames,
             }
           : {
               id: generatedId++,
@@ -483,6 +489,7 @@ function buildFixtureTrackRows(rows: AlbumRow[]): TrackIndexRow[] {
               duration: 180,
               date: row.latest,
               format: 'flac',
+              track_series: trackSeriesNames,
             },
       );
     }
@@ -514,6 +521,8 @@ export interface FixtureOptions {
   /** Full-screen Cover Flow interval exposed by /api/status. */
   coverflowIntervalMs?: number;
   searchHistoryLimit?: number;
+  /** Track-level series names keyed by album title. */
+  trackSeries?: Map<string, string>;
   extraRows?: AlbumRow[];
   /** Origins allowed to select an origin-based playback redirect target. */
   allowedFrontendOrigins?: string[];
@@ -574,7 +583,7 @@ export async function createFixtureContext(
   }));
   const index = await SqliteIndex.build(
     rows,
-    buildFixtureTrackRows(rows),
+    buildFixtureTrackRows(rows, options.trackSeries),
     1,
     options.indexDbPath,
   );

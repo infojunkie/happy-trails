@@ -1,5 +1,10 @@
 import pg from 'pg';
-import { config, musicTable, trackTable } from './config.js';
+import {
+  config,
+  musicTable,
+  trackSeriesForPath,
+  trackTable,
+} from './config.js';
 
 const { Pool } = pg;
 
@@ -78,6 +83,8 @@ export interface TrackRow {
   frequency: number | null;
   /** Lowercase file extension, used only to decide native playability. */
   format: string | null;
+  /** File path; used to resolve a TRACKS_FOLDERS series. */
+  path?: string;
 }
 
 /** One `music` row as consumed by the in-memory track index. */
@@ -99,6 +106,10 @@ export interface TrackIndexRow {
   date: string | null;
   /** Lowercase file extension, used only to decide native playability. */
   format: string | null;
+  /** File path, used to resolve a TRACKS_FOLDERS series. */
+  path?: string;
+  /** Track-level series names from TRACKS_FOLDERS. */
+  track_series?: string[];
 }
 
 const ALBUM_QUERY = `
@@ -147,7 +158,8 @@ const TRACK_INDEX_QUERY = `
     m.disc,
     m.duration,
     to_char(m.date, 'YYYY-MM-DD"T"HH24:MI:SS') AS date,
-    lower(substring(m.path from '\\.([^./]+)$')) AS format
+    lower(substring(m.path from '\\.([^./]+)$')) AS format,
+    m.path AS path
   FROM ${musicTable} m
   WHERE m.fs_online IS NOT FALSE
     AND ${pathNotUnder('m.path', '$1')}
@@ -169,7 +181,8 @@ const TRACK_QUERY = `
     m.duration,
     m.bitrate,
     m.frequency,
-    lower(substring(m.path from '\\.([^./]+)$')) AS format
+    lower(substring(m.path from '\\.([^./]+)$')) AS format,
+    m.path AS path
   FROM ${musicTable} m
   WHERE (m.album = ANY($1::text[]) OR (m.album IS NULL AND $2 = '(Unknown Album)'))
     AND ${ALBUM_ARTIST} = $3
@@ -260,14 +273,24 @@ export async function loadLibraryRows(): Promise<{
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     const albums = await client.query<AlbumRow>(ALBUM_QUERY, [
-      config.looseTracksFolders,
+      config.tracksFolders.map((folder) => folder.prefix),
       config.ignoreFolders,
     ]);
     const tracks = await client.query<TrackIndexRow>(TRACK_INDEX_QUERY, [
       config.ignoreFolders,
     ]);
     await client.query('COMMIT');
-    return { albums: albums.rows, tracks: tracks.rows };
+    // Resolve the folder series here so the SQLite builder receives a plain
+    // per-track list and does not need the path or config.
+    const trackRows = tracks.rows.map((row) => {
+      const { path: _path, ...rest } = row;
+      const trackSeries = trackSeriesForPath(_path, config.tracksFolders);
+      // Omit the array for the common case to keep the build's heap down.
+      return trackSeries.length > 0
+        ? { ...rest, track_series: trackSeries }
+        : rest;
+    });
+    return { albums: albums.rows, tracks: trackRows };
   } catch (error) {
     try {
       await client.query('ROLLBACK');

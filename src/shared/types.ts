@@ -98,6 +98,8 @@ export interface TrackSummary {
   genres: string[];
   /** Country/region tags from the album, deduplicated. */
   regions: string[];
+  /** Track-level series names from TRACKS_FOLDERS, deduplicated. */
+  series: string[];
 }
 
 export interface TrackSearchResponse {

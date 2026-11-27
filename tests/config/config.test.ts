@@ -8,9 +8,11 @@ import {
   parseDsmFrontendUrl,
   parseIgnoreFolders,
   parseIndexDbDir,
-  parseLooseTracksFolders,
+  parseSeriesAllowlist,
+  parseTracksFolders,
   parseTrustProxy,
   resolveDsmFrontendBase,
+  trackSeriesForPath,
 } from '../../src/server/config.js';
 
 test('a full http(s) frontend URL is used verbatim', () => {
@@ -190,17 +192,54 @@ test('resolveDsmFrontendBase selects fixed or origin-based targets', () => {
   );
 });
 
-test('TRACKS_FOLDERS splits on "|" and drops trailing slashes', () => {
-  assert.deepEqual(parseLooseTracksFolders(undefined), []);
-  assert.deepEqual(parseLooseTracksFolders(''), []);
-  assert.deepEqual(parseLooseTracksFolders('   '), []);
-  assert.deepEqual(parseLooseTracksFolders('|'), []);
+test('SERIES_ALLOWLIST maps series names to title substrings', () => {
+  assert.deepEqual(parseSeriesAllowlist(undefined), []);
+  assert.deepEqual(parseSeriesAllowlist('   '), []);
   assert.deepEqual(
-    parseLooseTracksFolders(
-      ' /music/loose/covers/ | /music/random tracks/// |  | /music/other ',
-    ),
-    ['/music/loose/covers', '/music/random tracks', '/music/other'],
+    parseSeriesAllowlist(' Rock Candy=Rock Candy Edition | Millennium | A = B=title '),
+    [
+      { name: 'Rock Candy', match: 'Rock Candy Edition' },
+      { name: 'Millennium', match: 'Millennium' },
+      { name: 'A = B', match: 'title' },
+    ],
   );
+  assert.deepEqual(parseSeriesAllowlist('=only match'), [
+    { name: 'only match', match: 'only match' },
+  ]);
+});
+
+test('TRACKS_FOLDERS maps series names to folder prefixes', () => {
+  assert.deepEqual(parseTracksFolders(undefined), []);
+  assert.deepEqual(parseTracksFolders(''), []);
+  assert.deepEqual(parseTracksFolders('   '), []);
+  assert.deepEqual(parseTracksFolders('|'), []);
+  assert.deepEqual(
+    parseTracksFolders(
+      ' Covers Collection=/music/covers/ | Random Tracks=/music/random/// | /music/other ',
+    ),
+    [
+      { series: 'Covers Collection', prefix: '/music/covers' },
+      { series: 'Random Tracks', prefix: '/music/random' },
+      { series: 'other', prefix: '/music/other' },
+    ],
+  );
+});
+
+test('trackSeriesForPath uses the first matching folder prefix', () => {
+  const folders = [
+    { series: 'Covers Collection', prefix: '/music/covers' },
+    { series: 'Nested', prefix: '/music/covers/nested' },
+  ];
+  assert.deepEqual(
+    trackSeriesForPath('/music/covers/x.flac', folders),
+    ['Covers Collection'],
+  );
+  assert.deepEqual(
+    trackSeriesForPath('/music/covers/nested/x.flac', folders),
+    ['Covers Collection'],
+  );
+  assert.deepEqual(trackSeriesForPath('/music/elsewhere/x.flac', folders), []);
+  assert.deepEqual(trackSeriesForPath(null, folders), []);
 });
 
 test('IGNORE_FOLDERS uses the same prefix parsing', () => {

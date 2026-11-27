@@ -165,6 +165,8 @@ CREATE TABLE tracks (
   date            TEXT,                  -- per-track upload date
   genre_names     TEXT NOT NULL,         -- JSON array of this track's genres
   region_names    TEXT NOT NULL,         -- JSON array of this track's regions
+  track_series_names TEXT NOT NULL,      -- TRACKS_FOLDERS series names
+  track_series_keys  TEXT NOT NULL,      -- folded track-series lookup keys
   search_title    TEXT NOT NULL,
   search_artist   TEXT NOT NULL,         -- folded track artist + album artist
   search_source   TEXT NOT NULL,
@@ -233,21 +235,31 @@ Album title and series terms resolve through the album index by `album_id`, so
 Each track also stores its own genre and region names and lookup keys as JSON
 arrays (`genre_names`, `region_names`, `genre_keys`, `region_keys`). The names
 drive the result-row pills; the keys make `genre:` and `region:` exact
-per-track filters. Series remains an album-level property.
+per-track filters.
 
-Series are stored in `album_series` rather than a folded text column.
+Album series are stored in `album_series` rather than a folded text column.
 `serie:` (alias `label:`) matches `album_series.serie_key` exactly, so query
 totals agree with the series facet counts. Values are assembled at build time:
 
 - every `{...}` group is split on `/` (spaces optional) and each token is a
   distinct series; multiple groups each contribute. No other tokenizing is
   applied, so commas, separator words, and punctuation stay in the name.
-- albums with no braced series may match `SERIES_ALLOWLIST`: entries are
+- albums with no braced series may match `SERIES_ALLOWLIST`: entries have the
+  form `Series Name=title substring` (no `=` means both are the same). They are
   checked in configured order as substrings anywhere in the album title, and
-  only the first match is retained.
+  only the first match is retained. Series are keyed by the display name, so
+  entries sharing a name aggregate.
 - `SERIES_DENYLIST` is applied
   last: if any entry is a substring of the album title, the album is removed
   from all series.
+
+`TRACKS_FOLDERS` adds track-level series. Each track row stores the series
+name(s) of its folder (`track_series_names`) and their folded keys
+(`track_series_keys`); the names drive the Track-row pills, and the keys make
+`serie:` match in Tracks mode. These tracks are not added to `album_series`, so
+their album count stays zero and the series is not rendered in Albums mode.
+Track and album series sharing a folded name are the same series: the facet
+`track_count` counts each track once even when both apply.
 
 Matching for the allowlist and denylist folds case, accents, and apostrophes.
 The field name is parsed in
@@ -369,19 +381,24 @@ EXISTS (
    WHERE tag.value = ?
 )
 
--- album-level series
+-- album-level series, or a track's TRACKS_FOLDERS series
 EXISTS (
   SELECT 1 FROM album_series ase
    WHERE ase.album_id = t.album_id AND ase.serie_key = ?
 )
+OR EXISTS (
+  SELECT 1 FROM json_each(t.track_series_keys) tag
+   WHERE tag.value = ?
+)
 ```
 
 Fielded `genre:` and `region:` terms use the same `json_each` lookup, so only
-tracks carrying that tag match. `serie:` remains album-level because a series
-belongs to the album, not an individual track. The sidebar shows the facet's
-`trackCount` in Tracks mode and its `albumCount` in Albums mode, so each number
-equals the result of selecting that filter. The row pills come from
-`tracks.genre_names`/`region_names`.
+tracks carrying that tag match. `serie:` matches either the album's series or
+the track's folder series. The sidebar shows the facet's `trackCount` in Tracks
+mode and its `albumCount` in Albums mode, so each number equals the result of
+selecting that filter. The row pills come from
+`tracks.genre_names`/`region_names`, plus `track_series_names` for the
+track-only series.
 
 The row query joins the album for identity and display pills:
 
@@ -646,9 +663,9 @@ and is reported through `/api/status`.
 
 ## Current boundaries
 
-- Track `genre:` and `region:` filters use the track's own tags; `serie:`
-  remains album-level, since series belong to albums rather than individual
-  tracks. Sidebar facet counts are album counts, not track counts.
+- Track `genre:` and `region:` filters use the track's own tags. `serie:`
+  matches the album's series and, in Tracks mode, a track's `TRACKS_FOLDERS`
+  series. Sidebar counts follow the mode (albums or tracks).
 - The database is rebuilt in full. Incremental updates would need to consume
   the change stream or a tighter fingerprint and apply upserts; the FTS
   triggers are already in place for row-level updates.

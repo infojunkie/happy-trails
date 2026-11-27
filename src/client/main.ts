@@ -2648,6 +2648,23 @@ function createGenreChip(name: string): HTMLElement {
   return chip;
 }
 
+/** Track-only series chip from a TRACKS_FOLDERS entry. */
+function createTrackSerieChip(name: string): HTMLElement {
+  const query = facetTerm('serie', name);
+  const chip = el(
+    'button',
+    {
+      class: 'chip chip-small chip-serie',
+      type: 'button',
+      title: `Search for ${query}`,
+      'aria-label': `Search for ${query}`,
+    },
+    el('span', { text: name }),
+  );
+  chip.addEventListener('click', () => navigateToSearch(query));
+  return chip;
+}
+
 function createRegionChip(name: string): HTMLElement {
   const key = regionKey(name);
   const selected = selectedRegionKeys().has(key);
@@ -2778,6 +2795,9 @@ function renderTrackResult(track: TrackSummary): HTMLElement {
   );
 
   const tags = el('div', { class: 'track-result-tags tag-list' });
+  for (const name of track.series ?? []) {
+    tags.append(createTrackSerieChip(name));
+  }
   appendTagChips(tags, track.genres, track.regions, {
     genres: 2,
     regions: 2,

@@ -340,6 +340,43 @@ test('GET /api/genres returns separate genre, region, and series facets', async 
   );
 });
 
+test('track folder series appear only in Tracks results', async () => {
+  const fixture = await runFixture({
+    trackSeries: new Map([['Abbey Road', 'Covers Collection']]),
+  });
+  try {
+    const facets = await json<GenresResponse>(
+      fixture.server.baseUrl,
+      '/api/genres',
+    );
+    const serie = facets.body.series.find(
+      (entry) => entry.name === 'Covers Collection',
+    );
+    assert.ok(serie);
+    assert.equal(serie.albumCount, 0);
+    assert.ok(serie.trackCount > 0);
+
+    const tracks = await trackSearch(
+      fixture.server.baseUrl,
+      `/api/tracks?q=${encodeURIComponent('serie:"Covers Collection"')}`,
+    );
+    assert.ok(tracks.total > 0);
+    assert.ok(
+      tracks.tracks.every((track) =>
+        track.series.includes('Covers Collection'),
+      ),
+    );
+
+    const visible = await albums(
+      fixture.server.baseUrl,
+      `/api/albums?q=${encodeURIComponent('serie:"Covers Collection"')}`,
+    );
+    assert.equal(visible.total, 0);
+  } finally {
+    await closeFixture(fixture);
+  }
+});
+
 test('GET /api/albums lists, sorts, paginates, and clamps parameters', async () => {
   const all = await albums(main.server.baseUrl, '/api/albums');
   assert.ok(all.total > 0);

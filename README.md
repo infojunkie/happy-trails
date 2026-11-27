@@ -27,8 +27,9 @@ design and current status.
 
 - Album grid sorted by latest upload date (`MAX(date)`).
 - Tracks stored under `TRACKS_FOLDERS` prefixes (covers collections,
-  random-track folders, …) stay fully searchable in Tracks mode, but the
-  albums they name do not appear in the Albums view or its facet counts.
+  random-track folders, …) stay fully searchable in Tracks mode and carry the
+  configured track-only series name, but the albums they name do not appear in
+  the Albums view or its facet counts.
 - Folders listed in `IGNORE_FOLDERS` are not indexed at all: their tracks
   never appear in Albums, Tracks, search, facet counts, album dialogs, or
   playback, and changes there do not trigger an index rebuild.
@@ -106,10 +107,13 @@ design and current status.
   Catalonia, …) are detected and exposed as a separate **Regions** facet, with
   their own filter. Selections add `region:"<name>"` terms. The genre facet
   contains only non-location tags.
-- A **Series** facet lists braced series names and `SERIES_ALLOWLIST` matches
-  with album or track counts, ordered by occurrence. It is a checkbox list:
-  each selection adds `serie:"<name>"` to the search bar joined with `OR` (a
-  match-any selection), and Clear removes them.
+- A **Series** facet lists braced series names, `SERIES_ALLOWLIST` names, and
+  track-only folder series with album or track counts, ordered by occurrence.
+  Series are identified by their display name, so several allowlist substrings
+  mapping to the same name aggregate into one facet row. Track-only folder
+  series have `albumCount = 0` and therefore appear in Tracks mode only. It is
+  a checkbox list: each selection adds `serie:"<name>"` to the search bar
+  joined with `OR` (a match-any selection), and Clear removes them.
 - Genre and region facets each have **Match any** / **Match all** modes. Any
   joins the selected terms with `OR` in the search bar; All joins them with
   `AND`. The two facet groups are combined with `AND`.
@@ -479,9 +483,9 @@ All variables are optional; see [`.env.example`](.env.example).
 | `ARTIST_EXCEPTIONS` | `Earth, Wind & Fire; Florence + The Machine; Simon & Garfunkel; Crosby, Stills, Nash & Young` | Additional artist names kept intact. Entries are separated by a vertical-bar character because the names contain commas; appended to the defaults. |
 | `REGION_TAGS` | — | Additional genre tags to classify as countries/regions, separated by a vertical-bar character. ISO country names, macro-regions, and common subnational regions are detected automatically. |
 | `SERIES_DENYLIST` | — | Series names that remove an album from all series when found anywhere in its title. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
-| `SERIES_ALLOWLIST` | — | Additional series names matched anywhere in an album title that has no `{...}` series. Entries are checked in configured order and only the first match is retained for the album. Separate entries with a vertical-bar character; matching ignores case, accents, and apostrophes. |
-| `TRACKS_FOLDERS` | — | Folder prefixes holding loose tracks, such as covers collections and random-track folders. Tracks under them stay fully indexed and searchable in Tracks mode, but the albums they name are hidden from the Albums view, album-mode Play all, and album facet counts. Entries are path prefixes (the whole subtree is covered), separated by a vertical-bar character; trailing slashes are ignored. |
-| `IGNORE_FOLDERS` | — | Folder prefixes excluded from the index entirely: their files appear nowhere (Albums, Tracks, search, facets, album dialogs, playback), and the change fingerprint ignores them, so edits there do not trigger rebuilds. Same prefix and separator rules as `TRACKS_FOLDERS`; an ignore entry wins when a path matches both. |
+| `SERIES_ALLOWLIST` | — | Additional series for album titles without `{...}`. Entries are `Series Name=title substring`, separated by a vertical-bar character; an entry without `=` uses the same text for both. Entries are checked in configured order and only the first match per album is retained; several entries may share a name to aggregate albums. Matching ignores case, accents, and apostrophes. The split is on the last `=`, so a series name may contain `=`. |
+| `TRACKS_FOLDERS` | — | Folders holding loose tracks, such as covers collections and random-track folders. Entries are `Series Name=folder prefix`, separated by a vertical-bar character; an entry without `=` uses the folder's basename as the series name. Tracks under them stay fully indexed and searchable in Tracks mode and carry that track-only series; the albums they name are hidden from the Albums view, album-mode Play all, and album facet counts. Prefixes cover the whole subtree; trailing slashes are ignored; the first matching folder wins. |
+| `IGNORE_FOLDERS` | — | Plain folder prefixes excluded from the index entirely: their files appear nowhere (Albums, Tracks, search, facets, album dialogs, playback), and the change fingerprint ignores them, so edits there do not trigger rebuilds. Subtree prefixes separated by a vertical-bar character; an ignore entry wins when a path matches a `TRACKS_FOLDERS` entry. |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Per-query statement timeout. |
 
 ### Behind DSM's reverse proxy
@@ -616,18 +620,27 @@ dialogs, or playback, and edits under them do not cause a rebuild. Ignored rows
 are removed before loose-track detection, so `IGNORE_FOLDERS` takes precedence
 when a path matches both settings.
 
-Folder prefixes in `TRACKS_FOLDERS` (covers collections, random tracks,
-…) change album visibility, not indexing. An album is flagged `track_only` when
-every one of its raw titles consists solely of tracks under those prefixes. Such
-albums keep their track counts, tags, sources, and comments in the index, and
-their tracks remain in the Tracks view, but the albums are omitted from the
-Albums listing, album-mode Play all, the status album total, and the album side
-of facet counts. A mixed album with at least one track outside a loose folder
-stays visible with its normal counts. Facet rows carry both counts, precomputed
-at build time: `albumCount` counts visible albums; `trackCount` counts every
-indexed track, using the track's own genre/region tags and its album's series,
-so it matches the Tracks-mode filter result. The client displays the count for
-the active mode and hides rows whose active-mode count is zero.
+`TRACKS_FOLDERS` entries have the form `Series Name=folder prefix` (an entry
+without `=` uses the folder's basename). They change album visibility, not
+indexing. An album is flagged `track_only` when every one of its raw titles
+consists solely of tracks under those prefixes. Such albums keep their track
+counts, tags, sources, and comments in the index, and their tracks remain in
+the Tracks view, but the albums are omitted from the Albums listing, album-mode
+Play all, the status album total, and the album side of facet counts. A mixed
+album with at least one track outside a loose folder stays visible with its
+normal counts.
+
+Each track under a `TRACKS_FOLDERS` prefix also gets that folder's series name
+as a track-level series. It appears on Track rows, in the Series facet with
+`albumCount = 0`, and matches `serie:` and bare search in Tracks mode; it is
+never attached to an album. If an album series and a folder series share a
+name, they aggregate into one facet row.
+
+Facet rows carry both counts, precomputed at build time: `albumCount` counts
+visible albums; `trackCount` counts every indexed track, using the track's own
+genre/region tags, its album's series, and its folder series, so it matches the
+Tracks-mode filter result. The client displays the count for the active mode
+and hides rows whose active-mode count is zero.
 
 Country/region detection uses `Intl.DisplayNames` for ISO 3166 country names in
 English, French, German, Spanish, Portuguese, and Italian, plus UN M49
@@ -666,11 +679,14 @@ distinct series; no other tokenizing is applied, so `{A, B}`, `{A feat. B}`,
 and `{Earth, Wind & Fire}` stay one name each. Every group in a title
 contributes its tokens.
 
-`SERIES_ALLOWLIST` adds series names for album titles that have no `{...}`
-tokens. Each allowlist entry is matched as a substring anywhere in the title
-(case, accents, and apostrophes are ignored); entries are checked in configured
-order, and only the first match is retained for the album. Albums with braced
-series are not considered for the allowlist.
+`SERIES_ALLOWLIST` adds series for album titles that have no `{...}` tokens.
+Each entry has the form `Series Name=title substring` (an entry without `=`
+uses the same text for both). The substring is matched anywhere in the title,
+ignoring case, accents, and apostrophes; entries are checked in configured
+order and only the first match is retained for the album. Several entries may
+map different substrings to the same series name, in which case their albums
+aggregate into one Series facet row. Albums with braced series are not
+considered for the allowlist.
 
 `SERIES_DENYLIST` replaces `SERIES_EXCEPTIONS` and is applied last. If any
 denylist entry occurs anywhere in the album title, the album is removed from
@@ -678,7 +694,8 @@ denylist entry occurs anywhere in the album title, the album is removed from
 no default entries.
 
 Values are stored in `album_series`, matched exactly with `serie:` (alias
-`label:`), and are also part of the all-field text.
+`label:`), and are also part of the all-field text. In Tracks mode, `serie:`
+also matches a track's `TRACKS_FOLDERS` series.
 
 Artist parsing applies to the effective album artist and to each track artist.
 A punctuation run is a separator only when whitespace surrounds it, so
@@ -1074,10 +1091,11 @@ accepted by the matching filter or used by the series radio list.
 
 `albumCount` counts visible albums carrying the tag. `trackCount` counts every
 indexed track carrying it: for genres and regions, each track's own tags; for
-series, the tracks of albums in that series. Track counts include tracks whose
-album is hidden by `TRACKS_FOLDERS`, so they match the result of the same
-filter in Tracks mode. A facet whose every album is hidden has
-`albumCount: 0` and is not rendered in Albums mode.
+series, the tracks of albums in that series plus tracks whose `TRACKS_FOLDERS`
+folder maps to that name. Track counts include tracks whose album is hidden by
+`TRACKS_FOLDERS`, so they match the result of the same filter in Tracks mode.
+A facet with `albumCount: 0` (a hidden album or a track-only folder series) is
+not rendered in Albums mode.
 
 ```json
 {
@@ -1163,13 +1181,14 @@ quoted value is matched as a contiguous phrase rather than as separate words.
 | `track` | Track titles. In Albums mode, returns albums that contain a matching track. |
 | `genre` | Genre tags, excluding country/region tags, matched exactly (`genres` is an alias). |
 | `region` | Country/region tags from the genre column, matched exactly (`regions` is an alias). |
-| `serie` | Series/label names from `{...}` groups split on `/`, plus the first matching `SERIES_ALLOWLIST` entry found anywhere in a title without braces. Matched exactly. Albums whose title contains a `SERIES_DENYLIST` entry are omitted entirely. `label` is an alias. |
+| `serie` | Series/label names from `{...}` groups split on `/`, the first matching `SERIES_ALLOWLIST` entry for a title without braces, and (in Tracks mode) a track's `TRACKS_FOLDERS` series. Matched exactly. Albums whose title contains a `SERIES_DENYLIST` entry are omitted entirely. `label` is an alias. |
 | `composer` | Composer tag values from the FLAC/ID3 metadata (`composers` is an alias). |
 | `source` | Raw source titles only, such as multi-CD labels (`disc` is an alias). In Tracks mode, this track's raw source title. |
 | `all` / `any` | All indexed fields, equivalent to a bare term. |
 
 In Tracks mode, terms are evaluated per track. `genre:` and `region:` match
-each track's own tags, while `serie:` remains album-level. The sidebar follows
+each track's own tags, while `serie:` matches the album's series or the
+track's folder series. The sidebar follows
 the mode: album counts in Albums mode, track counts in Tracks mode (labelled
 “Count of matching tracks”); both are computed so each count equals what
 selecting that filter returns.
@@ -1218,9 +1237,9 @@ Track-level counterpart to `/api/albums`, used by the Tracks result list.
 Each row includes the `music.id` (the id `/play/track/:id` accepts), the visible
 `artist` and parsed `artists`, the album artist, the opaque `albumKey` and
 merged `album` title, the raw `sourceAlbum`, disc/track/duration, and this
-track's own `genres`/`regions` for the pills. `genre:` and `region:` filter by
-those track tags; `serie:` remains album-level. Sidebar facet counts are album
-counts. An empty `q` lists every track.
+track's own `genres`/`regions`/`series` for the pills. `genre:` and `region:` filter by
+those track tags; `serie:` matches the album's series or the track's folder
+series. Sidebar facet counts are album counts. An empty `q` lists every track.
 
 ```json
 {
@@ -1243,7 +1262,8 @@ counts. An empty `q` lists every track.
       "disc": 0,
       "duration": 235,
       "genres": ["Jazz", "Funk"],
-      "regions": ["Ethiopia", "France"]
+      "regions": ["Ethiopia", "France"],
+      "series": []
     }
   ]
 }

@@ -249,3 +249,38 @@ test.describe('mobile track rows', () => {
     );
   });
 });
+
+test('track folder series show on track rows and filter in Tracks mode', async ({
+  page,
+}) => {
+  await page.goto(
+    `/?view=tracks&q=${encodeURIComponent('album:"World Sampler"')}`,
+  );
+  const row = page.locator('.track-result').first();
+  await expect(row.locator('.track-result-title')).toHaveText(
+    'World Sampler Track 1',
+  );
+  const serieChip = row.locator('.track-result-tags .chip-serie');
+  await expect(serieChip).toHaveText('Covers Collection');
+
+  await serieChip.click();
+  await expect(page.locator('#search')).toHaveValue(
+    'serie:"Covers Collection"',
+  );
+  await expect(page.locator('.track-result-title').first()).toHaveText(
+    'World Sampler Track 1',
+  );
+
+  // The Series facet lists the track-only series in Tracks mode only.
+  await expandFacet(page, '#serie-toggle', '#serie-panel');
+  const facetRow = page.locator('#serie-list .facet-row', {
+    hasText: 'Covers Collection',
+  });
+  await expect(facetRow).toBeVisible();
+
+  // A selected track-only series stays visible so it can be cleared; once
+  // deselected it disappears from Albums mode because it has no albums.
+  await page.locator('#clear-serie').click();
+  await page.locator('#mode-albums').click();
+  await expect(facetRow).toHaveCount(0);
+});

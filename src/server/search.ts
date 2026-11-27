@@ -55,6 +55,12 @@ export function normalizeAlbumName(album: string): string {
   return base.length > 0 ? base : album;
 }
 
+/** One `SERIES_ALLOWLIST` entry: a display name and its title substring. */
+export interface SeriesAllowlistEntry {
+  name: string;
+  match: string;
+}
+
 /** Any content inside curly braces, e.g. "Album {Blue Note}". */
 const CURLY_SERIES = /\{([^{}]+)\}/g;
 
@@ -104,24 +110,30 @@ export function bracedSeries(album: string): string[] {
  * - Albums with `{...}` tokens use only those tokens; the allowlist is not
  *   consulted for them.
  * - Otherwise, the first `SERIES_ALLOWLIST` entry (configured order) whose
- *   folded text occurs anywhere in the album title becomes the album's only
- *   allowlisted series.
+ *   folded match substring occurs anywhere in the album title contributes its
+ *   display name. Different entries may map to the same name; the index keys
+ *   series by that name, so those albums aggregate into one series.
  * - Finally, if any `SERIES_DENYLIST` entry occurs anywhere in the album
  *   title, the album is removed from all series.
  */
 export function detectSeries(
   album: string,
-  allowlist: readonly string[] = [],
+  allowlist: readonly (string | SeriesAllowlistEntry)[] = [],
   denylist: readonly string[] = [],
 ): string[] {
   const albumKey = seriesNameKey(album);
   let series = bracedSeries(album);
 
   if (series.length === 0) {
-    for (const entry of allowlist) {
-      const key = seriesNameKey(entry);
+    for (const rawEntry of allowlist) {
+      const entry =
+        typeof rawEntry === 'string'
+          ? { name: rawEntry, match: rawEntry }
+          : rawEntry;
+      const key = seriesNameKey(entry.match);
       if (key && albumKey.includes(key)) {
-        series = [entry.trim().replace(/\s+/g, ' ')];
+        const name = entry.name.replace(/\s+/g, ' ').trim();
+        if (name) series = [name];
         break;
       }
     }
